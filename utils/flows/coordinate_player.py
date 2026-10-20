@@ -7,6 +7,8 @@ from utils.core.coordinate_points import (choose_start_index, ordered_waypoints,
                                           validate_loop_count)
 from utils.core.coordinate_navigation import NavigationWait, ObstacleMap
 from utils.core.special_approach import in_interaction_range, interaction_standpoint
+from utils.core import special_verdict
+from utils.core.special_verdict import snapshot as special_snapshot
 from utils.core.tool_repair import ToolRepairCycle
 from utils.core.stamina import usable_stamina
 from utils.core.coordinate_recovery import (RecoveryProgress, recovery_plan, recovery_limit_reason,
@@ -39,10 +41,32 @@ class _RecoveryLimit(Exception):
         self.reason = reason
 
 
+SPECIAL_OUTCOME_TEXT = {
+    special_verdict.GATHERED: '已确认采到',
+    special_verdict.GONE: '资源已消失',
+    special_verdict.COOLING: '冷却已开始',
+    special_verdict.CHANGED: '状态有变化',
+    special_verdict.UNCHANGED: '未见变化',
+    special_verdict.UNKNOWN: '未能读到状态',
+}
+
+# The per-point line must repeat the verdict, never a bare "presses sent".
+SPECIAL_REACHED_TEXT = {
+    None: '动态采集已结束',
+    special_verdict.GATHERED: '已确认采到',
+    special_verdict.GONE: '资源已消失，判定采集完成',
+    special_verdict.COOLING: '冷却已开始，判定采集成功',
+    special_verdict.CHANGED: '状态有变化，请核对背包',
+    special_verdict.UNCHANGED: '未见状态变化，请核对背包',
+    special_verdict.UNKNOWN: '状态未能读取，请核对背包',
+}
+
+
 class _Follower:
     def __init__(self, data, reader, device, window, controls, report, clock, waypoints=None, start_mode='first',
                  recovery_attempts=0, jump_on_recovery=False, collect_wait_seconds=None, loop_count=1,
-                 continuous_recovery=False, navigator=None, repair_box=None, tool_selector=None, food=None):
+                 continuous_recovery=False, navigator=None, repair_box=None, tool_selector=None, food=None,
+                 scene_refresh=None):
         self.data, self.reader, self.device = data, reader, device
         self.window, self.controls, self._report, self.clock = window, controls, report, clock
         self.cycle, self.loop_count = 1, loop_count
@@ -84,6 +108,7 @@ class _Follower:
         self.food_menu_checked = False
         self.repair_menu_pending = False
         self.special_progress = None
+        self.scene_refresh = scene_refresh
 
     def report(self, state, message, **extra):
         if self.waypoints is not None:
@@ -405,48 +430,149 @@ class _Follower:
         self.collection_position(point)
         return self.collection['remaining'] <= 0
 
-    def special_target(self, point):
+    def special_objects(self, point):
+        """Every live object matching this dynamic identity, or None when unreadable."""
         if self.navigator is None:
             raise ValueError('动态资源采集需要连接实时场景与自动寻路')
         scene = self.navigator.scene_provider() or {}
         if scene.get('state') != 'ready':
-            raise ValueError('动态资源场景尚未就绪，未按 F')
+            return None
         identity = point['special_resource']
-        targets = [obj for obj in scene.get('objects', [])
-                   if obj.get('category') == identity['category']
-                   and obj.get('resource_static_id') == identity['static_id']
-                   and obj.get('map_dynamic') is True and not obj.get('map_cached')
-                   and valid_position(obj.get('position'))]
+        return [obj for obj in scene.get('objects', [])
+                if obj.get('category') == identity['category']
+                and obj.get('resource_static_id') == identity['static_id']
+                and obj.get('map_dynamic') is True and not obj.get('map_cached')
+                and valid_position(obj.get('position'))]
+
+    def special_target(self, point):
+        targets = self.special_objects(point)
+        if targets is None:
+            raise ValueError('动态资源场景尚未就绪，未按 F')
         if len(targets) != 1 or type(targets[0].get('resource_available')) is not int:
             raise ValueError('当前动态资源未加载、已离开视野或存在歧义，未按 F；请靠近后重新启动采集')
         return targets[0]
 
+    def sample_special(self, point):
+        """One refreshed read-only sample: target, 'unknown', or None when it is gone."""
+        if self.scene_refresh is not None:
+            try:
+                self.scene_refresh()
+            except (OSError, ValueError):
+                pass
+        targets = self.special_objects(point)
+        if targets is None:
+            return 'unknown'
+        if not targets:
+            return None
+        if len(targets) != 1 or type(targets[0].get('resource_available')) is not int:
+            return 'unknown'
+        return targets[0]
+
+    def settle_special(self, point):
+        """Judge the press that just happened from a fresh sample, and only report what moved."""
+        progress = self.special_progress
+        before = progress['before']
+        if before is None:
+            return
+        progress['before'] = None
+        deadline = self.clock.monotonic() + policy.COORD_SPECIAL_STATE_SETTLE_SECONDS
+        observed, samples = [], {}
+        while True:
+            self.wait(policy.COORD_SPECIAL_STATE_POLL_SECONDS)
+            sample = self.sample_special(point)
+            if sample != 'unknown':
+                after = special_snapshot(sample) if sample is not None else None
+                outcome = special_verdict.verdict(before, after)
+                observed.append(outcome)
+                samples[outcome] = after
+                if special_verdict.conclusive(outcome):
+                    break
+            if self.clock.monotonic() >= deadline:
+                break
+        outcome = special_verdict.strongest(observed)
+        after = samples.get(outcome)
+        progress['outcome'] = outcome
+        progress['after'] = after
+        if outcome == special_verdict.UNCHANGED:
+            progress['unchanged'] += 1
+        else:
+            progress['unchanged'] = 0
+        self.report('collecting', f'{point["name"]} · 第 {progress["sent"]} 次按 F · {SPECIAL_OUTCOME_TEXT[outcome]}',
+                    waypoint=progress.get('index', 1), waypoint_count=progress.get('total', 1),
+                    resource_press_count=progress['sent'], resource_outcome=outcome,
+                    resource_available_before=before.get('available'),
+                    resource_available_after=(after or {}).get('available'),
+                    resource_cold_end_before=before.get('cold_end'),
+                    resource_cold_end_after=(after or {}).get('cold_end'),
+                    resource_state_digest=(after or {}).get('digest'))
+
+    def finish_special(self, point, index, total):
+        """Report what is actually known about this dynamic resource and end the point."""
+        progress = self.special_progress
+        sent, outcome = progress['sent'], progress['outcome']
+        before, after = progress.get('pressed_from'), progress.get('after')
+        name = point['name']
+        if outcome == special_verdict.GATHERED:
+            message = f'{name} · 已确认采到（可用次数 {before}→{after.get("available")}）· 共按 F {sent} 次'
+        elif outcome == special_verdict.GONE:
+            message = f'{name} · 资源已从场景消失，判定采集完成 · 共按 F {sent} 次'
+        elif outcome == special_verdict.COOLING:
+            message = f'{name} · 冷却已开始，判定本次采集成功 · 共按 F {sent} 次'
+        elif outcome == special_verdict.UNCHANGED:
+            message = (f'{name} · 连按 F {sent} 次资源状态无变化，已停止 · 请核对背包'
+                       '（可能已在冷却或未命中）')
+        elif outcome == special_verdict.CHANGED:
+            message = f'{name} · 已按 F {sent} 次，资源状态有变化但未见掉落标志 · 请核对背包'
+        else:
+            message = f'{name} · 已按 F {sent} 次，未能读到资源状态 · 请核对背包'
+        self.report('collecting', message, waypoint=index+1, waypoint_count=total,
+                    resource_press_count=sent, resource_outcome=outcome,
+                    resource_confirmed=special_verdict.confirmed(outcome))
+        return True
+
     def collect_special(self, point, index, total):
         self.release()
-        target = self.special_target(point)
-        available = target['resource_available']
         limit = point['special_resource'].get('press_count', 10)
-        if self.special_progress is None:
-            self.special_progress = {'sent': 0}
-        if self.special_progress['sent'] >= limit:
-            self.report('collecting', f'{point["name"]} · 已完成 {limit} 次按 F 操作，请核对实际掉落',
-                        waypoint=index+1, waypoint_count=total, resource_press_count=limit)
-            return True
-        if available <= 0:
+        progress = self.special_progress
+        if progress is None:
+            progress = self.special_progress = {'sent': 0, 'unchanged': 0, 'outcome': None,
+                                                'before': None, 'after': None, 'pressed_from': None}
+        progress['index'], progress['total'] = index, total
+        if progress['before'] is not None:
+            self.settle_special(point)
+        if special_verdict.conclusive(progress['outcome']) \
+                or progress['unchanged'] >= policy.COORD_SPECIAL_UNCHANGED_LIMIT \
+                or progress['sent'] >= limit:
+            return self.finish_special(point, index, total)
+        try:
+            target = self.special_target(point)
+        except ValueError:
+            # A target that vanished after a press is a completed collection,
+            # not a broken route. A second read guards against one short scan.
+            if progress['sent'] > 0 and self.sample_special(point) is None:
+                progress['outcome'] = special_verdict.GONE
+                return self.finish_special(point, index, total)
+            raise
+        if target['resource_available'] <= 0:
             raise ValueError('资源当前没有可用采集标志，已释放按键，请核对是否已采完或处于冷却')
         current = self.read(force=True)
         if not in_interaction_range(current, target['position']):
             return False
-        self.report('collecting', f'{point["name"]} · 连按 F {self.special_progress["sent"]+1}/{limit} · F6暂停 · F9停止',
-                    waypoint=index+1, waypoint_count=total, resource_press_count=self.special_progress['sent'],
+        progress['before'] = special_snapshot(target)
+        progress['pressed_from'] = progress['before']['available']
+        self.report('collecting', f'{point["name"]} · 连按 F {progress["sent"]+1}/{limit} · F6暂停 · F9停止',
+                    waypoint=index+1, waypoint_count=total, resource_press_count=progress['sent'],
                     position=list(self.position))
         try:
             self.set_keys({'f'})
-            self.special_progress['sent'] += 1
+            progress['sent'] += 1
             self.wait(policy.COORD_COLLECTION_PRESS_SECONDS)
         finally:
             self.release()
-        self.wait(1.2)
+        self.settle_special(point)
+        if special_verdict.conclusive(progress['outcome']) \
+                or progress['unchanged'] >= policy.COORD_SPECIAL_UNCHANGED_LIMIT:
+            return self.finish_special(point, index, total)
         return False
 
     def repair_pause(self, message, index, total, state='repair_paused'):
@@ -857,7 +983,7 @@ class _Follower:
                     if self.waypoints is not None:
                         text = '已完成采集与等待' if self.collect_wait_seconds is not None else '已到达点位'
                         if 'special_resource' in points[index-1]:
-                            text = '已完成设定次数的连按操作'
+                            text = SPECIAL_REACHED_TEXT[(self.special_progress or {}).get('outcome')]
                         if self.navigator and self.navigator.memory_state == 'write_error':
                             text += '（走法记忆暂未保存）'
                         self.report('reached', f'{text} {index}/{len(points)} · F6暂停 · F9停止',

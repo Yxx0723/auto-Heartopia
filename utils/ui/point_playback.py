@@ -8,6 +8,7 @@ import threading
 from utils.core.coordinate_points import ordered_waypoints, validate_collect_wait, validate_loop_count
 from utils.core.coordinate_recovery import validate_recovery_options
 from utils.core.coordinate_navigation import LocalNavigator
+from utils.core import special_verdict
 from utils.core import thresholds as policy
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.route_path_memory import RoutePathMemory
@@ -19,16 +20,28 @@ from utils.drivers.windows_input import PreciseClock
 from utils.ui.playback_diagnostics import PlaybackDiagnostics
 
 
+SPECIAL_FINISH_TEXT = {
+    None: '动态资源采集结束，请核对背包',
+    special_verdict.GATHERED: '动态资源已确认采到，按键已释放',
+    special_verdict.GONE: '动态资源已从场景消失，采集完成',
+    special_verdict.COOLING: '动态资源冷却已开始，判定采集成功',
+    special_verdict.CHANGED: '动态资源状态有变化但未见掉落标志，请核对背包',
+    special_verdict.UNCHANGED: '动态资源连按未见状态变化，请核对背包',
+    special_verdict.UNKNOWN: '动态资源状态未能读取，请核对背包',
+}
+
+
 class PointPlayback:
     def __init__(self, profile, runner=None, window_factory=PointGameWindow, controls_factory=PlaybackControls,
                  reader_factory=ReadOnlyPosition, device_factory=TimelineInput, clock=PreciseClock,
                  scene_provider=None, navigator_factory=LocalNavigator, diagnostics_path=None, repair_factory=None,
-                 tool_factory=None, food_factory=None, wall_clock=None):
+                 tool_factory=None, food_factory=None, wall_clock=None, scene_refresh=None):
         self.profile = Path(profile)
         self.runner = runner
         self.window_factory, self.controls_factory = window_factory, controls_factory
         self.reader_factory, self.device_factory, self.clock = reader_factory, device_factory, clock
         self.scene_provider, self.navigator_factory = scene_provider, navigator_factory
+        self.scene_refresh = scene_refresh
         self.repair_factory = repair_factory
         self.tool_factory = tool_factory
         self.food_factory = food_factory
@@ -45,6 +58,7 @@ class PointPlayback:
         self.closed = False
         self.total = 0
         self.cycle, self.loop_count = 1, policy.COORD_PLAYBACK_DEFAULT_LOOPS
+        self.special_outcome = None
 
     @property
     def active(self):
@@ -57,6 +71,8 @@ class PointPlayback:
                 message += f' · 完成时间 {completed_at:%Y-%m-%d %H:%M:%S}'
                 extra['completed_at'] = completed_at.isoformat(timespec='seconds')
             self.cycle = extra.get('cycle', self.cycle)
+            if 'resource_outcome' in extra:
+                self.special_outcome = extra['resource_outcome']
             if 'navigation_path' in extra:
                 self.navigation_path = extra.pop('navigation_path')
             if state in ('finished', 'stopped', 'error', 'reached', 'cycle_finished',
@@ -113,6 +129,7 @@ class PointPlayback:
                             if auto_navigate and remember_paths and route_path is not None else None)
         self.stop_event.clear()
         self.cycle, self.loop_count = 1, loop_count
+        self.special_outcome = None
         self.navigation_path = []
         self.history = (PlaybackHistory(self.history_root, deepcopy(data),
                         Path(route_path).stem if route_path is not None else '未命名路线',
@@ -138,6 +155,8 @@ class PointPlayback:
             controls.start()
             navigation = ({'navigator': self.navigator_factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic)}
                           if auto_navigate else {})
+            if auto_navigate and self.scene_refresh is not None:
+                navigation['scene_refresh'] = lambda: self.scene_refresh(pid)
             if auto_navigate and self.path_memory is not None:
                 navigation['navigator'].path_memory = self.path_memory
                 navigation['navigator'].memory_state = 'learning'
@@ -162,7 +181,7 @@ class PointPlayback:
             finish_message = (('本次点位回放完成' if loop_count == 1 else f'已完成 {loop_count} 轮回放')
                               if completed else '回放已停止，按键已释放')
             if completed and any('special_resource' in point for point in data.get('points', [])):
-                finish_message = '动态资源连按操作已完成，请核对实际掉落'
+                finish_message = SPECIAL_FINISH_TEXT.get(self.special_outcome, SPECIAL_FINISH_TEXT[None])
             if self.path_memory is not None:
                 finish_message += f' · 已更新路线学习 · 已记忆 {self.path_memory.count} 段走法'
             self.update('finished' if completed else 'stopped', finish_message,

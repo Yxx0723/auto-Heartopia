@@ -116,3 +116,63 @@ def test_no_free_ring_does_not_select_the_occupied_resource_center():
 
 def test_horizontal_proximity_never_allows_collection_on_another_floor():
     assert not in_interaction_range([0., 2., 0.], [0., 0., 0.])
+
+
+def test_confirmed_counter_drop_stops_the_loop_on_the_first_press():
+    f, game, point, target, _ = follower()
+    point['special_resource']['press_count'] = 10
+
+    def on_input(event):
+        if event == {'type': 'key_down', 'key': 'f'}:
+            target['resource_available'] = 1
+
+    game.on_input = on_input
+    assert f.collect_point(point, 0, 1) is True
+    assert sum(e == {'type': 'key_down', 'key': 'f'} for _, e in game.events) == 1
+    assert '已确认采到' in f._report.call_args_list[-1].args[1]
+
+
+def test_a_target_vanishing_after_a_press_ends_as_collected_not_as_an_error():
+    f, game, point, target, nav = follower()
+    point['special_resource']['press_count'] = 10
+
+    def on_input(event):
+        if event == {'type': 'key_down', 'key': 'f'}:
+            nav.scene_provider.return_value['objects'] = []
+
+    game.on_input = on_input
+    assert f.collect_point(point, 0, 1) is True
+    assert sum(e == {'type': 'key_down', 'key': 'f'} for _, e in game.events) == 1
+    assert '资源已从场景消失' in f._report.call_args_list[-1].args[1]
+
+
+def test_presses_that_change_nothing_stop_at_the_policy_limit():
+    f, game, point, _, _ = follower()
+    point['special_resource']['press_count'] = 10
+    results = [f.collect_point(point, 0, 1) for _ in range(3)]
+    assert results == [False, False, True]
+    assert sum(e == {'type': 'key_down', 'key': 'f'} for _, e in game.events) == 3
+    assert '资源状态无变化' in f._report.call_args_list[-1].args[1]
+
+
+def test_an_unreadable_scene_after_a_press_never_claims_a_drop():
+    f, game, point, _, nav = follower()
+    point['special_resource']['press_count'] = 1
+
+    def on_input(event):
+        if event == {'type': 'key_down', 'key': 'f'}:
+            nav.scene_provider.return_value['state'] = 'loading'
+
+    game.on_input = on_input
+    assert f.collect_point(point, 0, 1) is False
+    assert f.collect_point(point, 0, 1) is True
+    assert '未能读到资源状态' in f._report.call_args_list[-1].args[1]
+
+
+def test_a_press_only_happens_inside_the_interaction_envelope():
+    f, game, point, target, _ = follower()
+    game.position = [1.3, 0., 0.]
+    target['position'] = [0., 0., 0.]
+    point['position'] = [0., 0., 0.]
+    assert not f.collect_point(point, 0, 1)
+    assert not game.events

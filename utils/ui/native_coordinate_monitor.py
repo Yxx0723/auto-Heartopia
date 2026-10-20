@@ -183,7 +183,7 @@ class CoordinateWindow:
         self.worker = MonitorWorker(monitor)
         diagnostics_dir = Path(point_path).parent if point_path else data_dir
         self.playback = PointPlayback(self.resources / 'profile.json', runner=playback_runner,
-                                      scene_provider=self.navigation_scene,
+                                      scene_provider=self.navigation_scene, scene_refresh=self.refresh_scene,
                                       diagnostics_path=diagnostics_dir / '日志' / '点位回放.jsonl')
         self.playback_status = {'state': 'idle', 'message': '按保存顺序回放 · F6开始/暂停 · F9停止'}
         self.scene_state = {'state': 'waiting', 'objects': [], 'colliders': []}
@@ -755,6 +755,11 @@ class CoordinateWindow:
 
     def navigation_scene(self, pid):
         return self.scene_worker.navigation_snapshot(pid) if self.scene_worker else None
+
+    def refresh_scene(self, pid):
+        """Ask for one immediate read-only poll so a single press can be judged."""
+        if self.scene_worker and not self.closed:
+            self.scene_worker.refresh()
 
     def tick(self):
         if self.closed:

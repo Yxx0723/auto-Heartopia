@@ -1,4 +1,5 @@
 """Typed identities and live availability for dynamic advanced gather objects."""
+import hashlib
 import struct
 
 
@@ -69,6 +70,10 @@ def special_gather(meta, component, entity):
     cold_end = value('coldEndTime', 10, 8, '<q')
     if not 0 <= available <= 100 or cold_end < 0:
         raise ValueError('高级资源采集状态范围无效')
+    # A digest of the whole collectable-state struct is evidence only: it tells
+    # a later press-apart comparison that some field moved, never that the
+    # player collected something. Parsed fields stay the only verdict inputs.
+    digest = hashlib.blake2b(raw, digest_size=8).hexdigest()
     if (meta.integer(at) != static_id or meta.integer(table+tf['offset']) != static_id
             or meta.integer(item_at) != VERIFIED_SPECIAL_IDS[category][1]
             or meta.ref(component, '_tableConfig') != table
@@ -80,5 +85,6 @@ def special_gather(meta, component, entity):
         raise ValueError('高级资源采样时发生变化')
     return {'category': category, 'resource_static_id': static_id,
             'resource_available': available, 'resource_cold_end_ms': cold_end,
+            'resource_state_digest': digest,
             'resource_component': component, 'resource_entity': entity,
             'map_dynamic': True}

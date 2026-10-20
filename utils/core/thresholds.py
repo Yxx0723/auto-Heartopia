@@ -45,6 +45,15 @@ COORD_SPECIAL_INTERACTION_RADIUS = 1.25
 # The outer valid ring can lie 1.2 units from the center. Its final approach
 # needs finer steering than normal 0.3-unit waypoints to enter the 1.25 envelope.
 COORD_SPECIAL_APPROACH_PRECISION = .05
+# A press is only worth judging once the read-only sample can reflect it. The
+# scene worker normally repolls every 2 s; a forced refresh still costs a game
+# frame plus that poll, so the settle window covers one refreshed sample and a
+# second one before the press is called ineffective.
+COORD_SPECIAL_STATE_SETTLE_SECONDS = 1.8
+COORD_SPECIAL_STATE_POLL_SECONDS = .35
+# Presses that change nothing are guesses, not gathering: stop and ask the
+# player to check the bag instead of hammering the interaction key.
+COORD_SPECIAL_UNCHANGED_LIMIT = 3
 COORD_WAYPOINT_SPACING = .4
 COORD_IDLE_RADIUS = .02
 COORD_DWELL_SECONDS = .3
