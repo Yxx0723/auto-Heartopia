@@ -113,6 +113,9 @@ COORD_RECOVERY_JUMP_SETTLE_SECONDS = .5
 COORD_RECOVERY_CONFIRM_DISTANCE = 1.
 COORD_RECOVERY_SIDE_STEP = .6
 COORD_RECOVERY_MAX_SIDE_DISTANCE = 2.4
+# User policy (2026-10-13): keep retrying after a failed round. A short release
+# interval avoids input thrashing and stays interruptible; operational budget.
+COORD_RECOVERY_RETRY_SECONDS = .5
 
 # Point collection policy: one .12 s F pulse, then a user-chosen dwell.
 # 3 s is an editable default, not a measured collection-animation duration.
@@ -319,3 +322,61 @@ MONO_FIELD_LIMIT = 512
 MONO_VTABLE_LIMIT = 4096
 MONO_OBJECT_LIMIT = 65536
 MONO_NAME_BYTES = 256
+# Read-only scene-map operating budgets (2026-10-13). The live registry probe
+# contained about 7400 hierarchies and 785 colliders. These caps bound parsing
+# and refresh work; they are not a claim that the whole world is loaded.
+COORD_SCENE_MAX_ITEMS = 20000
+# Container capacity includes reserved/removed slots; only live entries count
+# toward MAX_ITEMS. Reads still obey COORD_SCENE_MAX_BYTES independently.
+COORD_SCENE_MAX_CAPACITY = 262144
+# Local navigation starts with conservative padding; these are initial settings,
+# verified in simulations, not measured character capsule dimensions.
+COORD_NAV_GRID_STEP = .75
+COORD_NAV_CLEARANCE = .6
+COORD_NAV_WATER_CLEARANCE = 1.
+COORD_NAV_GROUND_CLEARANCE = .25
+COORD_NAV_BODY_HEIGHT = 1.75
+COORD_NAV_HEIGHT_REFRESH = .75
+COORD_NAV_SEARCH_RADIUS = 32.
+COORD_NAV_HORIZON = 24.
+COORD_NAV_MAX_NODES = 7500
+COORD_NAV_LEG_LENGTH = 3.
+COORD_NAV_MIN_PROGRESS = 2.
+COORD_NAV_PROBE_SECONDS = 20.
+COORD_NAV_RETRY_SECONDS = .5
+COORD_NAV_SCENE_MAX_AGE = 6.
+# Manual collection points can be recorded close to a trunk. Only their final
+# approach may use the observed endpoint's gap; solid geometry and water stay blocked.
+COORD_NAV_APPROACH_RADIUS = 1.5
+COORD_NAV_APPROACH_MIN_GAP = .05
+COORD_NAV_LEG_REACH_RADIUS = .6
+COORD_NAV_RECOVERY_WAIT_SECONDS = 3.
+COORD_NAV_APPROACH_SETTLE_SECONDS = .08
+# Keep a stable aim along a checked corridor instead of chasing dense samples.
+COORD_NAV_STEERING_LOOKAHEAD = 4.
+COORD_NAV_MEMORY_LOOKAHEAD = 3.
+COORD_NAV_MEMORY_CHORD_ERROR = .15
+# Fallbacks are only used when the normal local search finds no route.
+COORD_NAV_FINE_GRID_STEP = .375
+COORD_NAV_FINE_SEARCH_RADIUS = 16.
+COORD_NAV_WIDE_GRID_STEP = 1.
+COORD_NAV_WIDE_SEARCH_RADIUS = 60.
+COORD_NAV_WIDE_HORIZON = 48.
+COORD_NAV_WIDE_MAX_NODES = 16000
+COORD_SCENE_MAX_BYTES = 4194304
+COORD_SCENE_REFRESH_SECONDS = 2.
+# Display-only expansion requested on 2026-10-15. Navigation still consumes
+# fresh snapshots; historical fixed geometry never becomes an obstacle source.
+COORD_SCENE_RADIUS = 150.
+COORD_SCENE_LIVE_RADIUS = 80.
+COORD_SCENE_CACHE_CELL_SIZE = 64.
+COORD_SCENE_CACHE_FAR_SECONDS = 10.
+COORD_SCENE_CACHE_TTL = 1800.
+COORD_SCENE_CACHE_MAX_ITEMS = 20000
+COORD_SCENE_CACHE_MAX_CELLS = 256
+COORD_TOOL_REFRESH_SECONDS = 1.
+COORD_TOOL_LOW_PERCENT = 20.
+COORD_SCENE_ENTITY_COMPONENT_LIMIT = 128
+COORD_SCENE_LABEL_MAX_CHARS = 96
+COORD_SCENE_MIN_QUATERNION_NORM = .5
+COORD_SCENE_MAX_QUATERNION_NORM = 1.5

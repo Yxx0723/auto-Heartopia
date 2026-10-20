@@ -23,6 +23,9 @@ class CoordinateMonitor:
         self.session = 0
         self.sequence = 0
         self.last_sample = float('-inf')
+        self.last_tool_sample = float('-inf')
+        self.tool_sample = {'state': 'unavailable'}
+        self.stamina_sample = {'state': 'unavailable'}
         self.next_attempt = float('-inf')
         self.state = self._empty('connecting', '正在连接心动小镇…')
 
@@ -37,6 +40,9 @@ class CoordinateMonitor:
             self.reader.close()
             self.reader = None
         self.pid = None
+        self.last_tool_sample = float('-inf')
+        self.tool_sample = {'state': 'unavailable'}
+        self.stamina_sample = {'state': 'unavailable'}
 
     def status(self):
         with self.lock:
@@ -56,16 +62,34 @@ class CoordinateMonitor:
                         self.pid = pids[0]
                         self.session = secrets.token_hex(8)
                         self.last_sample = float('-inf')
+                        self.last_tool_sample = float('-inf')
                 except (OSError, ValueError) as exc:
                     self._close_reader()
                     self.state = self._empty('error', str(exc))
             if self.reader is not None and now - self.last_sample >= policy.COORD_MONITOR_REFRESH_SECONDS:
                 try:
                     sample = self.reader.snapshot()
+                    if now-self.last_tool_sample >= policy.COORD_TOOL_REFRESH_SECONDS:
+                        self.last_tool_sample = self.clock()
+                        try:
+                            read_tools = (getattr(self.reader, 'held_tool_snapshot', None)
+                                          or getattr(self.reader, 'tools_snapshot', None))
+                            self.tool_sample = read_tools() if read_tools else {'state': 'unavailable'}
+                        except (OSError, ValueError):
+                            # A tool model can reload independently of XYZ.
+                            # Hide its old number and let coordinate sampling continue.
+                            self.tool_sample = {'state': 'unavailable'}
+                        try:
+                            read_stamina = getattr(self.reader, 'stamina_snapshot', None)
+                            self.stamina_sample = read_stamina() if read_stamina else {'state': 'unavailable'}
+                        except (OSError, ValueError):
+                            self.stamina_sample = {'state': 'unavailable'}
                     self.sequence += 1
                     self.last_sample = self.clock()
                     self.state = {**self._empty('connected', '实时读取中'), **sample,
-                                  'sequence': self.sequence, 'sample_at': self.wall_clock()}
+                                  'sequence': self.sequence, 'sample_at': self.wall_clock(),
+                                  'tools': copy.deepcopy(self.tool_sample),
+                                  'stamina': copy.deepcopy(self.stamina_sample)}
                 except (OSError, ValueError) as exc:
                     self._close_reader()
                     self.next_attempt = self.clock() + policy.COORD_MONITOR_RETRY_SECONDS

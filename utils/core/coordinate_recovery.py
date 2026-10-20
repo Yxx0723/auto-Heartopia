@@ -64,14 +64,21 @@ def recovery_plan(origin, target, attempt):
     return [back, lateral, forward]
 
 
-def recovery_within_limits(position, origin, segment_start, target):
+def recovery_limit_reason(position, origin, segment_start, target, check_height=True):
     if not all(valid_position(p) for p in (position, origin, segment_start, target)):
-        return False
+        return 'invalid'
+    if check_height and origin[1] - position[1] > policy.COORD_MAX_HEIGHT_ERROR:
+        return 'height'
     dx, dz = target[0] - segment_start[0], target[2] - segment_start[2]
     length2 = dx * dx + dz * dz
     fraction = max(0., min(1., ((position[0] - segment_start[0]) * dx
                                + (position[2] - segment_start[2]) * dz) / length2)) if length2 else 0.
     nearest = [segment_start[0] + fraction * dx, position[1], segment_start[2] + fraction * dz]
-    return (distance(position, origin) <= policy.COORD_RECOVERY_MAX_RADIUS
-            and distance(position, nearest) <= policy.COORD_RECOVERY_MAX_RADIUS
-            and origin[1] - position[1] <= policy.COORD_MAX_HEIGHT_ERROR)
+    if distance(position, origin) > policy.COORD_RECOVERY_MAX_RADIUS \
+            or distance(position, nearest) > policy.COORD_RECOVERY_MAX_RADIUS:
+        return 'distance'
+    return None
+
+
+def recovery_within_limits(position, origin, segment_start, target):
+    return recovery_limit_reason(position, origin, segment_start, target) is None

@@ -31,11 +31,15 @@ class MonitorView:
         self.last_response = None
         self.status = {'state': 'connecting', 'message': '正在连接心动小镇…'}
         self.notice = ''
+        self.heading = None
+        self.heading_origin = None
 
     def invalidate(self, message=None):
         self.position = None
         self.previous = None
         self.speed = None
+        self.heading = None
+        self.heading_origin = None
         self.segment += 1
         if message:
             self.status = {'state': 'disconnected', 'message': message}
@@ -58,6 +62,8 @@ class MonitorView:
             self.reference = None
             self.previous = None
             self.sequence = None
+            self.heading = None
+            self.heading_origin = None
             self.segment += 1
         self.position = tuple(status['position'])
         if status.get('sequence') == self.sequence:
@@ -73,9 +79,20 @@ class MonitorView:
                 self.segment += 1
                 point['segment'] = self.segment
                 self.speed = None
+                self.heading = None
+                self.heading_origin = None
                 self.notice = '位置或采样间隔发生跳变，轨迹已分段。'
             else:
                 self.speed = 0. if dist < policy.COORD_IDLE_RADIUS else dist / dt
+        if self.heading_origin is not None:
+            dx = point['x'] - self.heading_origin['x']
+            dz = self.heading_origin['z'] - point['z']
+            length = math.hypot(dx, dz)
+            if length >= .05:
+                self.heading = (dx/length, dz/length)
+                self.heading_origin = point
+        else:
+            self.heading_origin = point
         last = self.trail[-1] if self.trail else None
         if last is None or point['segment'] != last['segment'] \
                 or math.hypot(point['x'] - last['x'], point['z'] - last['z']) >= policy.COORD_IDLE_RADIUS:
@@ -113,6 +130,7 @@ class MonitorView:
     def clear_trail(self):
         self.trail.clear()
         self.previous = None
+        self.heading_origin = None
         self.segment += 1
 
     @property

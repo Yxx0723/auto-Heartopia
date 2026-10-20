@@ -115,3 +115,46 @@ def test_trail_is_bounded_and_clearing_it_does_not_modify_reference():
     view.clear_trail()
     assert view.trail == []
     assert view.reference == (1., 2., 3.)
+
+
+def test_direction_updates_on_turns_and_survives_standing_and_clearing_only_trail():
+    view = MonitorView()
+    view.accept(sample((0., 0., 0.)), 10.)
+    assert view.heading is None
+    view.accept(sample((1., 0., 0.), sequence=2), 10.1)
+    assert view.heading == pytest.approx((1, 0))
+    view.accept(sample((1., 0., 1.), sequence=3), 10.2)
+    assert view.heading == pytest.approx((0, -1))
+    view.accept(sample((1., 0., 1.), sequence=4), 10.3)
+    view.clear_trail()
+    assert view.heading == pytest.approx((0, -1))
+    view.accept(sample((1., 0., 1.), sequence=5), 10.4)
+    assert view.heading == pytest.approx((0, -1))
+
+
+@pytest.mark.parametrize('reason', ['teleport', 'session', 'lost', 'gap', 'resume'])
+def test_direction_never_carries_across_unknown_movement(reason):
+    view = MonitorView()
+    view.accept(sample((0., 0., 0.)), 10.)
+    view.accept(sample((1., 0., 0.), sequence=2), 10.1)
+    assert view.heading
+    if reason == 'teleport': view.accept(sample((100., 0., 0.), sequence=3), 10.2)
+    if reason == 'session': view.accept(sample((1., 0., 0.), sequence=3, session='b'), 10.2)
+    if reason == 'lost': view.accept({'state': 'waiting'}, 10.2)
+    if reason == 'gap': view.accept(sample((1., 0., 0.), sequence=3), 15.)
+    if reason == 'resume':
+        view.set_paused(True)
+        assert view.heading
+        view.set_paused(False)
+    assert view.heading is None
+
+
+def test_slow_movement_accumulates_but_small_stationary_jitter_does_not_turn_arrow():
+    view = MonitorView()
+    view.accept(sample((0., 0., 0.)), 10.)
+    for i in range(1, 11):
+        view.accept(sample((i*.01, 0., 0.), sequence=i+1), 10.+i*.1)
+    assert view.heading == pytest.approx((1, 0))
+    for i in range(11, 20):
+        view.accept(sample((.1, 0., (-1)**i*.005), sequence=i+1), 10.+i*.1)
+    assert view.heading == pytest.approx((1, 0))

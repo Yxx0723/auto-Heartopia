@@ -65,6 +65,8 @@ class ReadOnlyPosition:
     def __init__(self, pid, profile_file, hwnd=None):
         self.handle = None
         self.pid, self.hwnd = pid, hwnd
+        self.tool_reader = None
+        self.stamina_reader = None
         self.profile = json.loads(Path(profile_file).read_text(encoding='utf-8'))
         errors = validate_profile(self.profile)
         if errors:
@@ -174,6 +176,38 @@ class ReadOnlyPosition:
 
     def read(self):
         return self.snapshot()['position']
+
+    def tools_snapshot(self):
+        return self._tools_snapshot(held=False)
+
+    def stamina_snapshot(self):
+        if self.locator is None:
+            raise ValueError('当前坐标版本不支持体力检测')
+        from utils.drivers.stamina import StaminaReader
+        try:
+            if self.stamina_reader is None:
+                self.stamina_reader = StaminaReader(self._read, self.locator)
+            return self.stamina_reader.snapshot()
+        except (ValueError, OSError):
+            self.stamina_reader = None
+            raise
+
+    def held_tool_snapshot(self):
+        return self._tools_snapshot(held=True)
+
+    def _tools_snapshot(self, held):
+        if self.locator is None:
+            raise ValueError('当前坐标版本不支持工具耐久检测')
+        # Lazy import avoids tying the coordinate reader's startup to optional
+        # tool metadata, and preserves its existing read-only process handle.
+        from utils.drivers.tool_durability import ToolDurabilityReader
+        try:
+            if self.tool_reader is None:
+                self.tool_reader = ToolDurabilityReader(self._read, self.base, self.locator.domain)
+            return self.tool_reader.snapshot(held=held)
+        except (OSError, ValueError):
+            self.tool_reader = None
+            raise
 
     def snapshot(self):
         if self.hwnd and self.window_pid(self.hwnd) != self.pid:

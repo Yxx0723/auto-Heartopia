@@ -5,7 +5,14 @@ root = Path(SPECPATH).resolve().parent
 icon = root / 'packaging/assets/monitor.ico'
 a = Analysis([str(root / 'tools/coordinate_monitor.py')], pathex=[str(root)],
     binaries=[], datas=[(str(root / 'webui/coordinate-monitor/profile.json'), 'monitor'),
-                         (str(icon), 'monitor')], hiddenimports=[], hookspath=[],
+                         (str(icon), 'monitor'),
+                         (str(root/'webui/coordinate-monitor/repair_box_menu.png'), 'monitor'),
+                         (str(root/'webui/coordinate-monitor/repair_menu_marker.png'), 'monitor'),
+                         (str(root/'webui/coordinate-monitor/axe_pick_icon.png'), 'monitor'),
+                         (str(root/'webui/coordinate-monitor/tool_tablet_marker.png'), 'monitor'),
+                         *[(str(root/'webui/coordinate-monitor'/name), 'monitor') for name in (
+                             'food_bag_marker.png', 'food_bag_close.png', 'food_eat_button.png', 'food_category.png', 'fruit_apple.png',
+                             'fruit_blueberry.png', 'fruit_raspberry.png', 'fruit_orange.png')]], hiddenimports=[], hookspath=[],
     hooksconfig={}, runtime_hooks=[], excludes=[], noarchive=False, optimize=0)
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name='HeartopiaMonitor',

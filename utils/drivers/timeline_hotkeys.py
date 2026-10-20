@@ -53,9 +53,12 @@ class PlaybackControls:
             return self.running, self.stopped or self.stop_requested()
 
     def pause(self):
+        self.pause_with_reason('游戏失去焦点或尺寸改变，已暂停 · 切回游戏按F6继续')
+
+    def pause_with_reason(self, message):
         with self.lock:
             self.running = False
-            self.feedback.update('paused', '游戏失去焦点或尺寸改变，已暂停 · 切回游戏按F6继续', window=self.window)
+            self.feedback.update('paused', message, window=self.window)
 
     def start(self):
         self.listener = keyboard.Listener(on_press=self.press, on_release=self.release)
