@@ -2,13 +2,20 @@
 import struct
 from utils.core import thresholds as policy
 from utils.core.scene_map import box_geometry, compose_transform
+from utils.core.terrain_map import verified_terrain_walls
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.native_world_collisions import NativeWorldCollisions
+from utils.drivers.global_minerals import GlobalMineralReader
+from utils.drivers.special_gather import SPECIAL_COMPONENTS, special_gather
 
 # Verified on 2026-10-14 against the standing player's blueberry bush and the
 # user's identified raspberry and ordinary bushes (each within 0.2 world units).
 # The coordinate profile pins the game build.
 BUSH_ITEM_TYPES = {101: 'bush', 102: 'blueberry', 103: 'raspberry'}
+# Verified on 2026-10-20 at the user's identified rock (0.539 units) and ore
+# (0.407 units), using exact gather components and their own _itemTypeID fields.
+# Unknown stone IDs stay generic until their actual resource identity is checked.
+STONE_ITEM_TYPES = {301: 'rock', 302: 'ore'}
 # Both exact types are present in the inspected game's vegetation metadata.
 TREE_COMPONENTS = {('CollectableTreeComponent', 'XDTLevelAndEntity.Gameplay.Component.Gather'),
                    ('CollectableAdvancedTreeComponent', 'XDTLevelAndEntity.Gameplay.Component.Gather')}
@@ -261,6 +268,7 @@ class MemorySceneMap:
             raise ValueError('当前游戏版本不支持场景地图')
         self.meta = SceneMetadata(self.memory._read, self.memory.locator.domain)
         self.native = None
+        self.global_minerals = None
 
     def close(self):
         self.memory.close()
@@ -402,7 +410,7 @@ class MemorySceneMap:
             return 'insect'
 
     def object_category(self, owner, info):
-        """Identify plants and fauna from components belonging to this exact entity."""
+        """Identify resources and fauna from components belonging to this exact entity."""
         if (info['name'], info['namespace']) != ('LevelEntityComponent', 'XDTLevelAndEntity.EntityView'):
             return 'other'
         meta = self.meta
@@ -421,10 +429,17 @@ class MemorySceneMap:
                     return 'other'
             version_at = components + meta.field(container['address'], '_version')['offset']
             before = meta.integer(version_at)
-            categories, bush_reads, identity_reads = set(), [], []
+            categories, resource_reads, identity_reads = set(), [], []
             for component in meta.dictionary(components, max_items=policy.COORD_SCENE_ENTITY_COMPONENT_LIMIT):
                 component_info = meta.obj(component)
-                if (component_info['name'], component_info['namespace']) in TREE_COMPONENTS:
+                special = (component_info['name'], component_info['namespace']) in SPECIAL_COMPONENTS
+                if special:
+                    try:
+                        categories.add(special_gather(meta, component, entity)['category'])
+                    except ValueError:
+                        categories.add('other')
+                    identity_reads.append(component)
+                elif (component_info['name'], component_info['namespace']) in TREE_COMPONENTS:
                     if meta.ref(component, '<entity>k__BackingField') != entity:
                         return 'other'
                     categories.add('tree')
@@ -435,32 +450,36 @@ class MemorySceneMap:
                         return 'other'
                     categories.add(self.insect_category(component, component_info, owner) if fauna == 'insect' else fauna)
                     identity_reads.append(component)
-                if (component_info['name'], component_info['namespace']) == (
-                        'CollectableBushComponent', 'XDTLevelAndEntity.Gameplay.Component.Gather'):
+                gather = {('CollectableBushComponent', 'XDTLevelAndEntity.Gameplay.Component.Gather'):
+                              (BUSH_ITEM_TYPES, 'shrub'),
+                          ('CollectableStoneComponent', 'XDTLevelAndEntity.Gameplay.Component.Gather'):
+                              (STONE_ITEM_TYPES, 'other')}.get((component_info['name'], component_info['namespace']))
+                if gather:
+                    item_types, fallback = gather
                     if meta.ref(component, '<entity>k__BackingField') != entity:
                         return 'other'
                     try:
                         item_field = meta.field(component_info['address'], '_itemTypeID')
                         if (item_field['code'] != 8 or item_field['flags'] & 16
                                 or not 16 <= item_field['offset'] <= component_info['size'] - 4):
-                            raise ValueError('Unsupported bush item identity')
+                            raise ValueError('Unsupported gather item identity')
                         item_at = component + item_field['offset']
                         item_id = meta.integer(item_at)
-                        categories.add(BUSH_ITEM_TYPES.get(item_id, 'shrub'))
-                        bush_reads.append((component, item_at, item_id))
+                        categories.add(item_types.get(item_id, fallback))
+                        resource_reads.append((component, item_at, item_id))
                     except ValueError:
-                        categories.add('shrub')
+                        categories.add(fallback)
             if (meta.integer(version_at) != before or meta.ref(entity, '_components') != components
                     or meta.ref(owner, '<entity>k__BackingField') != entity):
                 return 'other'
-            for component, item_at, item_id in bush_reads:
+            for component, item_at, item_id in resource_reads:
                 if meta.integer(item_at) != item_id or meta.ref(component, '<entity>k__BackingField') != entity:
                     return 'other'
             if any(meta.ref(component, '<entity>k__BackingField') != entity for component in identity_reads):
                 return 'other'
             if len(categories) == 1:
                 return categories.pop()
-            if categories & {'tree', 'insect', 'butterfly', 'bird', 'animal', 'other'}:
+            if categories & {'tree', 'rock', 'ore', 'fluorite', 'roaming_oak', 'insect', 'butterfly', 'bird', 'animal', 'other'}:
                 return 'other'
             return 'shrub' if categories else 'other'
         except ValueError:
@@ -519,8 +538,20 @@ class MemorySceneMap:
                     obj = {'position': world(hierarchy)[0],
                            'kind': 'entity' if info['name'] == 'LevelEntityComponent' else 'object',
                            'category': self.object_category(owner, info)}
+                    if obj['category'] in ('fluorite', 'roaming_oak'):
+                        entity = meta.ref(owner, '<entity>k__BackingField')
+                        matches = []
+                        for component in meta.dictionary(meta.ref(entity, '_components'), max_items=128):
+                            ci = meta.obj(component)
+                            if (ci['name'], ci['namespace']) in SPECIAL_COMPONENTS:
+                                matches.append(special_gather(meta, component, entity))
+                        if len(matches) != 1 or matches[0]['category'] != obj['category']:
+                            raise ValueError('高级资源识别结果已变化')
+                        obj.update(matches[0])
                     if obj['category'] in ('blueberry', 'raspberry', 'bush', 'tree', 'shrub'):
                         obj.update(map_static=True, map_id=('plant', hierarchy, owner))
+                    elif obj['category'] in ('rock', 'ore'):
+                        obj.update(map_static=True, map_id=('mineral', hierarchy, owner))
                     objects.append(obj)
             except ValueError:
                 skipped += 1
@@ -596,11 +627,32 @@ class MemorySceneMap:
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
             raise ValueError('场景已切换，正在重新读取地图')
-        return {'schema': 'memory-scene-map-v1', 'state': 'ready', 'read_only': True,
+        global_resources, global_state = [], 'unavailable'
+        try:
+            if getattr(self, 'global_minerals', None) is None:
+                self.global_minerals = GlobalMineralReader(meta, self.memory.base, STONE_ITEM_TYPES)
+            global_resources = self.global_minerals.snapshot()
+            global_state = 'ready'
+        except ValueError:
+            pass  # Optional display definitions must never discard live navigation geometry.
+        terrain = ()
+        if world_state == 'ready' and global_state == 'ready':
+            try:
+                terrain = verified_terrain_walls(self.memory.profile.get('game_assembly_sha256'),
+                                                 self.native.main_terrain_loaded())
+            except ValueError:
+                pass  # A changing scene must not receive the previous world's terrain.
+        colliders.extend(terrain)
+        return {'terrain_state': 'ready' if terrain else 'unavailable',
+                'terrain_revision': 'main-terrain-v1' if terrain else None,
+                'schema': 'memory-scene-map-v1', 'state': 'ready', 'read_only': True,
                 'scope': 'loaded-scene-partial', 'objects': objects, 'colliders': colliders,
                 'position': current['position'], 'barrier_state': barrier_state, 'world_state': world_state,
+                'global_resources': global_resources, 'global_resource_state': global_state,
+                'global_resource_counts': {category: sum(p['category'] == category for p in global_resources)
+                                           for category in ('rock', 'ore')},
                 'cache_context': (self.memory.pid, self.native.scene_key) if world_state == 'ready' else None,
-                'statistics': {'hierarchies': len(entries),
+                'statistics': {'hierarchies': len(entries), 'terrain_walls': len(terrain),
                     **world_stats,
                     'fences': sum(c.get('category') == 'fence' for c in colliders),
                     'handrails': sum(c.get('category') == 'handrail' for c in colliders),

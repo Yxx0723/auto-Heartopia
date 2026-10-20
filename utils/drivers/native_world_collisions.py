@@ -55,6 +55,20 @@ class NativeWorldCollisions:
         self.geometry_cache = {}
         self.scene_key = None
 
+    def main_terrain_loaded(self):
+        """The fixed terrain edges belong only to the verified startown root."""
+        if self.scene_key is None:
+            return False
+        meta = self.meta
+        root = meta.static_ref(self.root_class, 'instance')
+        if root != self.scene_key[0]:
+            return False
+        meta.obj(root, ('SceneLoaderRoot', 'SceneLoader'))
+        name = meta.ref(root, 'sceneName')
+        return (meta.string(name) == 'startown'
+                and meta.static_ref(self.root_class, 'instance') == root
+                and meta.ref(root, 'sceneName') == name)
+
     def vector(self, obj, name, count):
         meta = self.meta
         info = meta.obj(obj)

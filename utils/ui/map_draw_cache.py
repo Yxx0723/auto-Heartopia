@@ -6,6 +6,7 @@ import math
 from utils.core.coordinate_route import valid_position
 from utils.core import thresholds as policy
 from utils.core.scene_map import barrier_strokes
+from utils.core.map_resources import combine_resource_markers
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,7 @@ class SceneGeometryCache:
         self.cached_keys = set()
         self.object_cells, self.box_cells, self.wide_boxes = {}, {}, []
         self.preparations = 0
+        self.global_indexes = []
 
     def candidates(self, index, bounds):
         xs, zs = cells_for(bounds)
@@ -87,10 +89,12 @@ class SceneGeometryCache:
 
     def select(self, scene, position, radius, viewport):
         objects, boxes = scene.get('objects', []), scene.get('colliders', [])
-        source_key = (id(scene), id(objects), len(objects), id(boxes), len(boxes))
+        definitions = scene.get('global_resources', ())
+        source_key = (id(scene), id(objects), len(objects), id(boxes), len(boxes), id(definitions), len(definitions))
         if source_key != self.source_key:
             self.source, self.source_key = scene, source_key
-            self.objects = sorted(objects, key=lambda obj: self.ranks.get(obj.get('category'), 0))
+            self.objects = sorted(combine_resource_markers(objects, definitions),
+                                  key=lambda obj: self.ranks.get(obj.get('category'), 0))
             self.boxes = []
             self.barrier_kinds = {}
             self.cached_keys = set()
@@ -99,10 +103,13 @@ class SceneGeometryCache:
                 x, _, z = obj['position']
                 cell = math.floor(x/policy.COORD_SCENE_CACHE_CELL_SIZE), math.floor(z/policy.COORD_SCENE_CACHE_CELL_SIZE)
                 self.object_cells.setdefault(cell, []).append(i)
+            self.global_indexes = [i for i, obj in enumerate(self.objects) if obj.get('map_global')]
             for box in boxes:
                 coords, bounds = polygon_data(box['polygon'])
                 kind = box.get('category') if box.get('source') == 'verified-solid-collider' else None
                 kind = kind if kind in ('fence', 'handrail') else None
+                if box.get('category') == 'mountain' and box.get('source') == 'verified-main-terrain-mesh':
+                    kind = 'mountain'
                 key = ('collider', coords, kind)
                 if box.get('map_cached'):
                     key = (*key, 'cached')
@@ -118,7 +125,7 @@ class SceneGeometryCache:
                             self.box_cells.setdefault((x, z), []).append(i)
                 if kind:
                     self.barrier_kinds[key] = kind
-            self.valid_keys = self.reference_keys | {object_key(obj) for obj in objects} | {box[0] for box in self.boxes}
+            self.valid_keys = self.reference_keys | {object_key(obj) for obj in self.objects} | {box[0] for box in self.boxes}
             self.selection_key = None
             self.preparations += 1
         selection_key = (source_key, tuple(position) if position is not None else None, radius, viewport)
@@ -131,13 +138,16 @@ class SceneGeometryCache:
                 bounds = viewport.bounds(12)
                 query = (max(bounds[0], x-radius), min(bounds[1], x+radius),
                          max(bounds[2], z-radius), min(bounds[3], z+radius))
-                object_indexes = self.candidates(self.object_cells, query)
+                object_indexes = sorted(set(self.candidates(self.object_cells, query)) | {
+                    i for i in self.global_indexes if bounds[0] <= self.objects[i]['position'][0] <= bounds[1]
+                    and bounds[2] <= self.objects[i]['position'][2] <= bounds[3]})
                 box_indexes = sorted(set(self.candidates(self.box_cells, query)) | set(self.wide_boxes))
                 visible_objects = [obj for i in object_indexes
                                    for obj in (self.objects[i],)
                                    if bounds[0] <= obj['position'][0] <= bounds[1]
                                    and bounds[2] <= obj['position'][2] <= bounds[3]
-                                   and math.hypot(obj['position'][0] - x, obj['position'][2] - z) <= radius]
+                                   and (obj.get('map_global') or
+                                        math.hypot(obj['position'][0] - x, obj['position'][2] - z) <= radius)]
                 visible_boxes = [self.boxes[i] for i in box_indexes for box in (self.boxes[i],) if intersects(box[2], bounds)
                                  and math.hypot(min(max(x, box[2][0]), box[2][1]) - x,
                                                 min(max(z, box[2][2]), box[2][3]) - z) <= radius]

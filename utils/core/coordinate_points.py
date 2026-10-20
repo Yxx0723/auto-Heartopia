@@ -32,6 +32,14 @@ def validate_points(data):
             raise ValueError(f'第 {number} 条点位数据无效，原文件未修改。')
         if 'collect_wait' in point:
             validate_collect_wait(point['collect_wait'])
+        if 'special_resource' in point:
+            target = point['special_resource']
+            if not isinstance(target, dict) or target.get('category') not in ('fluorite', 'roaming_oak') \
+                    or type(target.get('static_id')) is not int or target['static_id'] <= 0:
+                raise ValueError('动态采集目标无效。')
+            count = target.get('press_count', 10)
+            if type(count) is not int or not 1 <= count <= 100:
+                raise ValueError('动态采集连按次数应为1～100次。')
     return data
 
 
@@ -81,6 +89,7 @@ def ordered_waypoints(data):
         raise ValueError('请先保存至少一个点位。')
     return [{'id': point['id'], 'name': point['name'],
              'position': list(point['position']), 'wait': 0.,
+             **({'special_resource': dict(point['special_resource'])} if 'special_resource' in point else {}),
              **({'collect_wait': point['collect_wait']} if 'collect_wait' in point else {})}
             for point in data['points']]
 

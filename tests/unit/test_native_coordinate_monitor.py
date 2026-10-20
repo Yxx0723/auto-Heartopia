@@ -307,6 +307,64 @@ def drawn_object_tags(window):
     return {tag for tag in window.map_cache.visible_tags if tag.startswith('scene-')}
 
 
+def test_map_hover_picks_only_visible_categories_without_changing_routes(tmp_path):
+    window = category_window(tmp_path)
+    window.map_hover = Mock()
+    original = [point.copy() for point in window.saved_points]
+    window.toggle_scene_category('blueberry')
+    targets = window.map_hover.update.call_args.args[1]
+    assert [target.title for target in targets] == ['蓝莓', '路线点 1']
+    assert '平面距离' in targets[0].detail
+    window.scene_state['objects'][0]['map_cached'] = True
+    window.draw()
+    assert '缓存参考' in window.map_hover.update.call_args.args[1][0].detail
+    assert window.saved_points == original
+
+
+def test_hover_motion_is_throttled_without_repainting_the_map(tmp_path):
+    window = category_window(tmp_path)
+    window.map_hover, window.map_hover_job, window.map_pointer = Mock(), None, None
+    window.root.after.return_value = 'hover-pending'
+    for x in range(30):
+        window.map_motion(Mock(x=x, y=100))
+    window.root.after.assert_called_once()
+    window.show_map_hover()
+    window.map_hover.show.assert_called_once_with(29, 100)
+    window.render.assert_not_called()
+    window.map_motion(Mock(x=20, y=30))
+    window.map_leave()
+    assert window.map_hover_job is None and window.map_pointer is None
+    window.root.after_cancel.assert_called_once_with('hover-pending')
+    window.map_hover.hide.assert_called_once()
+
+
+def test_offscreen_active_target_has_indicator_and_remains_in_the_route(tmp_path):
+    window = category_window(tmp_path)
+    position = [5000., 23., 5000.]
+    window.saved_points = [{'id': 1, 'position': position}]
+    window.playback_status = {'state': 'moving', 'waypoint': 1}
+    window.canvas.bbox.return_value = (850, -20, 990, 0)
+    window.draw()
+    assert any(call.kwargs.get('tags') == 'target-indicator'
+               for call in window.canvas.create_text.call_args_list)
+    assert not any(call.kwargs.get('tags') == 'saved-point'
+                   for call in window.canvas.create_rectangle.call_args_list)
+    assert window.saved_points == [{'id': 1, 'position': position}]
+    assert window.map_cache.viewport.x == window.view.position[0]
+
+
+def test_route_overview_uses_the_height_of_a_compact_map(tmp_path):
+    window = category_window(tmp_path)
+    window.canvas.winfo_width.return_value = 600
+    window.canvas.winfo_height.return_value = 200
+    x, y, z = window.view.position
+    window.saved_points = [{'id': 1, 'position': [x, y, z-200]}]
+    window.show_route_overview()
+    window.draw()
+    _, screen_y = window.map_cache.viewport.screen(x, z-200)
+    assert 160 <= screen_y <= 170
+
+
 def test_tree_filter_draws_canopy_and_trunk_and_reuses_cached_items(tmp_path):
     window = category_window(tmp_path)
     window.toggle_scene_category('tree')

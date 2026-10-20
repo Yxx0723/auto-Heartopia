@@ -48,7 +48,7 @@ def test_round_mushroom_is_not_misidentified_as_an_orange():
 def test_prepare_uses_two_observations_and_does_not_click_an_existing_selection():
     menu, window, device = FruitMenu(ROOT/'food_bag_marker.png'), Mock(), Mock()
     window.snapshot.return_value = frame()
-    target = menu.prepare(window, Mock(), Mock(), Mock(), device)
+    target = menu.prepare_visible(window, Mock(), Mock(), Mock(), device)
     assert target['food'] == '苹果'
     device.execute.assert_not_called()
     assert window.snapshot.call_count == 2
@@ -58,7 +58,7 @@ def test_prepare_does_not_consume_when_the_fruit_click_was_not_registered():
     menu, window, device = FruitMenu(ROOT/'food_bag_marker.png'), Mock(), Mock()
     window.snapshot.return_value = frame(selected=False, button=False)
     with pytest.raises(ValueError, match='未确认'):
-        menu.prepare(window, Mock(), Mock(), Mock(), device)
+        menu.prepare_visible(window, Mock(), Mock(), Mock(), device)
     assert [call.args[0]['type'] for call in device.execute.call_args_list] == ['mouse_down', 'mouse_up']
 
 
@@ -80,7 +80,7 @@ def test_closed_backpack_opens_with_b_and_closes_by_its_icon_without_other_keys(
 
     device.execute.side_effect = click
 
-    target = menu.prepare(window, tap, Mock(), Mock(), device)
+    target = menu.prepare_visible(window, tap, Mock(), Mock(), device)
     assert target['food'] == '苹果' and opened[0]
     device.execute.assert_not_called()
     menu.close_menu(window, tap, Mock(), Mock(), device)
@@ -95,7 +95,7 @@ def test_failed_backpack_open_does_not_try_vehicle_keys_or_consume_food():
     menu, window, device, tap = FruitMenu(ROOT/'food_bag_marker.png'), Mock(), Mock(), Mock()
     window.snapshot.return_value = Image.new('RGB', (778, 437), '#306230')
     with pytest.raises(ValueError, match='按 B 后未识别到背包'):
-        menu.prepare(window, tap, Mock(), Mock(), device)
+        menu.prepare_visible(window, tap, Mock(), Mock(), device)
     tap.assert_called_once_with('b')
     device.execute.assert_not_called()
 
@@ -114,6 +114,7 @@ def test_backpack_close_click_dismisses_the_whole_panel_without_keyboard_toggles
     opened = [True]
     menu.locate = Mock(side_effect=lambda picture: {} if opened[0] else None)
     menu.close_target = Mock(return_value={'x': 739.5, 'y': 18.5})
+    window.snapshot.return_value = frame()
 
     def click(event):
         if event['type'] == 'mouse_up':
@@ -132,6 +133,7 @@ def test_backpack_animation_is_allowed_to_finish_without_repeated_clicks():
     remaining = [float('inf')]
     menu.locate = Mock(side_effect=lambda picture: {} if remaining[0] > 0 else None)
     menu.close_target = Mock(return_value={'x': 739.5, 'y': 18.5})
+    window.snapshot.return_value = frame()
     def click(event):
         if event['type'] == 'mouse_up':
             remaining[0] = .45
@@ -198,7 +200,7 @@ def test_hovered_card_already_selected_is_confirmed_without_clicking_the_fruit_a
     menu, window, device, tap = FruitMenu(ROOT/'food_bag_marker.png'), Mock(), Mock(), Mock()
     with Image.open(FIXTURES/'fruit_card_bottom_left.png') as picture:
         window.snapshot.return_value = picture.copy()
-    assert menu.prepare(window, tap, Mock(), Mock(), device)['food'] == '苹果'
+    assert menu.prepare_visible(window, tap, Mock(), Mock(), device)['food'] == '苹果'
     assert window.snapshot.call_count == 2
     tap.assert_not_called()
     device.execute.assert_not_called()

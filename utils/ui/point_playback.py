@@ -11,6 +11,7 @@ from utils.core.coordinate_navigation import LocalNavigator
 from utils.core import thresholds as policy
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.route_path_memory import RoutePathMemory
+from utils.drivers.playback_history import PlaybackHistory, RecordingPosition
 from utils.drivers.point_game_window import PointGameWindow
 from utils.drivers.timeline_hotkeys import PlaybackControls
 from utils.drivers.town_window import TimelineInput
@@ -34,6 +35,8 @@ class PointPlayback:
         self.wall_clock = wall_clock or (lambda: datetime.now().astimezone())
         self.navigation_path = []
         self.path_memory = None
+        self.history = None
+        self.history_root = Path(diagnostics_path).parent.parent/'回放记录' if diagnostics_path is not None else None
         self.diagnostics = PlaybackDiagnostics(diagnostics_path) if diagnostics_path is not None else None
         self.results = queue.Queue(maxsize=1)
         self.result_lock = threading.Lock()
@@ -65,6 +68,11 @@ class PointPlayback:
                       'loop_count': self.loop_count, 'navigation_path': self.navigation_path, **extra}
             if self.diagnostics:
                 self.diagnostics.write(status)
+            if self.history:
+                self.history.event(status)
+                status['history_path'] = str(self.history.path)
+                if self.history.error:
+                    status['message'] += f' · 回放记录写入失败：{self.history.error}'
             self.results.put_nowait(status)
 
     def take_latest(self):
@@ -106,6 +114,14 @@ class PointPlayback:
         self.stop_event.clear()
         self.cycle, self.loop_count = 1, loop_count
         self.navigation_path = []
+        self.history = (PlaybackHistory(self.history_root, deepcopy(data),
+                        Path(route_path).stem if route_path is not None else '未命名路线',
+                        {'start_mode': start_mode, 'loop_count': loop_count,
+                         'auto_navigate': auto_navigate, 'remember_paths': remember_paths,
+                         'auto_repair': auto_repair, 'auto_eat': auto_eat,
+                         'collect_wait_seconds': collect_wait_seconds,
+                         'recovery_attempts': recovery_attempts, 'jump_on_recovery': jump_on_recovery})
+                        if self.history_root is not None else None)
         self.update('playback_wait', f'已就绪：{self.total} 个点 · 循环 {loop_count} 次 · 切回游戏按 F6 开始 · F9 停止')
         self.thread = threading.Thread(target=self._run, args=(deepcopy(data), pid, start_mode,
                                                               recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat),
@@ -138,15 +154,17 @@ class PointPlayback:
                 mode_text += f' · 已记忆 {self.path_memory.count} 段走法'
             self.update('playback_wait', f'{mode_text} · 循环 {loop_count} 次 · 切回游戏按 F6 开始 · F9 停止')
             completed = self.runner(data, size,
-                                     lambda: self.reader_factory(pid, self.profile, hwnd=window.hwnd),
+                                     lambda: self._recording_reader(pid, window.hwnd),
                                      device, window, controls, self.update, clock=self.clock, start_mode=start_mode,
                                      recovery_attempts=recovery_attempts, jump_on_recovery=jump_on_recovery,
                                      collect_wait_seconds=collect_wait_seconds, loop_count=loop_count,
                                      continuous_recovery=True, **navigation)
             finish_message = (('本次点位回放完成' if loop_count == 1 else f'已完成 {loop_count} 轮回放')
                               if completed else '回放已停止，按键已释放')
+            if completed and any('special_resource' in point for point in data.get('points', [])):
+                finish_message = '动态资源连按操作已完成，请核对实际掉落'
             if self.path_memory is not None:
-                finish_message += f' · 已记忆 {self.path_memory.count} 段走法'
+                finish_message += f' · 已更新路线学习 · 已记忆 {self.path_memory.count} 段走法'
             self.update('finished' if completed else 'stopped', finish_message,
                         cycle=loop_count if completed else self.cycle)
         except Exception as exc:
@@ -158,6 +176,12 @@ class PointPlayback:
                         cleanup()
                     except Exception as exc:
                         self.update('error', f'回放清理失败：{exc}')
+            if self.history:
+                self.history.close()
+
+    def _recording_reader(self, pid, hwnd):
+        reader = self.reader_factory(pid, self.profile, hwnd=hwnd)
+        return RecordingPosition(reader, self.history, self.clock.monotonic) if self.history else reader
 
     def stop(self):
         self.stop_event.set()

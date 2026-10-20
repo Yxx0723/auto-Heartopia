@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 
 from utils.vision.repair_box import RepairBoxMenu
+from utils.core import thresholds as policy
 
 
 FRUITS = {'apple': '苹果', 'blueberry': '蓝莓', 'raspberry': '树莓', 'orange': '橘子'}
@@ -25,6 +26,9 @@ class FruitMenu(RepairBoxMenu):
         self.close_icon = read('food_bag_close.png')
         self.eat = read('food_eat_button.png')
         self.category = read('food_category.png')
+        self.search_header = read('food_search_header.png')
+        self.search_results = read('food_search_results.png')
+        self.search_end = read('food_search_end.png')
         self.fruits = {key: read(f'fruit_{key}.png') for key in FRUITS}
         if self.bag.shape[:2] != (28, 55) or self.close_icon.shape[:2] != (21, 21) or self.eat.shape[:2] != (18, 112) \
                 or self.category.shape[:2] != (23, 23) or any(t.shape[:2] != (31, 31) for t in self.fruits.values()):
@@ -74,7 +78,13 @@ class FruitMenu(RepairBoxMenu):
 
     def bag_in(self, frame):
         matches = self.matches(frame, self.bag, self.scales(frame), left=frame.shape[1]//2, minimum=.90)
-        return matches[0] if matches else None
+        if matches:
+            return matches[0]
+        results = self.matches(frame, self.search_results, self.scales(frame), left=frame.shape[1]//2)
+        if results and self.end_search_target(frame):
+            result = results[0]
+            return dict(result, x=frame.shape[1]-55*result['scale'], search_results=True)
+        return None
 
     def locate(self, picture):
         return self.bag_in(self.frame(picture))
@@ -148,7 +158,7 @@ class FruitMenu(RepairBoxMenu):
         cyan = (hsv[:, :, 0] >= 75) & (hsv[:, :, 0] <= 100) & (hsv[:, :, 1] >= 70) & (hsv[:, :, 2] >= 100)
         return bool(np.mean(cyan) >= .65)
 
-    def prepare(self, window, tap, wait, check, device):
+    def prepare_visible(self, window, tap, wait, check, device):
         check()
         picture = window.snapshot()
         if self.locate(picture) is None:
@@ -195,6 +205,118 @@ class FruitMenu(RepairBoxMenu):
             raise ValueError('食用按钮位置不稳定，未食用')
         return second
 
+    def end_search_target(self, frame):
+        targets = self.matches(frame, self.search_end, self.scales(frame),
+                               left=frame.shape[1]//2, top=frame.shape[0]*3//4, minimum=.88)
+        return targets[0] if targets else None
+
+    def search_dialog(self, picture):
+        frame = self.frame(picture)
+        headers = self.matches(frame, self.search_header, self.scales(frame), minimum=.90)
+        targets = []
+        for header in headers:
+            x, y, scale = header['x'], header['y'], header['scale']
+            bx, by = x+118*scale, y+58*scale
+            left, right = round(bx-32*scale), round(bx+32*scale)
+            top, bottom = round(by-11*scale), round(by+11*scale)
+            if left < 0 or top < 0 or right > frame.shape[1] or bottom > frame.shape[0]:
+                continue
+            hsv = cv2.cvtColor(frame[top:bottom, left:right], cv2.COLOR_BGR2HSV)
+            cyan = (hsv[:, :, 0] >= 75) & (hsv[:, :, 0] <= 100) & (hsv[:, :, 1] >= 70)
+            if np.mean(cyan) < .65:
+                continue
+            targets.append(dict(header, x=x-43*scale, y=y+58*scale,
+                                submit={'x': bx, 'y': by},
+                                close={'x': x+171*scale, 'y': y}))
+        if not targets:
+            return None
+        first = targets[0]
+        if any(abs(t['x']-first['x']) > 8 or abs(t['y']-first['y']) > 8 for t in targets):
+            raise ValueError('背包搜索窗口存在歧义')
+        return first
+
+    def stable_dialog(self, window, wait, check):
+        check()
+        first = self.search_dialog(window.snapshot())
+        wait(.12)
+        check()
+        second = self.search_dialog(window.snapshot())
+        if first is None or second is None or abs(first['x']-second['x']) > 3 or abs(first['y']-second['y']) > 3:
+            raise ValueError('背包搜索框未确认，未输入文字')
+        return second
+
+    def open_search(self, window, tap, wait, check, device):
+        check()
+        picture = window.snapshot()
+        if self.search_dialog(picture) is not None:
+            return self.stable_dialog(window, wait, check)
+        frame = self.frame(picture)
+        end = self.end_search_target(frame)
+        if end is not None:
+            self.use(end, device, check, wait)
+            wait(.3)
+            picture = window.snapshot()
+        bag = self.locate(picture)
+        if bag is None:
+            tap(BACKPACK_KEY)
+            wait(.5)
+            check()
+            picture = window.snapshot()
+            bag = self.locate(picture)
+        if bag is None or bag.get('search_results'):
+            raise ValueError('按 B 后未确认完整背包，未打开搜索')
+        target = dict(bag, x=bag['x']-13*bag['scale'])
+        self.use(target, device, check, wait)
+        wait(.3)
+        return self.stable_dialog(window, wait, check)
+
+    def prepare(self, window, tap, wait, check, device):
+        # Search every new meal. Search results may also contain recipes, so a
+        # whitelisted fruit icon, its selected outline and the Eat action are
+        # still mandatory; a query match alone never authorizes consumption.
+        for food in FRUITS.values():
+            dialog = self.open_search(window, tap, wait, check, device)
+            self.use(dialog, device, check, wait)
+            if self.search_dialog(window.snapshot()) is None:
+                raise ValueError('输入前搜索窗口已关闭，未输入文字')
+            check()
+            try:
+                device.execute({'type': 'key_down', 'key': 'ctrl_l'})
+                tap('a')
+            finally:
+                device.execute({'type': 'key_up', 'key': 'ctrl_l'})
+            tap('backspace')
+            device.type_text(food, check, wait)
+            dialog = self.stable_dialog(window, wait, check)
+            self.use(dialog['submit'], device, check, wait)
+            for _ in range(8):
+                wait(.15)
+                check()
+                picture = window.snapshot()
+                if self.search_dialog(picture) is None and self.end_search_target(self.frame(picture)) is not None:
+                    break
+            else:
+                raise ValueError('未确认背包搜索结果，未选择水果')
+            frame = self.frame(picture)
+            bag = self.bag_in(frame)
+            if bag is None:
+                raise ValueError('搜索结果未确认')
+            fruits = [f for f in self.available(frame, bag) if f['food'] == food]
+            if not fruits:
+                continue
+            self.use(fruits[0], device, check, wait)
+            wait(.35)
+            check()
+            first = self.ready(window.snapshot())
+            wait(.12)
+            check()
+            second = self.ready(window.snapshot())
+            if first is None or second is None or first['food'] != food or second['food'] != food \
+                    or abs(first['x']-second['x']) > 3 or abs(first['y']-second['y']) > 3:
+                raise ValueError('搜索后的水果或食用按钮未确认，未食用')
+            return second
+        raise ValueError('搜索后没有可用的苹果、蓝莓、树莓或橘子')
+
     def close_target(self, picture):
         frame = self.frame(picture)
         bag = self.bag_in(frame)
@@ -202,7 +324,7 @@ class FruitMenu(RepairBoxMenu):
             return None
         scale = bag['scale']
         targets = self.matches(frame, self.close_icon, self.scales(frame),
-                               left=max(0, round(bag['x']-30*scale)))
+                               left=max(0, round(bag['x']-30*scale)), minimum=policy.COORD_FOOD_CLOSE_MATCH)
         targets = [t for t in targets if abs(t['x']-bag['x']-13*scale) <= 10*scale
                    and abs(t['y']-bag['y']+28*scale) <= 10*scale]
         if not targets:
@@ -218,8 +340,25 @@ class FruitMenu(RepairBoxMenu):
         # never the native window close control or a guessed screen position.
         check()
         picture = window.snapshot()
-        if self.locate(picture) is None:
+        if self.locate(picture) is None and self.search_dialog(picture) is None:
             return False
+        dialog = self.search_dialog(picture)
+        if dialog is not None:
+            dialog = self.stable_dialog(window, wait, check)
+            self.use(dialog['close'], device, check, wait)
+            wait(.3)
+            check()
+            picture = window.snapshot()
+            if self.search_dialog(picture) is not None:
+                raise ValueError('背包搜索窗口未关闭，未继续移动')
+        end = self.end_search_target(self.frame(picture))
+        if end is not None:
+            self.use(end, device, check, wait)
+            wait(.3)
+            check()
+            picture = window.snapshot()
+            if self.end_search_target(self.frame(picture)) is not None:
+                raise ValueError('背包搜索结果未退出，未继续移动')
         first = self.close_target(picture)
         if first is None:
             raise ValueError('未识别到背包关闭按钮，未点击')

@@ -55,6 +55,11 @@ class WindowsInput:
         flags = (0x8 if scan else 0) | (0x1 if extended else 0) | (0 if down else 0x2)
         self._send(Input(type=1, ki=KeyboardInput(0 if scan else vk, scan, flags, 0, 0)))
 
+    def unicode(self, unit, down):
+        if type(unit) is not int or not 0 <= unit <= 0xffff:
+            raise ValueError('文字输入编码无效')
+        self._send(Input(type=1, ki=KeyboardInput(0, unit, 0x4 | (0 if down else 0x2), 0, 0)))
+
     def mouse(self, flags, dx=0, dy=0, data=0):
         self._send(Input(type=0, mi=MouseInput(dx, dy, data & 0xffffffff, flags, 0, 0)))
 

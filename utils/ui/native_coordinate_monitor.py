@@ -24,13 +24,15 @@ from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
 from utils.ui.scene_map_worker import SceneMapWorker
 from utils.ui.map_draw_cache import MapDrawCache, Viewport, object_key, muted_color
-from utils.ui.map_presentation import MAP_STYLE, draw_grid, draw_chrome, draw_player
+from utils.ui.map_presentation import (MAP_STYLE, draw_grid, draw_chrome, draw_player, chrome_bounds,
+                                      draw_waypoint_labels, draw_target_indicator)
+from utils.ui.map_labels import layout_waypoints, HoverTarget, MapHover, target_indicator
 from utils.drivers.mono_scene import MemorySceneMap
 from utils.core.map_water_reference import MAP_WATER_AREAS, MAP_WATER_ISLANDS
 from utils.core.map_reference_roads import REFERENCE_ROADS
 
 
-COLORS = {'bg': '#101714', 'header': '#151e18', 'card': '#19221d', 'plot': MAP_STYLE['ground'],
+COLORS = {'bg': '#101714', 'card': '#19221d', 'plot': MAP_STYLE['ground'],
           'line': '#2b382f', 'text': '#edf3e8', 'muted': '#9ba99c', 'green': '#cef18b',
           'red': '#f1a19a', 'blue': '#a8c8ee', 'amber': '#efc97b', 'button': '#202c24',
           'shrub': '#365d3e', 'shrub_outline': '#89c880',
@@ -48,14 +50,22 @@ FAUNA_STYLES = {'butterfly': ('#45345b', '#bd91f2'),
                 'bird': ('#26484e', '#6bc9d7'),
                 'animal': ('#58422f', '#e8a775')}
 
+MINERAL_STYLES = {'rock': ('#4d5b63', '#b0bec6'),
+                  'ore': ('#4d5146', '#e2c17d'), 'fluorite': ('#176e77', '#80f5ed')}
+
 MAP_PIXELS_PER_UNIT = 3.  # Default 60-pixel grid spacing represents 20 world units.
 SCENE_RANGE_OPTIONS = (80, 150, 200, 300, 400)
-SCENE_RANKS = {**dict.fromkeys(PLANT_STYLES, 1), **dict.fromkeys(FAUNA_STYLES, 2)}
+SCENE_RANKS = {**dict.fromkeys(PLANT_STYLES, 1), **dict.fromkeys(MINERAL_STYLES, 1),
+               **dict.fromkeys(FAUNA_STYLES, 2), 'roaming_oak': 3}
 
 SCENE_CATEGORIES = {'blueberry': ('蓝莓', COLORS['blueberry_outline']),
                     'raspberry': ('树莓', COLORS['raspberry_outline']),
                     'bush': ('普通灌木', COLORS['shrub_outline']),
                     'tree': ('树木', PLANT_STYLES['tree'][1]),
+                    'rock': ('岩石', MINERAL_STYLES['rock'][1]),
+                    'ore': ('矿石', MINERAL_STYLES['ore'][1]),
+                    'fluorite': ('无暇萤石', '#80f5ed'),
+                    'roaming_oak': ('溜溜橡木', '#e8b574'),
                     'butterfly': ('蝴蝶', FAUNA_STYLES['butterfly'][1]),
                     'insect': ('其他昆虫', FAUNA_STYLES['insect'][1]),
                     'bird': ('鸟类', FAUNA_STYLES['bird'][1]),
@@ -179,6 +189,7 @@ class CoordinateWindow:
         self.scene_state = {'state': 'waiting', 'objects': [], 'colliders': []}
         # None means the explicit "all" mode; an empty set hides every object category.
         self.scene_categories = None
+        self.scene_filters_expanded = False
         self.scene_worker = SceneMapWorker(self.resources / 'profile.json', factory=scene_factory) if scene_factory else None
         self.zoom = 1.
         self.scene_radius = policy.COORD_SCENE_RADIUS
@@ -280,33 +291,13 @@ class CoordinateWindow:
 
     def build(self):
         self.configure_dropdowns()
-        header = tk.Frame(self.root, bg=COLORS['header'], height=60)
-        header.pack(fill='x')
-        brand = self.label(header, '⊙  心动小镇 · 坐标观测台', font=('Microsoft YaHei UI', -16, 'bold'))
-        brand.pack(side='left', padx=12, pady=7)
-        self.button(header, '退出监视器', self.close, small=True).pack(side='right', padx=(8, 12))
-        self.label(header, '原生窗口 · 仅读取', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='right')
         body = self.frame(self.root)
         body.pack(fill='both', expand=True, padx=12, pady=(6, 8))
         body.grid_columnconfigure(0, weight=1)
-        body.grid_rowconfigure(2, weight=1)
-        intro = self.frame(body)
-        intro.grid(row=0, column=0, sticky='ew', pady=(0, 5))
-        title = self.frame(intro)
-        title.pack(side='left')
-        self.label(title, '实时地图', font=('Microsoft YaHei UI', -17, 'bold')).pack(anchor='w')
-        self.label(title, '角色始终居中 · 滚轮缩放', color='muted', font=('Microsoft YaHei UI', -11)).pack(anchor='w', pady=(2, 0))
-        actions = self.frame(intro)
-        actions.pack(side='right', anchor='s', pady=5)
-        self.badge = self.label(actions, '● 正在连接', color='muted', font=('Microsoft YaHei UI', -12))
-        self.badge.pack(side='left', padx=(0, 12))
-        self.pause_button = self.button(actions, '暂停显示', self.pause)
-        self.pause_button.pack(side='left', padx=4)
-        self.copy_button = self.button(actions, '复制 XYZ', self.copy_position)
-        self.copy_button.pack(side='left', padx=(4, 0))
+        body.grid_rowconfigure(0, weight=1)
         workspace = self.frame(body)
         self.workspace = workspace
-        workspace.grid(row=2, column=0, sticky='nsew')
+        workspace.grid(row=0, column=0, sticky='nsew')
         workspace.grid_columnconfigure(0, weight=1)
         workspace.grid_columnconfigure(1, minsize=300)
         workspace.grid_rowconfigure(0, weight=1)
@@ -317,7 +308,9 @@ class CoordinateWindow:
         plotcard.grid_rowconfigure(2, weight=1)
         plothead = self.frame(plotcard, card=True)
         plothead.grid(row=0, column=0, sticky='ew')
-        self.label(plothead, '地图 / X · Z', font=('Microsoft YaHei UI', -12, 'bold')).pack(side='left', padx=6, pady=5)
+        self.scene_filters_toggle = self.button(plothead, '分类筛选 ▾', self.toggle_scene_filters, small=True)
+        self.scene_filters_toggle.configure(padx=6, font=('Microsoft YaHei UI', -11))
+        self.scene_filters_toggle.pack(side='left', padx=3, pady=4)
         self.map_expand_button = self.button(plothead, '大地图', self.toggle_map_size, small=True)
         self.map_expand_button.configure(padx=6, font=('Microsoft YaHei UI', -11))
         self.map_expand_button.pack(side='right', padx=1, pady=4)
@@ -329,15 +322,20 @@ class CoordinateWindow:
             button = self.button(plothead, text, action, small=True)
             button.configure(padx=4, font=('Microsoft YaHei UI', -11))
             button.pack(side='right', padx=1, pady=4)
-        filters = self.frame(plotcard, card=True, border=False)
-        filters.grid(row=1, column=0, sticky='ew', padx=6, pady=(3, 3))
-        self.build_scene_filters(filters)
         self.canvas = tk.Canvas(plotcard, bg=COLORS['plot'], bd=0, highlightthickness=0, height=270)
         self.map_cache = MapDrawCache(self.canvas, MAP_WATER_AREAS, SCENE_RANKS, roads=REFERENCE_ROADS,
                                      water_islands=MAP_WATER_ISLANDS)
+        self.map_hover, self.map_hover_job = MapHover(self.canvas), None
+        self.map_pointer = None
         self.canvas.grid(row=2, column=0, sticky='nsew')
         self.canvas.bind('<Configure>', self.map_configured)
         self.canvas.bind('<MouseWheel>', self.zoom_map)
+        self.canvas.bind('<Motion>', self.map_motion)
+        self.canvas.bind('<Leave>', self.map_leave)
+        self.scene_filters_frame = self.frame(self.canvas, card=True)
+        self.build_scene_filters(self.scene_filters_frame)
+        self.root.bind('<Button-1>', self.dismiss_scene_filters, add='+')
+        self.root.bind('<Escape>', self.escape_scene_filters, add='+')
         plotfoot = self.frame(plotcard, card=True)
         plotfoot.grid(row=3, column=0, sticky='ew')
         self.field(plotfoot, 'points', '轨迹点 0', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left', padx=8, pady=5)
@@ -380,7 +378,7 @@ class CoordinateWindow:
         sidebar.grid(row=0, column=1, rowspan=2, sticky='nsew')
         self.build_sidebar(sidebar)
         bottom = self.frame(body)
-        bottom.grid(row=3, column=0, sticky='ew', pady=(8, 0))
+        bottom.grid(row=1, column=0, sticky='ew', pady=(8, 0))
         toolbar = self.frame(bottom)
         toolbar.pack(fill='x')
         self.label(toolbar, '起点方式', color='muted', font=('Microsoft YaHei UI', -12)).pack(
@@ -450,15 +448,14 @@ class CoordinateWindow:
                                          color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1)
         self.playback_label.pack(fill='x', pady=(6, 0))
         footer = self.frame(body)
-        footer.grid(row=4, column=0, sticky='ew', pady=(5, 0))
+        footer.grid(row=2, column=0, sticky='ew', pady=(5, 0))
         self.label(footer, '点位自动保存到当前路线；各条路线保存在程序旁的「点位」文件夹。', color='muted', font=('Microsoft YaHei UI', -10)).pack(side='left')
         self.hint = self.label(footer, '切换场景后请等待重新连接', color='muted', font=('Microsoft YaHei UI', -10))
         self.hint.pack(side='right')
-        self.copy_button.configure(state='disabled')
         self.save_point_button.configure(state='disabled')
         self.play_button.configure(state='disabled')
         self.stop_button.configure(state='disabled')
-        self.map_expand_widgets = (intro, sidebar, pointcard, bottom, footer)
+        self.map_expand_widgets = (sidebar, pointcard, bottom, footer)
         self.expanded_status = self.label(plotcard, textvariable=self.fields['playback'],
             color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1)
         self.expanded_status.grid(row=4, column=0, sticky='ew', padx=14, pady=6)
@@ -513,6 +510,18 @@ class CoordinateWindow:
         controls = self.frame(inner, card=True, border=False)
         controls.grid(row=9, column=0, columnspan=2, sticky='ew')
         self.button(controls, '重新连接', self.reconnect, small=True).pack(fill='x')
+        specialbar = self.frame(controls, card=True, border=False)
+        specialbar.pack(fill='x', pady=(5, 0))
+        self.button(specialbar, '采集萤石', lambda: self.start_special_gather('fluorite'), small=True).pack(
+            side='left', fill='x', expand=True, padx=(0, 4))
+        self.button(specialbar, '采集橡木', lambda: self.start_special_gather('roaming_oak'), small=True).pack(
+            side='left', fill='x', expand=True)
+        pressbar = self.frame(controls, card=True, border=False)
+        pressbar.pack(fill='x', pady=(3, 0))
+        self.label(pressbar, '连按 F', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left')
+        self.special_press_var = tk.StringVar(self.root, value='10')
+        self.dropdown(pressbar, self.special_press_var, ['3', '5', '10', '20', '30'], width=4).pack(side='left', padx=6)
+        self.label(pressbar, '次', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left')
         self.frame(inner, card=True, height=1).grid(row=10, column=0, columnspan=2, sticky='ew', pady=(14, 8))
         maphead = self.frame(inner, card=True, border=False)
         maphead.grid(row=11, column=0, columnspan=2, sticky='ew')
@@ -528,7 +537,7 @@ class CoordinateWindow:
         switches = self.frame(inner, card=True, border=False)
         switches.grid(row=13, column=0, columnspan=2, sticky='ew')
         for index, (text, variable) in enumerate([
-                ('场景物体', self.scene_objects_var), ('碰撞轮廓', self.scene_colliders_var),
+                ('场景物体', self.scene_objects_var), ('山体与碰撞', self.scene_colliders_var),
                 ('河道与湖泊', self.scene_water_var), ('参考道路', self.scene_roads_var),
                 ('围栏／护栏', self.scene_barriers_var)]):
             tk.Checkbutton(switches, text=text, variable=variable, command=self.scene_layer_changed, bg=COLORS['card'],
@@ -643,18 +652,47 @@ class CoordinateWindow:
         self.scene_water_var = tk.BooleanVar(self.root, True)
         self.scene_roads_var = tk.BooleanVar(self.root, True)
         self.scene_barriers_var = tk.BooleanVar(self.root, True)
-        for column in range(6):
+        for column in range(7):
             parent.grid_columnconfigure(column, weight=1, uniform='category')
         self.scene_all_button = self.button(parent, '全部分类', lambda: self.set_scene_categories(True), small=True)
         self.scene_all_button.grid(row=0, column=0, sticky='nsew', padx=2, pady=2)
         self.scene_none_button = self.button(parent, '清空显示', lambda: self.set_scene_categories(False), small=True)
         self.scene_none_button.grid(row=1, column=0, sticky='nsew', padx=2, pady=2)
+        for button in (self.scene_all_button, self.scene_none_button):
+            button.configure(pady=2, font=('Microsoft YaHei UI', -11))
         self.scene_filter_buttons = {}
         for index, (category, (label, _)) in enumerate(SCENE_CATEGORIES.items()):
             button = self.button(parent, label, lambda category=category: self.toggle_scene_category(category), small=True)
-            button.configure(padx=3, pady=5, font=('Microsoft YaHei UI', -11))
-            button.grid(row=index // 5, column=index % 5 + 1, sticky='nsew', padx=2, pady=2)
+            button.configure(padx=3, pady=2, font=('Microsoft YaHei UI', -11))
+            button.grid(row=index // 6, column=index % 6 + 1, sticky='nsew', padx=2, pady=2)
             self.scene_filter_buttons[category] = button
+        self.global_minerals_button = self.button(parent, '岩石 / 矿石全览', self.show_mineral_overview, small=True)
+        self.global_minerals_button.grid(row=2, column=0, columnspan=7, sticky='ew', padx=2, pady=2)
+
+    def toggle_scene_filters(self):
+        self.scene_filters_expanded = not self.scene_filters_expanded
+        if self.scene_filters_expanded:
+            self.map_leave()
+            self.scene_filters_frame.place(x=6, y=6, relwidth=1., width=-12)
+            self.scene_filters_frame.lift()
+        else:
+            self.scene_filters_frame.place_forget()
+        self.update_scene_filter_controls()
+
+    def dismiss_scene_filters(self, event):
+        if not self.scene_filters_expanded:
+            return
+        widget = event.widget
+        while widget is not None:
+            if widget in (self.scene_filters_frame, self.scene_filters_toggle):
+                return
+            widget = widget.master
+        self.toggle_scene_filters()
+
+    def escape_scene_filters(self, event=None):
+        if self.scene_filters_expanded:
+            self.toggle_scene_filters()
+            return 'break'
 
     def update_scene_filter_controls(self):
         visible = self.scene_objects_var.get()
@@ -674,6 +712,11 @@ class CoordinateWindow:
                 '全部分类 · 点击筛选' if all_selected else
                 '已隐藏分类 · 点击显示' if none_selected else
                 f'已选 {len(self.scene_categories)} 类 · 可多选')
+        if hasattr(self, 'scene_filters_toggle'):
+            self.scene_filters_toggle.configure(text='收起分类 ▴' if self.scene_filters_expanded else '分类筛选 ▾')
+            if not self.scene_filters_expanded:
+                hint = ('物体已关闭' if not visible else '全部分类' if all_selected else
+                        '分类已隐藏' if none_selected else f'已选 {len(self.scene_categories)} 类')
         self.scene_filter_hint.configure(text=hint)
 
     def scene_layer_changed(self):
@@ -762,7 +805,6 @@ class CoordinateWindow:
         configure_changed(self.loop_count_spin, state='disabled' if playing else 'normal')
         configure_changed(self.point_wait_button, state='normal' if self.saved_points and not playing and not self.points_error else 'disabled')
         configure_changed(self.clear_points_button, state='normal' if self.saved_points and not playing and not self.points_error else 'disabled')
-        configure_changed(self.copy_button, state='normal' if live else 'disabled')
         configure_changed(self.save_point_button, state='normal' if live and not playing else 'disabled')
         configure_changed(self.play_button, state='normal' if live and self.saved_points and not playing and not self.points_error else 'disabled')
         configure_changed(self.stop_button, state='normal' if playing else 'disabled')
@@ -786,19 +828,16 @@ class CoordinateWindow:
         self.fields['points'].set(f'轨迹点 {len(view.trail)}')
         self.fields['speed'].set(f'平面速度 {view.speed:.2f} 单位/秒' if view.speed is not None else '平面速度 — 单位/秒')
         if view.paused:
-            badge, color, message = '● 已暂停', 'muted', '显示已暂停，当前为最后一次读数。'
+            color, message = 'muted', '显示已暂停，当前为最后一次读数。'
             self.fields['freshness'].set('已暂停 · 最后读数')
         elif live:
-            badge, color = '● 实时连接', 'green'
+            color = 'green'
             message = view.notice or '角色坐标读取正常。切回游戏走动即可观察变化。'
             self.fields['freshness'].set('实时读取中')
         else:
-            names = {'waiting': '等待游戏', 'connecting': '正在连接', 'error': '无法连接', 'disconnected': '连接中断'}
-            badge = '● ' + names.get(status.get('state'), '等待连接')
             color = 'muted' if status.get('state') in ('waiting', 'connecting') else 'red'
             message = status.get('message', '没有实时坐标，请重新连接。')
             self.fields['freshness'].set('没有实时数据')
-        configure_changed(self.badge, text=badge, fg=COLORS[color])
         configure_changed(self.message, text=user_feedback(message), fg=COLORS[color])
         if view.position is not None:
             stamp = status.get('sample_at')
@@ -812,17 +851,43 @@ class CoordinateWindow:
         world_text = '路边碰撞已接入' if scene.get('world_state') == 'ready' else '路边碰撞更新中'
         radius = getattr(self, 'scene_radius', policy.COORD_SCENE_RADIUS)
         cached = scene.get('display_cache', {}).get('cached_items', 0)
-        text = (f'物体 {len(scene["objects"])} · 碰撞 {len(scene["colliders"])}\n{barrier_text} · {world_text}\n显示 {radius:g} 单位 · 缓存参考 {cached}'
+        terrain_text = (f' · 山体边界 {stats.get("terrain_walls", 0)} 段'
+                        if scene.get('terrain_state') == 'ready' else '')
+        text = (f'物体 {len(scene["objects"])} · 碰撞 {len(scene["colliders"])}\n{barrier_text} · {world_text}{terrain_text}\n显示 {radius:g} 单位 · 缓存参考 {cached}'
                 if scene['state'] == 'ready' else '正在读取场景…' if scene['state'] == 'loading'
                 else scene.get('message', '进入角色后自动读取场景'))
+        if scene.get('global_resource_state') == 'ready':
+            counts = scene.get('global_resource_counts', {})
+            text += f'\n全图岩石 {counts.get("rock", 0)} · 矿石 {counts.get("ore", 0)}'
         configure_changed(self.scene_status, text=text)
+        if hasattr(self, 'global_minerals_button'):
+            configure_changed(self.global_minerals_button,
+                              state='normal' if scene.get('global_resource_state') == 'ready' else 'disabled')
         self.render_tool_durability()
         self.render_stamina()
         self.draw_if_changed()
 
     @staticmethod
     def draw_scene_symbol(canvas, x, z, category):
-        if category == 'tree':
+        if category in MINERAL_STYLES:
+            fill, outline = MINERAL_STYLES[category]
+            tag = 'scene-'+category
+            canvas.create_polygon(x-7, z+4, x-6, z-2, x-2, z-6, x+3, z-5,
+                                  x+7, z, x+6, z+5, x-2, z+6,
+                                  fill=fill, outline=outline, width=1, tags=tag)
+            canvas.create_line(x-6, z-2, x, z, x+3, z-5, fill=outline, width=1, tags=tag)
+            canvas.create_line(x, z, x+1, z+5, fill=outline, width=1, tags=tag)
+            if category in ('ore', 'fluorite'):
+                canvas.create_polygon(x+1, z-1, x+2, z-8, x+5, z-10, x+7, z-6,
+                                      x+5, z, fill='#8fd2dd', outline='#d1f0df', width=1, tags=tag)
+                canvas.create_line(x-4, z+3, x-2, z+1, x, z+2, fill='#f2d48a', width=1.5, tags=tag)
+        elif category == 'roaming_oak':
+            tag = 'scene-roaming_oak'
+            canvas.create_line(x, z-2, x, z+7, fill='#d0a278', width=5, tags=tag)
+            canvas.create_oval(x-8, z-12, x+8, z+1, fill='#245e47', outline='#e8b574', width=2, tags=tag)
+            canvas.create_line(x-5, z+6, x-8, z+8, fill='#e8b574', width=2, tags=tag)
+            canvas.create_line(x+3, z+6, x+7, z+8, fill='#e8b574', width=2, tags=tag)
+        elif category == 'tree':
             fill, outline = PLANT_STYLES['tree']
             canvas.create_oval(x-6, z+3, x+7, z+7, fill='#101e17', outline='', tags='scene-tree')
             canvas.create_line(x, z-2, x, z+6, fill='#c99b6c', width=2, tags='scene-tree')
@@ -891,15 +956,20 @@ class CoordinateWindow:
         if self.map_view == 'range':
             radius = getattr(self, 'scene_radius', policy.COORD_SCENE_RADIUS)
             scale = min(max(1., w-48), max(1., h-64)) / (2*radius) * self.zoom
-        elif self.map_view == 'route':
-            route_points = [(p['position'][0], p['position'][2]) for p in self.saved_points]
-            route_points.extend((p[0], p[2]) for p in navigation_path)
+        elif self.map_view in ('route', 'minerals'):
+            if self.map_view == 'minerals':
+                mineral_points = self.scene_state.get('global_resources', []) or [
+                    obj for obj in self.scene_state.get('objects', []) if obj.get('category') in ('rock', 'ore')]
+                route_points = [(p['position'][0], p['position'][2]) for p in mineral_points]
+            else:
+                route_points = [(p['position'][0], p['position'][2]) for p in self.saved_points]
+                route_points.extend((p[0], p[2]) for p in navigation_path)
             if view.position is not None:
                 route_points.append((cx, cz))
             route_points = route_points or points or [(cx, cz)]
             dx = max(5., max(abs(x - cx) for x, _ in route_points))
             dz = max(5., max(abs(z - cz) for _, z in route_points))
-            scale = min(max(1., w - 96) / (2 * dx), max(1., h - 128) / (2 * dz)) * self.zoom
+            scale = min(max(1., w - 76) / (2 * dx), max(1., h - 76) / (2 * dz)) * self.zoom
         else:
             # Stable local detail: far routes, old trails and large colliders
             # must not keep shrinking the player's immediate surroundings.
@@ -941,7 +1011,11 @@ class CoordinateWindow:
         for key, coords, _ in scene_boxes:
             kind = self.map_cache.geometry.barrier_kinds.get(key)
             cached = key in self.map_cache.geometry.cached_keys
-            if kind:
+            if kind == 'mountain':
+                if self.scene_colliders_var.get():
+                    self.map_cache.polygon(key, coords, -1, fill='', outline='#bb9874', width=2,
+                                           tags=('scene-mountain', 'scene-terrain'))
+            elif kind:
                 if self.scene_barriers_var.get():
                     color = muted_color(MAP_STYLE[kind]) if cached else MAP_STYLE[kind]
                     self.map_cache.barrier(key, coords, color, kind)
@@ -967,49 +1041,75 @@ class CoordinateWindow:
         if len(coords) >= 4:
             canvas.create_line(*coords, fill=MAP_STYLE['trail'], width=2, tags='walk-trail')
             canvas.create_line(*coords[-64:], fill='#acd7a2', width=2, tags='walk-trail-recent')
+        saved_line = [value for point in self.saved_points
+                      for value in (px(point['position'][0]), pz(point['position'][2]))]
+        if len(saved_line) >= 4:
+            canvas.create_line(*saved_line, fill='#172934', width=4, tags='saved-route-edge')
+            canvas.create_line(*saved_line, fill=MAP_STYLE['route_line'], width=1.5, dash=(5, 5), tags='saved-route')
         if navigation_path and view.position is not None:
             planned = [v for p in [view.position, *navigation_path] for v in (px(p[0]), pz(p[2]))]
             canvas.create_line(*planned, fill='#102a29', width=6, tags='navigation-path-edge')
             canvas.create_line(*planned, fill=MAP_STYLE['navigation'], width=2.5, dash=(7, 4),
                                arrow='last', arrowshape=(8, 10, 4), tags='navigation-path')
-        saved_line = [value for point in self.saved_points
-                      for value in (px(point['position'][0]), pz(point['position'][2]))]
-        if len(saved_line) >= 4:
-            canvas.create_line(*saved_line, fill='#172934', width=4, tags='saved-route-edge')
-            canvas.create_line(*saved_line, fill=MAP_STYLE['route'], width=1.5, dash=(5, 5), tags='saved-route')
-        for index, point in enumerate(self.saved_points, 1):
-            x, y = px(point['position'][0]), pz(point['position'][2])
-            active = self.playback_status.get('waypoint') == index
-            canvas.create_rectangle(x - 8, y - 8, x + 8, y + 8,
-                                    fill='#4a6940' if active else '#193849',
-                                    outline=MAP_STYLE['player' if active else 'route'], width=1.5, tags='saved-point')
-            canvas.create_text(x, y, text=str(point['id']), fill='#edf5e6',
-                               font=('Consolas', -11, 'bold'), tags='saved-point-label')
+        active = self.playback_status.get('waypoint') if self.playback_status.get('state') not in (
+            'idle', 'finished', 'stopped', 'error') else None
+        labels = layout_waypoints(self.saved_points, viewport, active, chrome_bounds(viewport, step))
+        draw_waypoint_labels(canvas, viewport, self.saved_points, labels)
         draw_chrome(canvas, viewport, step, self.map_view == 'route', self.scene_roads_var.get(),
-                    heading_known=view.heading is not None)
+                    heading_known=view.heading is not None, resource_view=self.map_view == 'minerals')
         if view.position is not None:
+            if isinstance(active, int) and 1 <= active <= len(self.saved_points):
+                indicator = target_indicator(viewport, self.saved_points[active-1]['position'])
+                if indicator:
+                    draw_target_indicator(canvas, viewport, indicator, self.saved_points[active-1]['id'])
             x, y = px(view.position[0]), pz(view.position[2])
             draw_player(canvas, x, y, view.trail, view.paused, direction=view.heading)
         elif not view.trail and not self.saved_points:
             canvas.create_text(w / 2, h / 2, text='等待读取角色位置\n进入游戏后自动连接', fill=COLORS['muted'],
                                font=('Microsoft YaHei UI', -13), justify='center')
+        if hasattr(self, 'map_hover'):
+            targets = []
+            for obj in scene_objects:
+                position = obj['position']
+                name = SCENE_CATEGORIES.get(obj.get('category'), SCENE_CATEGORIES['other'])[0]
+                detail = ('缓存参考 · ' if obj.get('map_cached') else '') + self.map_distance(position)
+                if obj.get('map_definition'):
+                    detail = '全图资源位置 · '+self.map_distance(position)+'\n资源定义，不表示当前可采集状态'
+                targets.append(HoverTarget(px(position[0]), pz(position[2]), name, detail))
+            for label in labels:
+                ids = '/'.join(str(self.saved_points[i-1]['id']) for i in label['indexes'])
+                title = '路线点 '+(ids if len(ids) <= 36 else ids[:33]+'…')
+                point = self.saved_points[(active if active in label['indexes'] else label['indexes'][0])-1]
+                detail = f'{point.get("name", "采集点")} · '+self.map_distance(point['position'])
+                if len(label['indexes']) > 1:
+                    detail += f'\n共 {len(label["indexes"])} 个重叠点 · 按原顺序采集'
+                x, y = label['anchor']
+                targets.append(HoverTarget(x, y, title, detail, label['rect']))
+            self.map_hover.update(viewport, targets)
 
-    def pause(self):
-        paused = not self.view.paused
-        if paused and self.playback.active:
-            self.stop_playback()
-        self.worker.set_paused(paused)
-        self.view.set_paused(paused)
-        self.pause_button.configure(text='继续显示' if paused else '暂停显示')
-        self.render()
+    def map_distance(self, position):
+        current = self.view.position
+        if current is None:
+            return '等待角色坐标'
+        distance = math.hypot(position[0]-current[0], position[2]-current[2])
+        return f'平面距离 {distance:.1f} 单位'
 
-    def copy_position(self):
-        if self.view.position is None or self.view.paused:
-            return
-        text = '\n'.join(f'{axis} = {value:.6f}' for axis, value in zip('XYZ', self.view.position))
-        self.root.clipboard_clear()
-        self.root.clipboard_append(text)
-        self.hint.configure(text='XYZ 坐标已复制')
+    def map_motion(self, event):
+        self.map_pointer = (event.x, event.y)
+        if self.map_hover_job is None:
+            self.map_hover_job = self.root.after(70, self.show_map_hover)
+
+    def show_map_hover(self):
+        self.map_hover_job = None
+        if self.map_pointer is not None and not self.closed:
+            self.map_hover.show(*self.map_pointer)
+
+    def map_leave(self, event=None):
+        self.map_pointer = None
+        if self.map_hover_job is not None:
+            self.root.after_cancel(self.map_hover_job)
+            self.map_hover_job = None
+        self.map_hover.hide()
 
     def clear_trail(self):
         self.view.clear_trail()
@@ -1154,6 +1254,35 @@ class CoordinateWindow:
             self.route_var.set(self.route_name)
             messagebox.showerror(titles[action] + '失败', str(exc), parent=self.root)
 
+    def start_special_gather(self, category):
+        try:
+            self.view.point_snapshot(self.clock())
+            scene = self.navigation_scene(self.view.status.get('pid')) or {}
+            matches = [obj for obj in scene.get('objects', [])
+                       if obj.get('category') == category and obj.get('map_dynamic') is True
+                       and not obj.get('map_cached') and type(obj.get('resource_available')) is int
+                       and obj['resource_available'] > 0]
+            name = SCENE_CATEGORIES[category][0]
+            if scene.get('state') != 'ready' or len(matches) != 1:
+                raise ValueError(f'当前未唯一识别到可采集的{name}。请靠近当天资源后重试；'
+                                 '未加载区域不使用旧坐标，也不会当作全图没有该资源。')
+            target = matches[0]
+            stamp = self.wall_clock().isoformat(timespec='milliseconds')
+            data = {'schema': 'coordinate-points-v1', 'points': [{
+                'id': 1, 'name': name, 'position': list(target['position']),
+                'sample_at': stamp, 'saved_at': stamp,
+                'special_resource': {'category': category, 'static_id': target['resource_static_id'],
+                                     'press_count': int(self.special_press_var.get())}}]}
+            self.playback.start(data, self.view.status.get('pid'),
+                recovery_attempts=int(self.recovery_count_var.get()), jump_on_recovery=self.recovery_jump_var.get(),
+                collect_wait_seconds=0., loop_count=1, auto_navigate=True,
+                auto_repair=self.repair_auto_var.get(), auto_eat=self.food_auto_var.get(),
+                route_path=self.point_store.path.parent/f'动态采集-{name}.json', remember_paths=False)
+            self.playback_status = {'state': 'playback_wait', 'message': f'{name}动态采集已就绪 · 切回游戏按 F6 · F9停止'}
+            self.render()
+        except (OSError, ValueError) as exc:
+            messagebox.showerror('无法开始动态采集', str(exc), parent=self.root)
+
     def start_playback(self):
         try:
             self.view.point_snapshot(self.clock())
@@ -1262,6 +1391,7 @@ class CoordinateWindow:
                 len(trail), point_key(trail[0]) if trail else None, point_key(trail[-1]) if trail else None,
                 tuple((p['id'], tuple(p['position'])) for p in self.saved_points),
                 id(scene), id(scene.get('objects')), id(scene.get('colliders')),
+                id(scene.get('global_resources')), len(scene.get('global_resources', ())),
                 tuple(tuple(p) for p in self.playback_status.get('navigation_path', [])),
                 self.playback_status.get('waypoint'), self.map_view, self.zoom, self.scene_radius,
                 None if self.scene_categories is None else frozenset(self.scene_categories),
@@ -1296,6 +1426,15 @@ class CoordinateWindow:
         self.map_view = 'route' if self.saved_points else 'nearby'
         self.set_zoom(1.)
 
+    def show_mineral_overview(self):
+        self.scene_categories = {'rock', 'ore'}
+        self.scene_objects_var.set(True)
+        if getattr(self, 'scene_filters_expanded', False):
+            self.toggle_scene_filters()
+        self.update_scene_filter_controls()
+        self.map_view = 'minerals'
+        self.set_zoom(1.)
+
     def toggle_map_size(self):
         self.map_expanded = not self.map_expanded
         for widget in self.map_expand_widgets:
@@ -1317,7 +1456,6 @@ class CoordinateWindow:
         self.worker.take_latest()
         self.view.set_paused(False)
         self.view.invalidate('正在重新连接游戏…')
-        self.pause_button.configure(text='暂停显示')
         self.worker.reconnect()
         self.render()
 
@@ -1339,6 +1477,8 @@ class CoordinateWindow:
             return
         self.closed = True
         self.root.after_cancel(self.timer)
+        if getattr(self, 'map_hover_job', None) is not None:
+            self.root.after_cancel(self.map_hover_job)
         if self.draw_job is not None:
             self.root.after_cancel(self.draw_job)
         self.playback.close()

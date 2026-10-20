@@ -153,3 +153,87 @@ def test_river_crossing_walk_is_saved_and_reused_with_current_water_checks(tmp_p
         assert distance(game.read(), target) <= .3
         assert sum(e == {'type': 'key_down', 'key': 'f'} for _, e in game.events) == 1
         assert not game.keys and game.closed
+
+
+def test_continuous_learning_keeps_faster_previous_walk_and_counts_every_success(tmp_path):
+    memory = RoutePathMemory(tmp_path / 'route.json', manual_points([(0, 0, 8)]))
+    direct = trace()
+    detour = [[0., 0., 0.], [4., 0., 0.], [4., 0., 4.], [4., 0., 8.], [0., 0., 8.]]
+    assert memory.remember(0, direct, 3.)
+    assert memory.remember(0, detour, 9.)
+    assert memory.lookup(0, (0, 0, 0)) == [tuple(p) for p in direct]
+    assert memory.remember(0, direct, 4.)
+    loaded = RoutePathMemory(tmp_path / 'route.json', manual_points([(0, 0, 8)]))
+    stats = loaded.statistics[loaded._identity(direct)]
+    assert stats['successes'] == 2 and stats['best_seconds'] == 3.
+    assert len(loaded.legs['0']) == 2
+    assert loaded.learning_summary['0']['completed_walks'] == 3
+
+
+def test_longer_but_measured_faster_successful_corridor_can_win(tmp_path):
+    memory = RoutePathMemory(tmp_path / 'route.json', manual_points([(0, 0, 8)]))
+    direct = trace()
+    detour = [[0., 0., 0.], [4., 0., 0.], [4., 0., 4.], [4., 0., 8.], [0., 0., 8.]]
+    assert memory.remember(0, direct, 20.)
+    assert memory.remember(0, detour, 8.)
+    assert memory.lookup(0, (0, 0, 0))[1] == (4., 0., 0.)
+
+
+def test_collect_wait_is_not_counted_as_travel_time(tmp_path):
+    data = manual_points([(0, 0, 8)])
+    memory = RoutePathMemory(tmp_path / 'route.json', data)
+    game = NavigationGame()
+    nav = LocalNavigator(lambda: scene(), clock=game.monotonic, water_areas=(), path_memory=memory)
+    assert drive_points(data, game.size(), lambda: game, game, game, game, lambda *a, **kw: None,
+                        clock=game, navigator=nav, collect_wait_seconds=20.)
+    record = next(iter(memory.statistics.values()))
+    assert 0 < record['best_seconds'] < 20.
+
+
+def test_legacy_geometry_survives_first_learning_update(tmp_path):
+    memory = RoutePathMemory(tmp_path / 'route.json', manual_points([(0, 0, 8)]))
+    memory.path.parent.mkdir()
+    memory.path.write_text(json.dumps({'schema': memory.schema, 'route_fingerprint': memory.fingerprint,
+                                      'legs': {'0': [trace()]}}), encoding='utf-8')
+    loaded = RoutePathMemory(tmp_path / 'route.json', manual_points([(0, 0, 8)]))
+    assert loaded.lookup(0, (0, 0, 0))
+    assert loaded.remember(0, trace(), 3.)
+    assert loaded.count == 1 and len(loaded.legs['0']) == 1
+
+
+def test_blocked_corridor_is_demoted_when_alternative_finishes(tmp_path):
+    data = manual_points([(0, 0, 8)])
+    memory = RoutePathMemory(tmp_path / 'route.json', data)
+    direct = trace()
+    detour = [[0., 0., 0.], [4., 0., 0.], [4., 0., 4.], [4., 0., 8.], [0., 0., 8.]]
+    assert memory.remember(0, direct, 3.)
+    assert memory.lookup(0, (0, 0, 0))
+    memory.reject_selected()
+    assert memory.remember(0, detour, 5.)
+    loaded = RoutePathMemory(tmp_path / 'route.json', data)
+    assert loaded.lookup(0, (0, 0, 0))[1] == (4., 0., 0.)
+    assert loaded.statistics[loaded._identity(direct)]['blocked'] == 1
+
+
+def test_pause_time_is_excluded_from_learned_duration(tmp_path):
+    data = manual_points([(0, 0, 8)])
+    durations = []
+    for paused in (False, True):
+        memory = RoutePathMemory(tmp_path / ('paused.json' if paused else 'normal.json'), data)
+        game = NavigationGame()
+        if paused:
+            game.pause_at, game.resume_at = 1., 11.
+        assert run_walk(game, data, memory, scene())[0]
+        durations.append(next(iter(memory.statistics.values()))['best_seconds'])
+    assert abs(durations[0] - durations[1]) < 1.
+
+
+def test_new_detours_do_not_evict_the_best_measured_corridor(tmp_path):
+    memory = RoutePathMemory(tmp_path / 'route.json', manual_points([(0, 0, 8)]))
+    assert memory.remember(0, trace(), 2.)
+    for x in (1., 2., 3., 4., 5.):
+        path = [[0., 0., 0.], [x, 0., 0.], [x, 0., 4.], [x, 0., 8.], [0., 0., 8.]]
+        assert memory.remember(0, path, 8. + x)
+    assert len(memory.legs['0']) == 3
+    assert memory.lookup(0, (0, 0, 0)) == [tuple(p) for p in trace()]
+    assert memory.learning_summary['0']['completed_walks'] == 6

@@ -274,7 +274,7 @@ def test_tree_identity_requires_exact_component_and_stable_entity_membership(nam
             r.write(components + 76, struct.pack('<i', 1))
         return value
     scene.meta = SceneMetadata(read, r.domain)
-    assert scene.object_category(owner, scene.meta.obj(owner)) == ('other' if problem else 'tree')
+    assert scene.object_category(owner, scene.meta.obj(owner)) == ('other' if problem or name == 'CollectableAdvancedTreeComponent' else 'tree')
 
 
 def test_conflicting_tree_and_bush_components_are_not_classified_as_either_plant():

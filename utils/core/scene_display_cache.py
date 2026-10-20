@@ -65,7 +65,8 @@ class SceneDisplayCache:
                 # Only the reader can establish a stationary landmark's identity.
                 # Animals, unknown entities and home-built colliders stay live.
                 eligible = item.get('map_static') is True and identity and (
-                    kind == 'colliders' or item.get('category') in ('tree', 'bush', 'blueberry', 'raspberry', 'shrub'))
+                    kind == 'colliders' or item.get('category') in (
+                        'tree', 'bush', 'blueberry', 'raspberry', 'shrub', 'rock', 'ore'))
                 bounds = item_bounds(item, kind) if eligible else None
                 if bounds is None:
                     live[kind].append(item)

@@ -38,6 +38,13 @@ DEFAULT_MATCH = 0.90
 COORD_SAMPLE_SECONDS = .05
 COORD_CONSENSUS = .01
 COORD_REACH_RADIUS = .3
+# 2026-10-20 failed oak run: actor stood 0.95 units from the solid center.
+# A separate conservative interaction envelope avoids demanding entry into it;
+# ordinary saved-waypoint precision remains 0.3. Live drop effect is rechecked.
+COORD_SPECIAL_INTERACTION_RADIUS = 1.25
+# The outer valid ring can lie 1.2 units from the center. Its final approach
+# needs finer steering than normal 0.3-unit waypoints to enter the 1.25 envelope.
+COORD_SPECIAL_APPROACH_PRECISION = .05
 COORD_WAYPOINT_SPACING = .4
 COORD_IDLE_RADIUS = .02
 COORD_DWELL_SECONDS = .3
@@ -380,3 +387,16 @@ COORD_SCENE_ENTITY_COMPONENT_LIMIT = 128
 COORD_SCENE_LABEL_MAX_CHARS = 96
 COORD_SCENE_MIN_QUATERNION_NORM = .5
 COORD_SCENE_MAX_QUATERNION_NORM = 1.5
+
+# Legacy memories have no timing: use a conservative walking-speed estimate
+# only for ranking, never for movement control or arrival decisions.
+COORD_MEMORY_ESTIMATED_SPEED = 3.
+# Repeated blocked corridors remain available without unbounded score growth.
+COORD_MEMORY_BLOCKED_PENALTY_CAP = 10
+
+# Thin projection of a verified vertical face; navigation retains its body clearance.
+COORD_TERRAIN_EDGE_HALF_WIDTH = .02
+
+# Current backpack X scores 0.899-0.918 on real 1024x768 captures; the old .92
+# rejected it. Header-relative position and two stable frames remain mandatory.
+COORD_FOOD_CLOSE_MATCH = .82

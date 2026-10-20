@@ -124,6 +124,19 @@ class TimelineInput:
             if event['dx']:
                 self.native.mouse(0x1000, data=event['dx'] * factor)
 
+    def type_text(self, text, check, wait):
+        if not isinstance(text, str) or not 1 <= len(text) <= 32 or any(ord(c) < 32 for c in text):
+            raise ValueError('搜索文本无效')
+        encoded = text.encode('utf-16-le')
+        for offset in range(0, len(encoded), 2):
+            check()
+            unit = int.from_bytes(encoded[offset:offset+2], 'little')
+            try:
+                self.native.unicode(unit, True)
+            finally:
+                self.native.unicode(unit, False)
+            wait(.03)
+
     def release_all(self):
         errors = []
         for key in list(self.keys):

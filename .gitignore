@@ -207,3 +207,4 @@ test.bat
 *.CT
 *.lock
 !packaging/HeartopiaMonitor.spec
+/回放记录/

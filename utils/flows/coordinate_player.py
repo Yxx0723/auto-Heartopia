@@ -5,7 +5,8 @@ from pathlib import Path
 from utils.core import thresholds as policy
 from utils.core.coordinate_points import (choose_start_index, ordered_waypoints, validate_collect_wait,
                                           validate_loop_count)
-from utils.core.coordinate_navigation import NavigationWait
+from utils.core.coordinate_navigation import NavigationWait, ObstacleMap
+from utils.core.special_approach import in_interaction_range, interaction_standpoint
 from utils.core.tool_repair import ToolRepairCycle
 from utils.core.stamina import usable_stamina
 from utils.core.coordinate_recovery import (RecoveryProgress, recovery_plan, recovery_limit_reason,
@@ -82,6 +83,7 @@ class _Follower:
         self.meal_settle_until = 0.
         self.food_menu_checked = False
         self.repair_menu_pending = False
+        self.special_progress = None
 
     def report(self, state, message, **extra):
         if self.waypoints is not None:
@@ -358,6 +360,8 @@ class _Follower:
         return position
 
     def collect_point(self, point, index, total):
+        if 'special_resource' in point:
+            return self.collect_special(point, index, total)
         if self.collection is None:
             self.collection = {'sent': False, 'remaining': point.get('collect_wait', self.collect_wait_seconds)}
         self.release()
@@ -400,6 +404,50 @@ class _Follower:
                 self.collection['remaining'] = max(0., remaining - elapsed)
         self.collection_position(point)
         return self.collection['remaining'] <= 0
+
+    def special_target(self, point):
+        if self.navigator is None:
+            raise ValueError('动态资源采集需要连接实时场景与自动寻路')
+        scene = self.navigator.scene_provider() or {}
+        if scene.get('state') != 'ready':
+            raise ValueError('动态资源场景尚未就绪，未按 F')
+        identity = point['special_resource']
+        targets = [obj for obj in scene.get('objects', [])
+                   if obj.get('category') == identity['category']
+                   and obj.get('resource_static_id') == identity['static_id']
+                   and obj.get('map_dynamic') is True and not obj.get('map_cached')
+                   and valid_position(obj.get('position'))]
+        if len(targets) != 1 or type(targets[0].get('resource_available')) is not int:
+            raise ValueError('当前动态资源未加载、已离开视野或存在歧义，未按 F；请靠近后重新启动采集')
+        return targets[0]
+
+    def collect_special(self, point, index, total):
+        self.release()
+        target = self.special_target(point)
+        available = target['resource_available']
+        limit = point['special_resource'].get('press_count', 10)
+        if self.special_progress is None:
+            self.special_progress = {'sent': 0}
+        if self.special_progress['sent'] >= limit:
+            self.report('collecting', f'{point["name"]} · 已完成 {limit} 次按 F 操作，请核对实际掉落',
+                        waypoint=index+1, waypoint_count=total, resource_press_count=limit)
+            return True
+        if available <= 0:
+            raise ValueError('资源当前没有可用采集标志，已释放按键，请核对是否已采完或处于冷却')
+        current = self.read(force=True)
+        if not in_interaction_range(current, target['position']):
+            return False
+        self.report('collecting', f'{point["name"]} · 连按 F {self.special_progress["sent"]+1}/{limit} · F6暂停 · F9停止',
+                    waypoint=index+1, waypoint_count=total, resource_press_count=self.special_progress['sent'],
+                    position=list(self.position))
+        try:
+            self.set_keys({'f'})
+            self.special_progress['sent'] += 1
+            self.wait(policy.COORD_COLLECTION_PRESS_SECONDS)
+        finally:
+            self.release()
+        self.wait(1.2)
+        return False
 
     def repair_pause(self, message, index, total, state='repair_paused'):
         self.release()
@@ -477,7 +525,8 @@ class _Follower:
         self.release()
         self.navigation_waiting = True
         try:
-            self.report('eating', f'体力 {status["current"]} / {status["maximum"]}，正在补充水果 · F6暂停 · F9停止',
+            action = '正在搜索水果并补充' if status['current'] < 30 else '已恢复，正在收起背包'
+            self.report('eating', f'体力 {status["current"]} / {status["maximum"]}，{action} · F6暂停 · F9停止',
                         waypoint=index+1, waypoint_count=total)
             if self.clock.monotonic() < self.meal_settle_until:
                 self.wait(self.meal_settle_until-self.clock.monotonic())
@@ -676,13 +725,36 @@ class _Follower:
         while index < len(points):
             try:
                 self.guard()
+                special_near = False
+                if 'special_resource' in points[index]:
+                    live_target = self.special_target(points[index])
+                    current = self.read(force=True)
+                    special_near = in_interaction_range(current, live_target['position'])
+                    if special_near:
+                        points[index]['position'] = list(current)
+                    elif '_approach_for' not in points[index] or distance(
+                            points[index]['_approach_for'], live_target['position']) > .3 \
+                            or not in_interaction_range(points[index]['position'], live_target['position']):
+                        self.release()
+                        scene = self.navigator.scene_provider()
+                        obstacles = ObstacleMap(scene, live_target['position'], goal=live_target['position'])
+                        try:
+                            approach = interaction_standpoint(current, live_target['position'], obstacles)
+                        except ValueError as exc:
+                            self.report('navigating', f'{exc}，等待场景更新 · F9停止',
+                                        waypoint=index+1, waypoint_count=len(points))
+                            self.wait(.2)
+                            continue
+                        self.navigator.invalidate()
+                        points[index]['position'] = approach
+                        points[index]['_approach_for'] = list(live_target['position'])
                 if self.maintain_stamina(index, len(points)) or self.maintain_tool(index, len(points)):
                     anchor, navigation_leg, navigation_wait_since = None, None, None
                     best, progress_at = math.inf, self.clock.monotonic()
                     if self.navigator:
                         self.navigator.invalidate()
                     continue
-                if basis is None and self.collection is None:
+                if basis is None and self.collection is None and not special_near:
                     # A paused period is outside the coordinate jump/time budget.
                     self.position_at = None
                     if not selected:
@@ -753,7 +825,8 @@ class _Follower:
                                 ' · F6暂停 · F9停止', waypoint=index + 1, waypoint_count=len(points),
                                 recovery_result='cleared', recovery_failures=0,
                                 recovery_limit=self.recovery_attempts)
-                if remaining <= policy.COORD_REACH_RADIUS:
+                if remaining <= policy.COORD_REACH_RADIUS and (
+                        'special_resource' not in points[index] or special_near):
                     self.set_keys(set())
                     if self.navigator and self.collection is None:
                         # Allow inertia and landing to settle before pressing F.
@@ -765,6 +838,8 @@ class _Follower:
                                 or distance(arrival, position) > policy.COORD_IDLE_RADIUS \
                                 or abs(position[1] - arrival[1]) > policy.COORD_IDLE_RADIUS:
                             continue
+                    if self.navigator and self.navigator.learning_finished is None:
+                        self.navigator.learning_finished = self.active_time
                     if self.waypoints is not None and self.collect_wait_seconds is not None:
                         if not self.collect_point(points[index], index, len(points)):
                             continue
@@ -781,11 +856,14 @@ class _Follower:
                         self.navigator.arrived(position)
                     if self.waypoints is not None:
                         text = '已完成采集与等待' if self.collect_wait_seconds is not None else '已到达点位'
+                        if 'special_resource' in points[index-1]:
+                            text = '已完成设定次数的连按操作'
                         if self.navigator and self.navigator.memory_state == 'write_error':
                             text += '（走法记忆暂未保存）'
                         self.report('reached', f'{text} {index}/{len(points)} · F6暂停 · F9停止',
                                     position=list(position), waypoint=index, waypoint_count=len(points))
                     self.collection = None
+                    self.special_progress = None
                     dwell, anchor = None, None
                     self.recovery.reset()
                     if self.navigator:
@@ -810,6 +888,7 @@ class _Follower:
                     planning_at = self.clock.monotonic()
                     self.navigation_waiting = True
                     try:
+                        self.navigator.learning_time = self.active_time
                         self.navigator.set_waypoint(index)
                         target = self.navigator.next_target(position, target, check=self.guard, before_plan=self.release)
                     except NavigationWait as exc:
@@ -939,10 +1018,15 @@ class _Follower:
                                         waypoint=index + 1, waypoint_count=len(points), navigation_path=[])
                             continue
                     anchor, anchor_at = position, now
-                desired = direction_keys(position, target, basis)
+                special_steering = ({'reach_radius': policy.COORD_SPECIAL_APPROACH_PRECISION}
+                                    if 'special_resource' in points[index] else {})
+                desired = direction_keys(position, target, basis, **special_steering)
                 if self.navigator:
+                    steering_travel = max(.15, self.calibration_speed * policy.COORD_SAMPLE_SECONDS * 2)
+                    if special_steering:
+                        steering_travel = min(steering_travel, max(.02, distance(position, target)))
                     desired = self.navigator.steering_keys(position, target, basis,
-                        max(.15, self.calibration_speed * policy.COORD_SAMPLE_SECONDS * 2))
+                        steering_travel, **special_steering)
                 if anchor is None or desired != anchor_keys:
                     anchor, anchor_keys, anchor_at = position, set(desired), now
                 self.set_keys(desired)

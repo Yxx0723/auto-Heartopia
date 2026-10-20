@@ -274,3 +274,37 @@ def test_worker_rejects_invalid_collection_wait_before_thread_start(seconds):
     with pytest.raises(ValueError):
         worker.start(points(), 77, collect_wait_seconds=seconds)
     assert worker.thread is None
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_worker_records_each_reader_sample_and_final_result(tmp_path, fail):
+    route = tmp_path/'orange.json'
+    def runner(data, size, factory, device, window, controls, report, **kwargs):
+        report('playing', 'started', waypoint=1)
+        reader = factory()
+        try:
+            assert reader.read() == [1., 0., 2.]
+        finally:
+            reader.close()
+        if fail:
+            raise ValueError('test obstacle failure')
+        report('reached', 'done', waypoint=1, cycle=1)
+        return True
+    source = Mock()
+    source.read.return_value = [1., 0., 2.]
+    worker = PointPlayback('profile.json', runner=runner, window_factory=FakeWindow,
+                           controls_factory=WaitingControls, device_factory=lambda window: Mock(),
+                           reader_factory=lambda *a, **k: source,
+                           diagnostics_path=tmp_path/'logs'/'playback.jsonl')
+    worker.start(points(), 77, route_path=route)
+    worker.thread.join(timeout=2)
+    assert not worker.active
+    status = worker.take_latest()
+    assert status['state'] == ('error' if fail else 'finished')
+    folder = Path(status['history_path'])
+    summary = json.loads((folder/'summary.json').read_text(encoding='utf-8'))
+    assert summary['sample_count'] == 1
+    assert summary['state'] == status['state']
+    assert summary['route_name'] == 'orange'
+    source.close.assert_called_once()
+    assert (folder/'trajectory.jsonl').read_text(encoding='utf-8').strip()
+    worker.close()

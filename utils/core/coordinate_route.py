@@ -166,9 +166,9 @@ def key_vector(keys, basis):
     return [f * a + r * b for a, b in zip(basis['forward'], basis['right'])]
 
 
-def direction_keys(position, target, basis):
+def direction_keys(position, target, basis, reach_radius=None):
     dx, dz = target[0] - position[0], target[2] - position[2]
-    if math.hypot(dx, dz) <= policy.COORD_REACH_RADIUS:
+    if math.hypot(dx, dz) <= (policy.COORD_REACH_RADIUS if reach_radius is None else reach_radius):
         return set()
     options = [set(k) for k in ('w', 'd', 's', 'a', 'wd', 'ds', 'sa', 'aw')]
     def score(keys):

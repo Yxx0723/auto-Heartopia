@@ -92,7 +92,7 @@ class ObstacleMap:
             if heights[1] <= position[1] + policy.COORD_NAV_GROUND_CLEARANCE \
                     or heights[0] >= position[1] + policy.COORD_NAV_BODY_HEIGHT:
                 continue
-            candidates.append((box.get('polygon'), policy.COORD_NAV_CLEARANCE, True))
+            candidates.append((box.get('polygon'), policy.COORD_NAV_CLEARANCE, box.get('category') != 'mountain'))
         candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False) for polygon in water_areas)
         candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False) for polygon in probes)
         for polygon, clearance, approachable in candidates:
@@ -267,6 +267,9 @@ class LocalNavigator:
         self.path_memory = path_memory
         self.waypoint = None
         self.memory_leg = None
+        self.learning_time = None
+        self.learning_started = None
+        self.learning_finished = None
         self.memory_path, self.walked_path = [], []
         self.memory_aim = None
         self.memory_loaded, self.memory_failed = False, False
@@ -274,6 +277,7 @@ class LocalNavigator:
         self.search_radius = policy.COORD_NAV_SEARCH_RADIUS
         self.stats = {'map_builds': 0, 'plans': 0}
         self.water_guard = None
+        self.water_guard_context = None
 
     def set_waypoint(self, index):
         if self.waypoint != index:
@@ -289,7 +293,9 @@ class LocalNavigator:
             if self.walked_path and self.walked_path[-1] != tuple(position):
                 self.walked_path.append(tuple(position))
             try:
-                if self.path_memory.remember(self.waypoint, self.walked_path):
+                if self.path_memory.remember(self.waypoint, self.walked_path,
+                        (self.learning_finished - self.learning_started)
+                        if self.learning_finished is not None and self.learning_started is not None else None):
                     self.memory_state = 'saved'
             except (OSError, ValueError):
                 self.memory_state = 'write_error'
@@ -320,14 +326,14 @@ class LocalNavigator:
         return self.obstacles is not None and self.obstacles.clear(
             (before[0], before[2]), (after[0], after[2]), escape=True)
 
-    def steering_keys(self, position, target, basis, travel, obstacles=None):
+    def steering_keys(self, position, target, basis, travel, obstacles=None, reach_radius=None):
         """Check the actual quantized WASD pulse, not just the ideal path line.
 
         A tangent path beside a river can round to a diagonal into the water.
         Prefer the usual direction, falling back to the best clear direction.
         Moving outward from existing padding uses the same escape rule as A*.
         """
-        preferred = direction_keys(position, target, basis)
+        preferred = direction_keys(position, target, basis, reach_radius=reach_radius)
         obstacles = self.obstacles if obstacles is None else obstacles
         if not preferred or obstacles is None:
             return preferred
@@ -348,15 +354,23 @@ class LocalNavigator:
         return max(alternatives, key=lambda item: item[0])[1] if alternatives else set()
 
     def recovery_keys(self, position, target, basis, travel):
-        """A jump may probe a low obstacle, but must not drive into known water."""
+        """A jump may probe a low obstacle, but never known water or terrain walls."""
         scene = self.scene_provider()
         if not scene or scene.get('state') != 'ready':
             return None
-        if self.water_guard is None or not self.water_guard.covers_search(position, travel):
-            self.water_guard = ObstacleMap({'colliders': []}, position, water_areas=self.water_areas)
+        context = (scene.get('cache_context'), scene.get('terrain_revision'))
+        if self.water_guard is None or self.water_guard_context != context \
+                or abs(position[1] - self.water_guard.height) >= policy.COORD_NAV_HEIGHT_REFRESH \
+                or not self.water_guard.covers_search(position, travel):
+            walls = [box for box in scene.get('colliders', ())
+                     if box.get('source') == 'verified-main-terrain-mesh']
+            self.water_guard = ObstacleMap({'colliders': walls}, position, water_areas=self.water_areas)
+            self.water_guard_context = context
         return self.steering_keys(position, target, basis, travel, obstacles=self.water_guard)
 
     def blocked(self, position, target):
+        if self.path_memory:
+            self.path_memory.reject_selected()
         self.memory_path = []
         self.memory_aim = None
         self.memory_state = 'learning' if self.path_memory else 'off'
@@ -376,6 +390,8 @@ class LocalNavigator:
         leg = (self.waypoint, tuple(target))
         if self.memory_leg != leg:
             self.memory_leg = leg
+            self.learning_started = self.learning_time
+            self.learning_finished = None
             self.memory_loaded, self.memory_failed = False, False
             self.memory_path, self.walked_path = [], []
             self.memory_aim = None
@@ -407,6 +423,7 @@ class LocalNavigator:
             except NavigationWait as exc:
                 if exc.reason == 'scene':
                     raise
+            self.path_memory.reject_selected()
             self.memory_path = []
             self.memory_aim = None
             self.invalidate()
