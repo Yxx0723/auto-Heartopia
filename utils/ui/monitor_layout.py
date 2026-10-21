@@ -9,6 +9,10 @@ from utils.core.map_reference_roads import REFERENCE_ROADS
 from utils.ui.monitor_style import COLORS, SCENE_CATEGORIES, SCENE_RANGE_OPTIONS, SCENE_RANKS
 from utils.ui.monitor_widgets import MonitorWidgets
 
+# 起点方式：默认从距人物最近的点接入，直接往末点走（不再默认走完整回放）。
+START_MODE_OPTIONS = ('完整回放', '最近点接入')
+START_MODE_DEFAULT = '最近点接入'
+
 
 class MonitorLayout(MonitorWidgets):
     def build(self):
@@ -109,8 +113,8 @@ class MonitorLayout(MonitorWidgets):
         toolbar.pack(fill='x')
         self.label(toolbar, '起点方式', color='muted', font=('Microsoft YaHei UI', -12)).pack(
             side='left', padx=(0, 6))
-        self.start_mode_var = tk.StringVar(self.root, value='完整回放')
-        self.start_menu = self.dropdown(toolbar, self.start_mode_var, ['完整回放', '最近点接入'], width=10)
+        self.start_mode_var = tk.StringVar(self.root, value=START_MODE_DEFAULT)
+        self.start_menu = self.dropdown(toolbar, self.start_mode_var, list(START_MODE_OPTIONS), width=10)
         self.start_menu.pack(side='left')
         self.play_button = self.button(toolbar, '▶ 按顺序回放', self.start_playback, primary=True, small=True)
         self.play_button.pack(side='left', padx=(4, 5))
