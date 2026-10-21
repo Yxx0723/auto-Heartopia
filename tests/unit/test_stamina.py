@@ -5,7 +5,8 @@ import pytest
 from utils.core.stamina import stamina_status, usable_stamina
 from utils.drivers.stamina import NativeGrowList, component_indices
 from utils.ui.coordinate_monitor import CoordinateMonitor
-from utils.ui.native_coordinate_monitor import CoordinateWindow, COLORS
+from utils.ui.native_coordinate_monitor import CoordinateWindow
+from utils.ui.monitor_style import COLORS
 from unittest.mock import Mock
 from types import SimpleNamespace
 

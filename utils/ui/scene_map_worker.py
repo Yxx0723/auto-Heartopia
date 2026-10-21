@@ -5,10 +5,13 @@ import time
 from utils.core import thresholds as policy
 from utils.core.scene_display_cache import SceneDisplayCache
 from utils.drivers.mono_scene import MemorySceneMap
+from utils.drivers.special_resource_locations import SpecialResourceLocations
+from utils.drivers.fixed_resource_cache import FixedResourceCache
 
 
 class SceneMapWorker:
-    def __init__(self, profile, factory=MemorySceneMap, clock=time.monotonic):
+    def __init__(self, profile, factory=MemorySceneMap, clock=time.monotonic, special_locations_path=None,
+                 fixed_resources_path=None):
         self.profile, self.factory = profile, factory
         self.clock = clock
         self.latest_scene, self.latest_at = None, None
@@ -17,6 +20,8 @@ class SceneMapWorker:
         self.pid, self.generation, self.reader_pid = None, 0, None
         self.reader, self.thread = None, None
         self.history = SceneDisplayCache()
+        self.special_locations = SpecialResourceLocations(special_locations_path) if special_locations_path else None
+        self.fixed_resources = FixedResourceCache(fixed_resources_path) if fixed_resources_path else None
 
     def start(self):
         self.thread = threading.Thread(target=self.run, name='scene-map-reader', daemon=True)
@@ -75,12 +80,16 @@ class SceneMapWorker:
                 self.reader = self.factory(pid, self.profile)
                 self.reader_pid = pid
             result = self.reader.snapshot()
+            if self.special_locations is not None:
+                result = self.special_locations.enrich(result)
         except (OSError, ValueError) as exc:
             self.close_reader()
             result = {'state': 'error', 'objects': [], 'colliders': [],
                       'message': '场景正在更新，稍后自动重试', 'diagnostic': str(exc)}
         now = self.clock()
         display = history.update(result, now)
+        if self.fixed_resources is not None:
+            display = self.fixed_resources.enrich(display)
         with self.lock:
             if generation == self.generation and not self.stop.is_set():
                 self.latest_scene, self.latest_at = result, now

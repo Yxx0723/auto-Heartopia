@@ -6,7 +6,7 @@ import math
 from utils.core.coordinate_route import valid_position
 from utils.core import thresholds as policy
 from utils.core.scene_map import barrier_strokes
-from utils.core.map_resources import combine_resource_markers
+from utils.core.map_resources import combine_resource_markers, RESOURCE_CATEGORIES
 
 
 @dataclass(frozen=True)
@@ -90,10 +90,12 @@ class SceneGeometryCache:
     def select(self, scene, position, radius, viewport):
         objects, boxes = scene.get('objects', []), scene.get('colliders', [])
         definitions = scene.get('global_resources', ())
-        source_key = (id(scene), id(objects), len(objects), id(boxes), len(boxes), id(definitions), len(definitions))
+        special = scene.get('global_special_resources', ())
+        resources = scene.get('global_map_resources', ())
+        source_key = (id(scene), id(objects), len(objects), id(boxes), len(boxes), id(definitions), len(definitions), id(special), len(special), id(resources), len(resources))
         if source_key != self.source_key:
             self.source, self.source_key = scene, source_key
-            self.objects = sorted(combine_resource_markers(objects, definitions),
+            self.objects = sorted(combine_resource_markers(objects, [*definitions, *special, *resources]),
                                   key=lambda obj: self.ranks.get(obj.get('category'), 0))
             self.boxes = []
             self.barrier_kinds = {}
@@ -103,7 +105,8 @@ class SceneGeometryCache:
                 x, _, z = obj['position']
                 cell = math.floor(x/policy.COORD_SCENE_CACHE_CELL_SIZE), math.floor(z/policy.COORD_SCENE_CACHE_CELL_SIZE)
                 self.object_cells.setdefault(cell, []).append(i)
-            self.global_indexes = [i for i, obj in enumerate(self.objects) if obj.get('map_global')]
+            self.global_indexes = [i for i, obj in enumerate(self.objects)
+                                   if obj.get('map_global') or obj.get('category') in RESOURCE_CATEGORIES]
             for box in boxes:
                 coords, bounds = polygon_data(box['polygon'])
                 kind = box.get('category') if box.get('source') == 'verified-solid-collider' else None
@@ -146,7 +149,7 @@ class SceneGeometryCache:
                                    for obj in (self.objects[i],)
                                    if bounds[0] <= obj['position'][0] <= bounds[1]
                                    and bounds[2] <= obj['position'][2] <= bounds[3]
-                                   and (obj.get('map_global') or
+                                   and (obj.get('map_global') or obj.get('category') in RESOURCE_CATEGORIES or
                                         math.hypot(obj['position'][0] - x, obj['position'][2] - z) <= radius)]
                 visible_boxes = [self.boxes[i] for i in box_indexes for box in (self.boxes[i],) if intersects(box[2], bounds)
                                  and math.hypot(min(max(x, box[2][0]), box[2][1]) - x,

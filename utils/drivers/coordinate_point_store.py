@@ -1,13 +1,23 @@
-"""Windows point persistence with process locking and atomic replacement."""
+"""Point persistence with native process locking and atomic replacement."""
 import json
 from contextlib import contextmanager
 from copy import deepcopy
-import msvcrt
 import os
 from pathlib import Path
 import tempfile
 
-from utils.core.coordinate_points import append_point, empty_points, set_collect_wait, validate_points
+from utils.core.coordinate_points import append_point, empty_points, set_collect_wait, validate_points, remove_point
+
+
+def _lock_file(stream, acquire):
+    """Keep nonblocking, process-scoped exclusion on Windows and POSIX."""
+    stream.seek(0)
+    if os.name == 'nt':
+        import msvcrt
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK if acquire else msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB if acquire else fcntl.LOCK_UN)
 
 
 def atomic_write_json(path, data):
@@ -46,8 +56,29 @@ class PointStore:
     def append(self, snapshot, saved_at, collect_wait=None):
         return self._update(lambda data: append_point(data, snapshot, saved_at, collect_wait=collect_wait))
 
-    def set_collect_wait(self, point_id, seconds):
-        return self._update(lambda data: set_collect_wait(data, point_id, seconds))
+    def set_collect_wait(self, point_id, seconds, expected_data=None):
+        def change(data):
+            if expected_data is not None and data != expected_data:
+                raise ValueError('点位已发生变化，请重新打开点位管理后再保存。')
+            return set_collect_wait(data, point_id, seconds)
+        return self._update(change)
+
+    def delete_point(self, point_id, backup_path, expected_data=None):
+        with self.locked():
+            data = self.load()
+            if expected_data is not None and data != expected_data:
+                raise ValueError('点位已发生变化，请重新打开点位管理后再删除。')
+            result = remove_point(data, point_id)
+            backup_path = Path(backup_path)
+            if backup_path.resolve() == self.path.resolve():
+                raise ValueError('备份不能覆盖当前路线文件。')
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            with backup_path.open('xb') as stream:
+                stream.write(self.path.read_bytes())
+                stream.flush()
+                os.fsync(stream.fileno())
+            self._write(result)
+            return result, backup_path
 
     def create(self, data=None):
         data = deepcopy(validate_points(data if data is not None else empty_points()))
@@ -97,7 +128,7 @@ class PointStore:
     @contextmanager
     def locked(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # The OS releases this byte lock even if the process terminates.
+        # The OS releases this lock even if the process terminates.
         # Re-read inside the lock so two monitor windows cannot lose a save.
         with self.path.with_suffix('.lock').open('a+b') as lock:
             if lock.tell() == 0:
@@ -105,14 +136,13 @@ class PointStore:
                 lock.flush()
             lock.seek(0)
             try:
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                _lock_file(lock, True)
             except OSError as exc:
                 raise OSError('另一个窗口正在保存点位，请稍后再试。') from exc
             try:
                 yield
             finally:
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+                _lock_file(lock, False)
 
     def _update(self, change):
         with self.locked():

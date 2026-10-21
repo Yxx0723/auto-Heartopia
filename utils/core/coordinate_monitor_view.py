@@ -7,7 +7,8 @@ from utils.core import thresholds as policy
 
 def locator_details(status):
     if status.get('locator') == 'mono-local-player':
-        lines = [f'{i + 1:02d}  {path["label"]}\n    XYZ → 0x{path["address"]:X}'
+        lines = [f'{i + 1:02d}  {path["label"]}\n    XYZ → '
+                 + (f'0x{path["address"]:X}' if type(path.get('address')) is int else '附着根节点世界坐标')
                  for i, path in enumerate(status.get('paths', []))]
         return '\n'.join(lines), '本地角色对象校验通过'
     lines = [f'{i + 1:02d}  UnityPlayer.dll + 0x{path["rva"]:X}   '

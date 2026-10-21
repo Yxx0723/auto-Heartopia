@@ -208,3 +208,6 @@ test.bat
 *.lock
 !packaging/HeartopiaMonitor.spec
 /回放记录/
+/地图缓存/
+/日志/
+/道路数据/实走轨迹/

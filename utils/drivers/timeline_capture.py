@@ -3,15 +3,10 @@ import threading
 import time
 import queue
 
-from utils.core.input_keys import CONTROL_KEYS, key_from_vk, ordered_keys
+from utils.core.input_keys import CONTROL_KEYS, key_from_vk, ordered_keys, key_name
 from utils.drivers.raw_mouse import RawMouse
 
 
-def key_name(key):
-    vk = getattr(key, 'vk', None)
-    if isinstance(vk, int):
-        return key_from_vk(vk) or (getattr(key, 'char', '') or '').lower()
-    return (getattr(key, 'char', None) or getattr(key, 'name', '') or '').lower()
 
 
 class Capture:

@@ -95,8 +95,7 @@ def test_spatial_selection_matches_brute_force_at_expanded_radii_and_cell_edges(
             objects, boxes = cache.select(source, (x, 0, z), radius, viewport)
             bounds = viewport.bounds(12)
             expected = [o for o in source['objects'] if bounds[0] <= o['position'][0] <= bounds[1]
-                        and bounds[2] <= o['position'][2] <= bounds[3]
-                        and math.hypot(o['position'][0]-x, o['position'][2]-z) <= radius]
+                        and bounds[2] <= o['position'][2] <= bounds[3]]
             expected_boxes = [b for b in cache.boxes if intersects(b[2], bounds)
                               and math.hypot(min(max(x, b[2][0]), b[2][1])-x,
                                              min(max(z, b[2][2]), b[2][3])-z) <= radius]
@@ -265,3 +264,15 @@ def test_water_shore_layers_reuse_the_same_projected_geometry_and_visibility():
     assert set(canvas.items) == ids
     a, b = ids
     assert canvas.coords(a) == pytest.approx(canvas.coords(b))
+
+@pytest.mark.parametrize('category',['tree','blueberry','raspberry','fish','bird','insect','butterfly','animal','crop','shrub'])
+def test_all_available_resources_ignore_player_radius_but_not_viewport(category):
+    from utils.ui.map_draw_cache import SceneGeometryCache
+    source={'objects':[{'position':[300,0,0],'category':category},
+                       {'position':[300,0,5],'category':'other'},
+                       {'position':[2000,0,0],'category':category}], 'colliders':[]}
+    cache=SceneGeometryCache((),{})
+    view=Viewport(1000,600,0,0,1)
+    objects,_=cache.select(source,[0,0,0],80,view)
+    assert len(objects)==1 and objects[0]['category']==category and objects[0]['position']==[300,0,0]
+    assert not objects[0].get('map_global')

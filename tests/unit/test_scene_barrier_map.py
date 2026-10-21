@@ -9,7 +9,7 @@ from tests.unit.test_native_coordinate_monitor import capture_window
 from utils.core.coordinate_navigation import ObstacleMap, plan_path, polygon_distance
 from utils.core.scene_map import barrier_strokes, box_geometry
 from utils.ui.map_draw_cache import MapDrawCache, Viewport
-from utils.ui.native_coordinate_monitor import SCENE_RANKS
+from utils.ui.monitor_style import SCENE_RANKS
 
 
 def barrier(kind='fence', **kwargs):

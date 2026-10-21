@@ -1,11 +1,6 @@
-"""地图 JSON 的写盘格式 —— CLAUDE.md R22。
+"""Canonical serialization retained by the current personal recording format.
 
-地图 JSON 的格式在仓库里是混的（实测 633 个文件：4 / 2 / 顶格 / 7 空格四种缩进，
-221 个还混着 Tab），所以写盘不做「保留原格式」，一律重排成规范形式：
-4 空格缩进 + 短数组内联 + 末尾不加换行。
-
-三个写入方（webui 保存 / 录制 / 批量字段替换）必须共用 `utils/core/json_io.py`
-这一个序列化器 —— 各写一套的话格式会再次分叉。
+The obsolete WebUI/Star Rail writer contracts are preserved in legacy/tests.
 """
 
 import json
@@ -17,11 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MAP_DIR = REPO_ROOT / "map"
 
 #: 会把地图 JSON 写到盘上的地方
-WRITER_FILES = (
-    "webui/server.py",  # webui 保存地图
-    "utils/ui/record.py",  # --record 录制
-    "tools/convert.py",  # 批量字段替换
-)
+WRITER_FILES = ('utils/core/personal_route.py',)
 
 #: 这三个表达式是分叉的根源：各自序列化、各自定缩进
 RETIRED_SERIALIZERS = (
@@ -108,7 +99,7 @@ class TestIsCanonical:
 
 
 class TestWritersShareOneSerializer:
-    """三个写入方都走同一个序列化器，且没留下各写一套的旧代码。"""
+    """当前录制写入方使用共享序列化器，历史执行器的契约另行归档。"""
 
     def test_all_writers_reference_the_shared_serializer(self):
         missing = [

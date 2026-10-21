@@ -6,6 +6,8 @@ from utils.core.thresholds import COORD_MONITOR_STALE_SECONDS
 
 
 def current_position_table(status):
+    if status.get('position_computed') or status.get('attached_to_parent'):
+        raise ValueError('附着载具时显示载具根节点位置；请下车后再导出角色 CE 坐标表')
     address = status.get('address')
     if status.get('state') != 'connected' or not valid_position(status.get('position')) \
             or type(address) is not int or not 0x10000 <= address < 0x7ffffffffff7 \

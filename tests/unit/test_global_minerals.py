@@ -7,6 +7,7 @@ import pytest
 from utils.core.map_resources import combine_resource_markers
 from utils.ui.map_draw_cache import MapDrawCache, Viewport
 from utils.drivers.global_minerals import GlobalMineralReader
+from utils.ui.monitor_style import SCENE_CATEGORIES
 from utils.drivers.mono_scene import SceneMetadata
 from tests.unit.test_mono_scene import dictionary
 from tests.unit.test_native_coordinate_monitor import category_window
@@ -142,8 +143,8 @@ def test_far_minerals_remain_visible_while_local_objects_keep_their_radius_limit
     source = {'objects': [mineral(200), mineral(150, 'tree')], 'colliders': [],
               'global_resources': [mineral(200, map_definition=True), mineral(-200, 'ore', map_definition=True)]}
     objects, _ = cache.geometry.select(source, [0, 20, 0], 80, Viewport(1000, 600, 0, 0, 1))
-    assert {o['position'][0] for o in objects} == {-200, 200}
-    assert len(objects) == 2
+    assert {o['position'][0] for o in objects} == {-200, 150, 200}
+    assert len(objects) == 3
     assert 'map_global' not in source['objects'][0]
 
 
@@ -172,10 +173,55 @@ def test_mineral_overview_fits_far_definitions_keeps_player_centered_and_routes_
     window.show_mineral_overview()
     window.draw()
     viewport = window.map_cache.viewport
-    assert window.map_view == 'minerals' and window.scene_categories == {'rock', 'ore'}
+    assert window.map_view == 'minerals' and window.scene_categories == set(SCENE_CATEGORIES)-{'other'}
     assert viewport.screen(window.view.position[0], window.view.position[2]) == (450., 250.)
     for point in points:
         x, y = viewport.screen(point['position'][0], point['position'][2])
         assert 35 <= x <= 865 and 35 <= y <= 465
     assert {'scene-rock', 'scene-ore'} <= window.map_cache.visible_tags
     assert window.saved_points == original
+
+
+
+@pytest.mark.parametrize('item,kind,category',[(201,1,'tree'),(212,1,'tree'),(102,3,'blueberry'),(103,3,'raspberry'),(101,3,'bush')])
+def test_full_map_vegetation_includes_far_unloaded_plants(item,kind,category):
+    r,reader,_=definition_runtime()
+    reader.item_types[item]=category
+    r.write(r.parts.rows[0]+20,struct.pack('<ii',item,kind))
+    result=reader.snapshot()
+    point=next(p for p in result if p['resource_id']==100)
+    assert point['category']==category and point['position'][0]==-500
+    assert point['map_definition'] and point['resource_kind']==kind
+    assert 'resource_available' not in point
+
+
+@pytest.mark.parametrize('kind,item,category',[(4,201,'tree'),(8,102,'blueberry'),(1,102,'blueberry'),(3,201,'tree')])
+def test_facilities_and_crossed_resource_kinds_are_excluded(kind,item,category):
+    r,reader,_=definition_runtime()
+    reader.item_types[item]=category
+    r.write(r.parts.rows[0]+20,struct.pack('<ii',item,kind))
+    result=reader.snapshot()
+    assert all(p['resource_id']!=100 for p in result)
+
+
+def test_overview_displays_far_plants_beyond_radius_in_all_quadrants(tmp_path):
+    window=category_window(tmp_path)
+    points=[mineral(x,category,map_definition=True) | {'position':[x,20,z]}
+            for category in ('tree','blueberry','raspberry','bush')
+            for x,z in ((-600,-600),(-600,600),(600,-600),(600,600))]
+    window.scene_state['global_resources']=points
+    window.scene_state['objects']=[]
+    window.scene_radius=80
+    window.show_mineral_overview()
+    window.draw()
+    objects,_=window.map_cache.geometry.select(window.scene_state,window.view.position,80,window.map_cache.viewport)
+    assert len(objects)==16
+    assert {p['category'] for p in objects}=={'tree','blueberry','raspberry','bush'}
+    assert {'scene-tree','scene-blueberry','scene-raspberry','scene-bush'} <= window.map_cache.visible_tags
+
+
+def test_fixed_definitions_reuse_cache_beyond_old_periodic_refresh_interval():
+ _,reader,now=definition_runtime()
+ first=reader.snapshot()
+ now[0]=100000
+ assert reader.snapshot() is first and reader.loads==1

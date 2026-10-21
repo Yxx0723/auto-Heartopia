@@ -1,72 +1,30 @@
-"""Position feedback playback, with bounded calibration and injectable devices."""
+"""Position-feedback session, steering and runner assembly with injected devices."""
 import math
 from pathlib import Path
-
 from utils.core import thresholds as policy
-from utils.core.coordinate_points import (choose_start_index, ordered_waypoints, validate_collect_wait,
-                                          validate_loop_count)
+from utils.core.coordinate_points import choose_start_index, ordered_waypoints, validate_collect_wait, validate_loop_count
 from utils.core.coordinate_navigation import NavigationWait, ObstacleMap
-from utils.core.special_approach import in_interaction_range, interaction_standpoint
-from utils.core import special_verdict
-from utils.core.special_verdict import snapshot as special_snapshot
+from utils.core.special_approach import in_interaction_range, interaction_standpoint, ApproachProgress
 from utils.core.tool_repair import ToolRepairCycle
-from utils.core.stamina import usable_stamina
-from utils.core.coordinate_recovery import (RecoveryProgress, recovery_plan, recovery_limit_reason,
-                                             validate_recovery_options)
-from utils.core.coordinate_route import (build_waypoints, direction_keys, distance,
-                                         key_vector, make_basis, rotate_basis, valid_position,
-                                         validate_coordinate_route)
+from utils.core.coordinate_recovery import RecoveryProgress, validate_recovery_options
+from utils.core.coordinate_route import build_waypoints, direction_keys, distance, key_vector, make_basis, rotate_basis, valid_position, validate_coordinate_route
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.timeline_hotkeys import PlaybackControls
-from utils.drivers.town_window import TimelineInput, TownWindow
-from utils.drivers.windows_input import PreciseClock
-from utils.ui.recorder_feedback import Feedback
+from utils.drivers.clock import PreciseClock
+from utils.flows.playback_signals import _Paused, _Stopped, _CalibrationRetry, _RecoveryLimit, _SkipPoint
+from utils.flows.playback_collection import CollectionActions, SPECIAL_REACHED_TEXT
+from utils.flows.playback_recovery import RecoveryActions
+from utils.flows.playback_sustain import SustainActions
+from utils.flows.playback_visits import VisitActions
 
 
-class _Paused(Exception):
-    pass
+class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions):
+    """Single owner of input guards, clock and pause/resume progress for all roles."""
 
-
-class _Stopped(Exception):
-    pass
-
-
-class _CalibrationRetry(Exception):
-    pass
-
-
-class _RecoveryLimit(Exception):
-    def __init__(self, reason):
-        super().__init__(reason)
-        self.reason = reason
-
-
-SPECIAL_OUTCOME_TEXT = {
-    special_verdict.GATHERED: '已确认采到',
-    special_verdict.GONE: '资源已消失',
-    special_verdict.COOLING: '冷却已开始',
-    special_verdict.CHANGED: '状态有变化',
-    special_verdict.UNCHANGED: '未见变化',
-    special_verdict.UNKNOWN: '未能读到状态',
-}
-
-# The per-point line must repeat the verdict, never a bare "presses sent".
-SPECIAL_REACHED_TEXT = {
-    None: '动态采集已结束',
-    special_verdict.GATHERED: '已确认采到',
-    special_verdict.GONE: '资源已消失，判定采集完成',
-    special_verdict.COOLING: '冷却已开始，判定采集成功',
-    special_verdict.CHANGED: '状态有变化，请核对背包',
-    special_verdict.UNCHANGED: '未见状态变化，请核对背包',
-    special_verdict.UNKNOWN: '状态未能读取，请核对背包',
-}
-
-
-class _Follower:
     def __init__(self, data, reader, device, window, controls, report, clock, waypoints=None, start_mode='first',
                  recovery_attempts=0, jump_on_recovery=False, collect_wait_seconds=None, loop_count=1,
                  continuous_recovery=False, navigator=None, repair_box=None, tool_selector=None, food=None,
-                 scene_refresh=None):
+                 scene_refresh=None, stable_navigation=False, skip_unreachable=False):
         self.data, self.reader, self.device = data, reader, device
         self.window, self.controls, self._report, self.clock = window, controls, report, clock
         self.cycle, self.loop_count = 1, loop_count
@@ -109,11 +67,20 @@ class _Follower:
         self.repair_menu_pending = False
         self.special_progress = None
         self.scene_refresh = scene_refresh
+        self.stable_navigation = stable_navigation
+        self.skip_unreachable = skip_unreachable and navigator is not None and waypoints is not None
+        self.visit_progress = None
+        self.retry_pass, self.deferred, self.failed_reasons = 0, [], {}
+        self.unresolved_points = []
+        self.visit_point = None
 
     def report(self, state, message, **extra):
         if self.waypoints is not None:
             message = f'第 {self.cycle}/{self.loop_count} 轮 · {message}'
             extra.update(cycle=self.cycle, loop_count=self.loop_count)
+        if self.skip_unreachable and self.visit_point is not None:
+            extra.setdefault('point_id', self.visit_point['id'])
+            extra.setdefault('retry_pass', self.retry_pass)
         self._report(state, message, **extra)
 
     def guard(self):
@@ -137,7 +104,8 @@ class _Follower:
         started = self.clock.monotonic()
         if not force and self.position_at is not None and started - self.position_at < policy.COORD_SAMPLE_SECONDS:
             return self.position
-        position = self.reader.read()
+        read_position = getattr(self.reader, 'read_for_playback', self.reader.read)
+        position = read_position()
         now = self.clock.monotonic()
         if not valid_position(position):
             raise ValueError('角色坐标无效，已停止回放')
@@ -235,606 +203,6 @@ class _Follower:
         self.report('playing', '正在按坐标回放 · F6暂停 · F9停止', position=list(self.position))
         return basis
 
-    def recovery_position(self, segment_start, target, force=False):
-        position = self.read(force=force)
-        # Continuous traversal may legitimately descend a slope or stairs by
-        # more than the old one-unit drop from the obstacle anchor. read()
-        # validates 3D motion between samples; arrival still checks the floor.
-        reason = recovery_limit_reason(position, self.recovery.origin, segment_start, target,
-                                       check_height=not self.continuous_recovery)
-        if reason is not None:
-            raise _RecoveryLimit(reason)
-        return position
-
-    def recovery_jump(self, target, basis, segment_start):
-        before = self.recovery_position(segment_start, target, force=True)
-        end = self.clock.monotonic() + policy.COORD_RECOVERY_JUMP_SECONDS
-        advance = True
-        try:
-            while self.clock.monotonic() < end:
-                position = self.recovery_position(segment_start, target)
-                # Hold Space for the full pulse, but stop forward input near
-                # the point or at the bounded probe distance to avoid overshoot.
-                advance = advance and distance(before, position) < policy.COORD_RECOVERY_FORWARD_DISTANCE \
-                    and distance(position, target) > policy.COORD_REACH_RADIUS
-                keys = direction_keys(position, target, basis) if advance else set()
-                if advance and self.navigator:
-                    keys = self.navigator.recovery_keys(position, target, basis,
-                        max(.15, self.calibration_speed * policy.COORD_SAMPLE_SECONDS * 2))
-                    if keys is None:
-                        return False
-                self.set_keys(keys | {'space'})
-                self.clock.sleep(min(.01, max(0., end - self.clock.monotonic())))
-        finally:
-            self.release()
-        # Read during post-release observation too. A vertical jump alone
-        # cannot count as progress because distance() uses the XZ plane.
-        end = self.clock.monotonic() + policy.COORD_RECOVERY_JUMP_SETTLE_SECONDS
-        while self.clock.monotonic() < end:
-            self.recovery_position(segment_start, target)
-            self.clock.sleep(min(.01, max(0., end - self.clock.monotonic())))
-        position = self.recovery_position(segment_start, target, force=True)
-        return distance(position, target) < distance(before, target) - policy.COORD_STUCK_DISTANCE \
-            or distance(position, target) <= policy.COORD_REACH_RADIUS
-
-    def recovery_leg(self, target, basis, segment_start, route_target):
-        reason = recovery_limit_reason(target, self.recovery.origin, segment_start, route_target,
-                                       check_height=not self.continuous_recovery)
-        if reason is not None:
-            raise _RecoveryLimit(reason)
-        end = self.clock.monotonic() + policy.COORD_RECOVERY_LEG_SECONDS
-        try:
-            while self.clock.monotonic() < end:
-                position = self.recovery_position(segment_start, route_target)
-                if distance(position, target) <= policy.COORD_REACH_RADIUS:
-                    return True
-                keys = direction_keys(position, target, basis)
-                if self.navigator:
-                    keys = self.navigator.recovery_keys(position, target, basis,
-                        max(.15, self.calibration_speed * policy.COORD_SAMPLE_SECONDS * 2))
-                    if keys is None:
-                        return False
-                self.set_keys(keys)
-                self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
-            position = self.recovery_position(segment_start, route_target, force=True)
-            return distance(position, target) <= policy.COORD_REACH_RADIUS
-        finally:
-            self.release()
-
-    def recover(self, target, basis, segment_start, index, total):
-        self.release()
-        before = self.read(force=True)
-        self.recovery.begin(before)
-        if self.waypoints is not None:
-            # Manual points can be far apart. Quantized WASD steering may take
-            # a valid approach outside the original start-to-point corridor.
-            # Bound detours around this obstacle, independent of that approach.
-            segment_start = self.recovery.origin
-        self.report('recovering', f'点位 {index + 1}/{total} · 连续失败 {self.recovery.failures}/{self.recovery_attempts}'
-                    ' · 正在处理障碍 · F6暂停 · F9停止', position=list(before),
-                    waypoint=index + 1, waypoint_count=total, recovery_phase='start',
-                    recovery_attempt=self.recovery.attempts, recovery_limit=self.recovery_attempts,
-                    recovery_failures=self.recovery.failures)
-        if self.jump_on_recovery:
-            self.report('recovering', f'点位 {index + 1}/{total} · 连续失败 {self.recovery.failures}/{self.recovery_attempts}'
-                        ' · 大跳：长按空格 '
-                        f'{policy.COORD_RECOVERY_JUMP_SECONDS:g} 秒 · F6暂停 · F9停止',
-                        position=list(before), waypoint=index + 1, waypoint_count=total,
-                        recovery_phase='jump', recovery_attempt=self.recovery.attempts,
-                        recovery_limit=self.recovery_attempts, recovery_failures=self.recovery.failures)
-            if self.recovery_jump(target, basis, segment_start):
-                return True
-        self.report('recovering', f'点位 {index + 1}/{total} · 左右试走校正 '
-                    f'· 连续失败 {self.recovery.failures}/{self.recovery_attempts} · F6暂停 · F9停止',
-                    position=list(self.position), waypoint=index + 1, waypoint_count=total,
-                    recovery_phase='detour', recovery_attempt=self.recovery.attempts,
-                    recovery_limit=self.recovery_attempts, recovery_failures=self.recovery.failures)
-        plan = recovery_plan(self.recovery.origin, target, self.recovery.attempts)
-        for point in plan:
-            if not self.recovery_leg(point, basis, segment_start, target):
-                return False
-        self.wait(policy.COORD_SETTLE_SECONDS)
-        position = self.read(force=True)
-        reason = recovery_limit_reason(position, self.recovery.origin, segment_start, target,
-                                       check_height=not self.continuous_recovery)
-        if reason is not None:
-            raise _RecoveryLimit(reason)
-        improved = distance(position, target) < distance(before, target) - policy.COORD_STUCK_DISTANCE
-        return improved
-
-    def fail_recovery(self, index, total):
-        if self.recovery.fail():
-            self.report('recovering', f'点位 {index + 1}/{total} · 本轮未通过'
-                        f' · 连续失败 {self.recovery.failures}/{self.recovery_attempts} · F6暂停 · F9停止',
-                        waypoint=index + 1, waypoint_count=total, recovery_result='failed',
-                        recovery_attempt=self.recovery.attempts, recovery_failures=self.recovery.failures,
-                        recovery_limit=self.recovery_attempts)
-
-    def pause_blocked(self, index, total, reason='连续失败达到上限'):
-        self.release()
-        self.resume_from_current = True
-        self.controls.pause()
-        self.report('blocked', f'点位 {index + 1}/{total} · {reason}，已暂停'
-                    ' · 手动绕过后 F6继续 · F9停止', waypoint=index + 1, waypoint_count=total,
-                    recovery_attempt=self.recovery.attempts, recovery_limit=self.recovery_attempts,
-                    recovery_failures=self.recovery.failures)
-        raise _Paused()
-
-    def retry_recovery(self, index, total, distance_limit=False):
-        self.release()
-        self.fail_recovery(index, total)
-        if distance_limit:
-            # End this probe and plan the next one locally. Do not treat the
-            # target's distance as a reason to pause or skip the saved point.
-            self.recovery.origin = tuple(self.position)
-        if self.recovery.failures >= self.recovery_attempts:
-            self.recovery.failures, self.recovery.pending = 0, False
-        reason = '已收回距离边界处的试探，重新规划' if distance_limit else '本轮未通过，开始下一轮脱困'
-        self.report('recovering', f'点位 {index + 1}/{total} · {reason} · 自动继续 · F6暂停 · F9停止',
-                    waypoint=index + 1, waypoint_count=total,
-                    recovery_result='distance_retry' if distance_limit else 'auto_retry',
-                    recovery_attempt=self.recovery.attempts, recovery_failures=self.recovery.failures,
-                    recovery_limit=self.recovery_attempts)
-        self.wait(policy.COORD_RECOVERY_RETRY_SECONDS)
-
-    def collection_position(self, point):
-        position = self.read(force=True)
-        if distance(position, point['position']) > policy.COORD_REACH_RADIUS \
-                or abs(position[1] - point['position'][1]) > policy.COORD_MAX_HEIGHT_ERROR:
-            raise ValueError('采集等待期间离开了当前点位或高度改变，已停止，请重新开始回放')
-        return position
-
-    def collect_point(self, point, index, total):
-        if 'special_resource' in point:
-            return self.collect_special(point, index, total)
-        if self.collection is None:
-            self.collection = {'sent': False, 'remaining': point.get('collect_wait', self.collect_wait_seconds)}
-        self.release()
-        self.collection_position(point)
-        if not self.collection['sent']:
-            if self.food is not None:
-                self.read_stamina()
-                if self.maintain_stamina(index, total):
-                    return False
-            if self.tool_selector is not None:
-                self.read_tool()
-                if self.maintain_tool(index, total):
-                    return False
-            self.report('collecting', f'点位 {index + 1}/{total} · 按 F 采集 · F6暂停 · F9停止',
-                        waypoint=index + 1, waypoint_count=total)
-            try:
-                self.set_keys({'f'})
-                self.collection['sent'] = True
-                self.wait(policy.COORD_COLLECTION_PRESS_SECONDS)
-            finally:
-                self.release()
-        remaining = self.collection['remaining']
-        now = self.clock.monotonic()
-        if now - self.last_collect_report >= policy.COORD_MONITOR_REFRESH_SECONDS:
-            self.report('collection_wait', f'点位 {index + 1}/{total} · 采集等待 {remaining:.1f} 秒'
-                        ' · F6暂停 · F9停止', waypoint=index + 1, waypoint_count=total,
-                        remaining_wait=remaining)
-            self.last_collect_report = now
-        if remaining > 0:
-            step = min(policy.COORD_SAMPLE_SECONDS, remaining)
-            before = self.clock.monotonic()
-            completed = False
-            try:
-                self.wait(step)
-                completed = True
-            finally:
-                # Only elapsed active time counts. A pause releases F and
-                # resumes this dwell without sending F again or moving to calibrate.
-                elapsed = step if completed else min(step, max(0., self.clock.monotonic() - before))
-                self.collection['remaining'] = max(0., remaining - elapsed)
-        self.collection_position(point)
-        return self.collection['remaining'] <= 0
-
-    def special_objects(self, point):
-        """Every live object matching this dynamic identity, or None when unreadable."""
-        if self.navigator is None:
-            raise ValueError('动态资源采集需要连接实时场景与自动寻路')
-        scene = self.navigator.scene_provider() or {}
-        if scene.get('state') != 'ready':
-            return None
-        identity = point['special_resource']
-        return [obj for obj in scene.get('objects', [])
-                if obj.get('category') == identity['category']
-                and obj.get('resource_static_id') == identity['static_id']
-                and obj.get('map_dynamic') is True and not obj.get('map_cached')
-                and valid_position(obj.get('position'))]
-
-    def special_target(self, point):
-        targets = self.special_objects(point)
-        if targets is None:
-            raise ValueError('动态资源场景尚未就绪，未按 F')
-        if len(targets) != 1 or type(targets[0].get('resource_available')) is not int:
-            raise ValueError('当前动态资源未加载、已离开视野或存在歧义，未按 F；请靠近后重新启动采集')
-        return targets[0]
-
-    def sample_special(self, point):
-        """One refreshed read-only sample: target, 'unknown', or None when it is gone."""
-        if self.scene_refresh is not None:
-            try:
-                self.scene_refresh()
-            except (OSError, ValueError):
-                pass
-        targets = self.special_objects(point)
-        if targets is None:
-            return 'unknown'
-        if not targets:
-            return None
-        if len(targets) != 1 or type(targets[0].get('resource_available')) is not int:
-            return 'unknown'
-        return targets[0]
-
-    def settle_special(self, point):
-        """Judge the press that just happened from a fresh sample, and only report what moved."""
-        progress = self.special_progress
-        before = progress['before']
-        if before is None:
-            return
-        progress['before'] = None
-        deadline = self.clock.monotonic() + policy.COORD_SPECIAL_STATE_SETTLE_SECONDS
-        observed, samples = [], {}
-        while True:
-            self.wait(policy.COORD_SPECIAL_STATE_POLL_SECONDS)
-            sample = self.sample_special(point)
-            if sample != 'unknown':
-                after = special_snapshot(sample) if sample is not None else None
-                outcome = special_verdict.verdict(before, after)
-                observed.append(outcome)
-                samples[outcome] = after
-                if special_verdict.conclusive(outcome):
-                    break
-            if self.clock.monotonic() >= deadline:
-                break
-        outcome = special_verdict.strongest(observed)
-        after = samples.get(outcome)
-        progress['outcome'] = outcome
-        progress['after'] = after
-        if outcome == special_verdict.UNCHANGED:
-            progress['unchanged'] += 1
-        else:
-            progress['unchanged'] = 0
-        self.report('collecting', f'{point["name"]} · 第 {progress["sent"]} 次按 F · {SPECIAL_OUTCOME_TEXT[outcome]}',
-                    waypoint=progress.get('index', 1), waypoint_count=progress.get('total', 1),
-                    resource_press_count=progress['sent'], resource_outcome=outcome,
-                    resource_available_before=before.get('available'),
-                    resource_available_after=(after or {}).get('available'),
-                    resource_cold_end_before=before.get('cold_end'),
-                    resource_cold_end_after=(after or {}).get('cold_end'),
-                    resource_state_digest=(after or {}).get('digest'))
-
-    def finish_special(self, point, index, total):
-        """Report what is actually known about this dynamic resource and end the point."""
-        progress = self.special_progress
-        sent, outcome = progress['sent'], progress['outcome']
-        before, after = progress.get('pressed_from'), progress.get('after')
-        name = point['name']
-        if outcome == special_verdict.GATHERED:
-            message = f'{name} · 已确认采到（可用次数 {before}→{after.get("available")}）· 共按 F {sent} 次'
-        elif outcome == special_verdict.GONE:
-            message = f'{name} · 资源已从场景消失，判定采集完成 · 共按 F {sent} 次'
-        elif outcome == special_verdict.COOLING:
-            message = f'{name} · 冷却已开始，判定本次采集成功 · 共按 F {sent} 次'
-        elif outcome == special_verdict.UNCHANGED:
-            message = (f'{name} · 连按 F {sent} 次资源状态无变化，已停止 · 请核对背包'
-                       '（可能已在冷却或未命中）')
-        elif outcome == special_verdict.CHANGED:
-            message = f'{name} · 已按 F {sent} 次，资源状态有变化但未见掉落标志 · 请核对背包'
-        else:
-            message = f'{name} · 已按 F {sent} 次，未能读到资源状态 · 请核对背包'
-        self.report('collecting', message, waypoint=index+1, waypoint_count=total,
-                    resource_press_count=sent, resource_outcome=outcome,
-                    resource_confirmed=special_verdict.confirmed(outcome))
-        return True
-
-    def collect_special(self, point, index, total):
-        self.release()
-        limit = point['special_resource'].get('press_count', 10)
-        progress = self.special_progress
-        if progress is None:
-            progress = self.special_progress = {'sent': 0, 'unchanged': 0, 'outcome': None,
-                                                'before': None, 'after': None, 'pressed_from': None}
-        progress['index'], progress['total'] = index, total
-        if progress['before'] is not None:
-            self.settle_special(point)
-        if special_verdict.conclusive(progress['outcome']) \
-                or progress['unchanged'] >= policy.COORD_SPECIAL_UNCHANGED_LIMIT \
-                or progress['sent'] >= limit:
-            return self.finish_special(point, index, total)
-        try:
-            target = self.special_target(point)
-        except ValueError:
-            # A target that vanished after a press is a completed collection,
-            # not a broken route. A second read guards against one short scan.
-            if progress['sent'] > 0 and self.sample_special(point) is None:
-                progress['outcome'] = special_verdict.GONE
-                return self.finish_special(point, index, total)
-            raise
-        if target['resource_available'] <= 0:
-            raise ValueError('资源当前没有可用采集标志，已释放按键，请核对是否已采完或处于冷却')
-        current = self.read(force=True)
-        if not in_interaction_range(current, target['position']):
-            return False
-        progress['before'] = special_snapshot(target)
-        progress['pressed_from'] = progress['before']['available']
-        self.report('collecting', f'{point["name"]} · 连按 F {progress["sent"]+1}/{limit} · F6暂停 · F9停止',
-                    waypoint=index+1, waypoint_count=total, resource_press_count=progress['sent'],
-                    position=list(self.position))
-        try:
-            self.set_keys({'f'})
-            progress['sent'] += 1
-            self.wait(policy.COORD_COLLECTION_PRESS_SECONDS)
-        finally:
-            self.release()
-        self.settle_special(point)
-        if special_verdict.conclusive(progress['outcome']) \
-                or progress['unchanged'] >= policy.COORD_SPECIAL_UNCHANGED_LIMIT:
-            return self.finish_special(point, index, total)
-        return False
-
-    def repair_pause(self, message, index, total, state='repair_paused'):
-        self.release()
-        pause_with_reason = getattr(self.controls, 'pause_with_reason', None)
-        if pause_with_reason:
-            pause_with_reason(message)
-        else:
-            self.controls.pause()
-        self.report(state, message+' · 处理后切回游戏按 F6 继续 · F9停止',
-                    waypoint=index+1, waypoint_count=total)
-        raise _Paused()
-
-    def repair_tap(self, key):
-        try:
-            self.set_keys({key})
-            self.wait(.1)
-        finally:
-            self.release()
-
-    def read_tool(self):
-        self.last_tool_check = self.clock.monotonic()
-        try:
-            self.tool_status = self.reader.tools_snapshot()
-        except (ValueError, OSError):
-            self.tool_status = {'state': 'unavailable'}
-        return self.tool_status
-
-    def read_stamina(self):
-        self.last_stamina_check = self.clock.monotonic()
-        try:
-            self.stamina_status = self.reader.stamina_snapshot()
-        except (ValueError, OSError):
-            self.stamina_status = {'state': 'unavailable'}
-        return self.stamina_status
-
-    def close_stamina_menu(self, index, total):
-        self.release()
-        self.navigation_waiting = True
-        try:
-            closed = self.food.close_menu(self.window, self.repair_tap, self.guard, self.wait, self.device)
-            self.meal_menu_pending = False
-            self.food_menu_checked = True
-            if closed:
-                self.report('playing', '已关闭背包，继续当前点位 · F6暂停 · F9停止',
-                            waypoint=index+1, waypoint_count=total)
-            return bool(closed)
-        except (ValueError, OSError) as exc:
-            self.repair_pause(f'关闭背包未完成：{exc}', index, total, state='food_paused')
-        finally:
-            self.release()
-            self.navigation_waiting = False
-            self.last_tick = self.clock.monotonic()
-
-    def maintain_stamina(self, index, total):
-        if self.food is None:
-            return False
-        if self.clock.monotonic()-self.last_stamina_check >= 1.:
-            self.read_stamina()
-        status = self.stamina_status
-        if not usable_stamina(status):
-            self.release()
-            for _ in range(3):
-                self.wait(.1)
-                status = self.read_stamina()
-                if usable_stamina(status):
-                    break
-        if not usable_stamina(status):
-            self.repair_pause('暂时无法读取本地角色体力，请等待读取恢复', index, total, state='food_paused')
-        if status['current'] >= 30 and not self.meal_pending and not self.meal_menu_pending:
-            # Starting or resuming may leave a backpack from manual eating or
-            # an earlier run open. Check once before movement, never per tick.
-            if not self.food_menu_checked:
-                return self.close_stamina_menu(index, total)
-            return False
-        self.release()
-        self.navigation_waiting = True
-        try:
-            action = '正在搜索水果并补充' if status['current'] < 30 else '已恢复，正在收起背包'
-            self.report('eating', f'体力 {status["current"]} / {status["maximum"]}，{action} · F6暂停 · F9停止',
-                        waypoint=index+1, waypoint_count=total)
-            if self.clock.monotonic() < self.meal_settle_until:
-                self.wait(self.meal_settle_until-self.clock.monotonic())
-                status = self.read_stamina()
-                if not usable_stamina(status):
-                    raise ValueError('体力正在更新，请稍后继续')
-            if not self.meal_pending and status['current'] < 30:
-                self.meal_menu_pending = True
-                target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device)
-                status = self.read_stamina()
-                if not usable_stamina(status):
-                    raise ValueError('食用前无法确认体力')
-                if status['current'] < 30:
-                    # Retain the attempted use across F6, focus loss and a
-                    # partial mouse press. Never eat twice before verifying.
-                    self.meal_pending = True
-                    self.meal_before, self.meal_deadline = status['current'], self.clock.monotonic()+8.
-                    try:
-                        self.food.use(target, self.device, self.guard, self.wait)
-                    finally:
-                        self.release()
-            status = self.read_stamina()
-            while self.meal_pending and self.clock.monotonic() < self.meal_deadline \
-                    and (not usable_stamina(status) or status['current'] <= self.meal_before):
-                self.wait(.1)
-                status = self.read_stamina()
-            if not usable_stamina(status):
-                raise ValueError('食用后暂时无法确认体力，请等待恢复后继续')
-            if self.meal_pending and status['current'] <= self.meal_before:
-                self.meal_pending = False
-                raise ValueError('食用后体力未增加，请检查水果数量或食用动作')
-            if self.meal_pending:
-                self.meal_pending = False
-                self.meal_settle_until = self.clock.monotonic()+2.
-                self.wait(2.)  # Keep the confirmed eating animation out of movement/calibration.
-                status = self.read_stamina()
-                if not usable_stamina(status):
-                    raise ValueError('体力正在更新，请稍后继续')
-            if status['current'] >= 30:
-                if self.meal_menu_pending:
-                    self.food.close_menu(self.window, self.repair_tap, self.guard, self.wait, self.device)
-                    self.meal_menu_pending = False
-                    self.food_menu_checked = True
-                self.report('playing', f'体力已恢复至 {status["current"]}，继续当前点位 · F6暂停 · F9停止',
-                            waypoint=index+1, waypoint_count=total)
-            return True
-        except (ValueError, OSError) as exc:
-            self.repair_pause(f'自动吃水果未完成：{exc}', index, total, state='food_paused')
-        finally:
-            self.release()
-            self.navigation_waiting = False
-            self.last_tick = self.clock.monotonic()
-
-    def equip_axe_pick(self, index, total):
-        self.release()
-        self.navigation_waiting = True
-        self.report('equipping', '正在拿出斧镐，确认持用后自动继续 · F6暂停 · F9停止',
-                    waypoint=index+1, waypoint_count=total)
-        try:
-            if not self.equip_pending:
-                self.wait(.15)
-                tool = self.read_tool()
-                if not ToolRepairCycle.usable(tool):
-                    raise ValueError('暂时无法确认斧镐状态，请等待读取恢复')
-                if not tool['equipped']:
-                    self.equip_menu_pending = True
-                    target = self.tool_selector.prepare(self.window, self.repair_tap, self.wait, self.guard)
-                    # Opening the menu can race a manual selection. Clicking an
-                    # already held tool can put it away, so re-read before input.
-                    tool = self.read_tool()
-                    if not ToolRepairCycle.usable(tool):
-                        raise ValueError('选用前斧镐状态发生变化')
-                    if not tool['equipped']:
-                        self.equip_pending = True
-                        self.equip_verify_until = self.clock.monotonic()+3.
-                        try:
-                            self.tool_selector.use(target, self.device, self.guard, self.wait)
-                        finally:
-                            self.release()
-            # An interrupted click is never repeated on F6 resume. First
-            # verify its result, even if the original deadline has elapsed.
-            tool = self.read_tool()
-            while self.equip_pending and self.clock.monotonic() < self.equip_verify_until \
-                    and not (ToolRepairCycle.usable(tool) and tool['equipped']):
-                self.wait(.1)
-                tool = self.read_tool()
-            if not ToolRepairCycle.usable(tool) or not tool['equipped']:
-                self.equip_pending = False
-                raise ValueError('选用后尚未确认手持斧镐，请检查 T 面板')
-            if self.equip_menu_pending:
-                self.tool_selector.close_menu(self.window, self.repair_tap, self.guard, self.wait)
-                self.equip_menu_pending = False
-            self.equip_pending = False
-            tool = self.read_tool()
-            if not ToolRepairCycle.usable(tool) or not tool['equipped']:
-                raise ValueError('斧镐持用状态再次改变，请确认后继续')
-            self.report('playing', '已手持斧镐，继续当前点位 · F6暂停 · F9停止',
-                        waypoint=index+1, waypoint_count=total)
-            return True
-        except (ValueError, OSError) as exc:
-            self.repair_pause(f'自动拿出斧镐未完成：{exc}', index, total, state='equip_paused')
-        finally:
-            self.release()
-            self.navigation_waiting = False
-            self.last_tick = self.clock.monotonic()
-
-    def maintain_tool(self, index, total):
-        if self.repair_box is None and self.tool_selector is None:
-            return False
-        now = self.clock.monotonic()
-        if now-self.last_tool_check >= 1.:
-            self.read_tool()
-        if self.tool_selector is not None:
-            if self.tool_status.get('state') == 'locked':
-                self.repair_pause('斧镐尚未解锁，暂时无法自动拿出', index, total, state='equip_paused')
-            if not ToolRepairCycle.usable(self.tool_status):
-                self.repair_pause('暂时无法确认斧镐持用状态，请等待读取恢复', index, total, state='equip_paused')
-            if not self.tool_status['equipped'] or self.equip_pending or self.equip_menu_pending:
-                return self.equip_axe_pick(index, total)
-        if self.repair_box is None:
-            return False
-        outcome = self.repair_cycle.observe(self.tool_status, now)
-        if self.repair_menu_pending and not self.repair_cycle.active:
-            try:
-                self.repair_box.close_menu(self.window, self.repair_tap, self.guard, self.wait)
-                self.repair_menu_pending = False
-            except (ValueError, OSError) as exc:
-                self.repair_pause(f'关闭 T 面板失败：{exc}', index, total)
-        if outcome == 'idle':
-            return False
-        failures = {'unavailable': '自动维修暂时读不到耐久，请等待游戏恢复',
-                    'not_held': '斧镐耐久偏低，请先手持斧镐再自动维修',
-                    'changed': '维修期间工具数据改变，请确认正在持用斧镐',
-                    'failed': '维修后耐久未恢复到20%，请检查维修盒数量或手动维修'}
-        if outcome in failures:
-            self.repair_pause(failures[outcome], index, total)
-        self.release()
-        self.navigation_waiting = True
-        try:
-            if outcome == 'needed':
-                self.report('repairing', '耐久低于20%，正在打开 T 面板使用维修盒 · F9停止',
-                            waypoint=index+1, waypoint_count=total, repair_phase='opening')
-                try:
-                    target = self.repair_box.prepare(self.window, self.repair_tap, self.wait, self.guard)
-                    self.repair_menu_pending = True
-                    # Preparation takes time. Recheck the actual tool immediately
-                    # before consuming anything, and retain the attempt on pause.
-                    self.tool_status = self.reader.tools_snapshot()
-                    if self.repair_cycle.observe(self.tool_status, self.clock.monotonic()) != 'needed':
-                        return True
-                    self.repair_cycle.mark_used(self.tool_status, self.clock.monotonic())
-                    try:
-                        self.repair_box.use(target, self.device, self.guard, self.wait)
-                    finally:
-                        # Wait a full effect duration AFTER releasing the click,
-                        # including when F6 interrupts that press.
-                        self.repair_cycle.started_at = self.clock.monotonic()
-                except (ValueError, OSError) as exc:
-                    self.repair_pause(f'维修盒使用未确认：{exc}', index, total)
-                finally:
-                    self.release()
-            if outcome == 'completed':
-                try:
-                    self.repair_box.close_menu(self.window, self.repair_tap, self.guard, self.wait)
-                    self.repair_menu_pending = False
-                except (ValueError, OSError) as exc:
-                    self.repair_pause(f'维修已完成，关闭 T 面板失败：{exc}', index, total)
-                self.report('playing', '维修完成，继续当前点位 · F6暂停 · F9停止',
-                            waypoint=index+1, waypoint_count=total, repair_phase='completed')
-                return True
-            remaining = self.repair_cycle.remaining(self.clock.monotonic())
-            if now-self.last_repair_report >= .5:
-                self.report('repairing', f'维修盒恢复中 · 剩余 {remaining:.1f} 秒 · F6暂停 · F9停止',
-                            waypoint=index+1, waypoint_count=total, repair_phase='waiting',
-                            repair_remaining=remaining)
-                self.last_repair_report = now
-            self.wait(min(.1, max(.01, remaining)))
-            return True
-        finally:
-            self.navigation_waiting = False
-            self.last_tick = self.clock.monotonic()
-
     def follow(self):
         points = self.waypoints if self.waypoints is not None else build_waypoints(self.data['samples'])
         index, basis = 0, None
@@ -848,16 +216,77 @@ class _Follower:
         segment_start = None
         navigation_leg = None
         navigation_wait_since = None
+        special_load_since = None
+        special_stalls = 0
+        approach_progress = ApproachProgress()
         while index < len(points):
             try:
+                self.visit_point = points[index]
                 self.guard()
+                self.check_visit(points[index])
                 special_near = False
                 if 'special_resource' in points[index]:
-                    live_target = self.special_target(points[index])
+                    scene = self.navigator.scene_provider() or {}
+                    live_objects = self.special_objects(points[index], scene=scene)
+                    if live_objects is None or not live_objects and scene.get('global_special_state') != 'ready':
+                        self.release()
+                        special_load_since = None
+                        if self.scene_refresh is not None:
+                            self.scene_refresh()
+                        if self.clock.monotonic() - self.last_report >= .5:
+                            self.report('navigating', '动态场景更新中，已释放按键，读取恢复后继续导航 · F9停止',
+                                        waypoint=index+1, waypoint_count=len(points))
+                            self.last_report = self.clock.monotonic()
+                        self.wait(.25)
+                        continue
+                    live_target = self.special_target(points[index], allow_global=True, scene=scene)
                     current = self.read(force=True)
                     special_near = in_interaction_range(current, live_target['position'])
+                    if special_near and live_target.get('resource_global_only'):
+                        self.release()
+                        if special_load_since is None:
+                            special_load_since = self.clock.monotonic()
+                        if self.clock.monotonic()-special_load_since >= policy.COORD_SPECIAL_LOAD_WAIT_SECONDS:
+                            from utils.core.special_approach import SpecialTargetUnavailable
+                            raise SpecialTargetUnavailable('已到达全图资源位置，但附近模型和交互状态仍未加载，未按 F；请核对资源是否仍在此处')
+                        if self.scene_refresh is not None:
+                            self.scene_refresh()
+                        if self.clock.monotonic() - self.last_report >= .5:
+                            self.report('navigating', '已到全图资源位置，等待附近对象与交互状态加载 · F9停止',
+                                        waypoint=index+1, waypoint_count=len(points))
+                            self.last_report = self.clock.monotonic()
+                        self.wait(.2)
+                        continue
+                    special_load_since = None
                     if special_near:
                         points[index]['position'] = list(current)
+                        special_stalls = 0
+                        approach_progress.reset()
+                    elif approach_progress.stalled(current, live_target['position'], self.clock.monotonic()):
+                        # Blocked inside the last stretch: re-pick the ring point
+                        # instead of sliding against the model for seconds.
+                        self.release()
+                        avoided = points[index].setdefault('_avoid_standpoints', [])
+                        if valid_position(points[index].get('position')) \
+                                and not in_interaction_range(points[index]['position'], live_target['position']) \
+                                and all(distance(points[index]['position'], seen) > .01 for seen in avoided):
+                            avoided.append(list(points[index]['position']))
+                        points[index].pop('_approach_for', None)
+                        approach_progress.reset()
+                        special_stalls += 1
+                        if special_stalls >= policy.COORD_SPECIAL_APPROACH_STALL_LIMIT:
+                            self.pause_blocked(index, len(points), '资源附近找不到能站住的落脚点')
+                        if self.navigator:
+                            self.navigator.invalidate()
+                        if self.clock.monotonic() - self.last_report >= .5:
+                            self.report('navigating',
+                                        f'点位 {index + 1}/{len(points)} · 贴近资源时被挡住，换落脚点 {special_stalls}/'
+                                        f'{policy.COORD_SPECIAL_APPROACH_STALL_LIMIT} · F9停止',
+                                        waypoint=index+1, waypoint_count=len(points),
+                                        special_stall=special_stalls)
+                            self.last_report = self.clock.monotonic()
+                        self.wait(.15)
+                        continue
                     elif '_approach_for' not in points[index] or distance(
                             points[index]['_approach_for'], live_target['position']) > .3 \
                             or not in_interaction_range(points[index]['position'], live_target['position']):
@@ -865,7 +294,8 @@ class _Follower:
                         scene = self.navigator.scene_provider()
                         obstacles = ObstacleMap(scene, live_target['position'], goal=live_target['position'])
                         try:
-                            approach = interaction_standpoint(current, live_target['position'], obstacles)
+                            approach = interaction_standpoint(current, live_target['position'], obstacles,
+                                                              avoid=points[index].get('_avoid_standpoints', ()))
                         except ValueError as exc:
                             self.report('navigating', f'{exc}，等待场景更新 · F9停止',
                                         waypoint=index+1, waypoint_count=len(points))
@@ -875,6 +305,7 @@ class _Follower:
                         points[index]['position'] = approach
                         points[index]['_approach_for'] = list(live_target['position'])
                 if self.maintain_stamina(index, len(points)) or self.maintain_tool(index, len(points)):
+                    self.pause_visit_clock()
                     anchor, navigation_leg, navigation_wait_since = None, None, None
                     best, progress_at = math.inf, self.clock.monotonic()
                     if self.navigator:
@@ -905,7 +336,7 @@ class _Follower:
                         self.report('calibrating', f'点位 {index + 1}/{len(points)} · {exc}，稍后重新校准 · F9停止',
                                     waypoint=index + 1, waypoint_count=len(points), navigation_path=[])
                         scene_ready = (self.navigator.scene_provider() or {}).get('state') == 'ready'
-                        if self.jump_on_recovery and scene_ready:
+                        if self.jump_on_recovery and scene_ready and not self.stable_navigation:
                             try:
                                 self.set_keys({'space'})
                                 self.wait(policy.COORD_RECOVERY_JUMP_SECONDS)
@@ -990,6 +421,8 @@ class _Follower:
                                     position=list(position), waypoint=index, waypoint_count=len(points))
                     self.collection = None
                     self.special_progress = None
+                    special_stalls = 0
+                    approach_progress.reset()
                     dwell, anchor = None, None
                     self.recovery.reset()
                     if self.navigator:
@@ -997,7 +430,11 @@ class _Follower:
                     navigation_leg = None
                     segment_start = position
                     best, progress_at = math.inf, now
-                    if self.waypoints is not None and index == len(points):
+                    if self.skip_unreachable:
+                        points, index = self.finish_visit(points, index-1, position)
+                        reference = position
+                        navigation_wait_since = None
+                    elif self.waypoints is not None and index == len(points):
                         self.report('cycle_finished', '本轮点位回放完成 · F6暂停 · F9停止',
                                     waypoint=index, waypoint_count=len(points))
                         if self.cycle < self.loop_count:
@@ -1174,7 +611,18 @@ class _Follower:
                     self.wait(policy.COORD_NAV_APPROACH_SETTLE_SECONDS)
                 else:
                     self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
+            except _SkipPoint as exc:
+                self.release()
+                points, index = self.finish_visit(points, index, self.position, reason=str(exc))
+                self.collection = self.special_progress = None
+                self.recovery.reset()
+                if self.navigator:
+                    self.navigator.invalidate()
+                segment_start = reference = self.position
+                navigation_leg = navigation_wait_since = anchor = dwell = None
+                best, progress_at = math.inf, self.clock.monotonic()
             except _Paused:
+                special_load_since = None
                 self.release()
                 if self.position is not None:
                     reference = self.position
@@ -1187,6 +635,7 @@ class _Follower:
                     navigation_leg = None
                     navigation_wait_since = None
                 self.clock.sleep(.01)
+                self.pause_visit_clock()
         return True
 
 
@@ -1215,16 +664,26 @@ def drive_route(data, reader_factory, device, window, controls, report, clock=Pr
             if reader:
                 reader.close()
 
-
 def drive_points(data, size, reader_factory, device, window, controls, report, clock=PreciseClock, start_mode='first',
                  recovery_attempts=0, jump_on_recovery=False, collect_wait_seconds=None,
                  loop_count=policy.COORD_PLAYBACK_DEFAULT_LOOPS, continuous_recovery=False, navigator=None,
-                 repair_box=None, tool_selector=None, food=None):
+                 repair_box=None, tool_selector=None, food=None, scene_refresh=None,
+                 stable_navigation=False, skip_unreachable=False):
+    if 'special_patrol' in data:
+        from utils.flows.special_patrol import drive_special_patrol
+        return drive_special_patrol(data, size, reader_factory, device, window, controls, report,
+            clock=clock, start_mode=start_mode, recovery_attempts=recovery_attempts,
+            jump_on_recovery=jump_on_recovery, collect_wait_seconds=collect_wait_seconds,
+            loop_count=loop_count, continuous_recovery=continuous_recovery, navigator=navigator,
+            repair_box=repair_box, tool_selector=tool_selector, food=food, scene_refresh=scene_refresh,
+            point_runner=drive_points, **({'stable_navigation': True} if stable_navigation else {}))
     reader = None
     try:
         points = ordered_waypoints(data)
         validate_loop_count(loop_count)
         validate_recovery_options(recovery_attempts, jump_on_recovery)
+        if type(stable_navigation) is not bool or type(skip_unreachable) is not bool:
+            raise ValueError('寻路稳定策略或跳过点位选项无效。')
         if type(continuous_recovery) is not bool or continuous_recovery and not recovery_attempts:
             raise ValueError('自动重试需要选择 1～10 次的每轮脱困次数。')
         if collect_wait_seconds is not None:
@@ -1242,12 +701,14 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
                 break
             clock.sleep(.01)
         reader = reader_factory()
-        config = {'duration': 0., 'client_size': list(size)}
+        config = {'duration': 0., 'client_size': list(size), 'patrol_probe': data.get('patrol_probe') is True}
         return _Follower(config, reader, device, window, controls, report, clock,
                          waypoints=points, start_mode=start_mode, recovery_attempts=recovery_attempts,
                          jump_on_recovery=jump_on_recovery, collect_wait_seconds=collect_wait_seconds,
                          loop_count=loop_count, continuous_recovery=continuous_recovery, navigator=navigator,
-                         repair_box=repair_box, tool_selector=tool_selector, food=food).follow()
+                         repair_box=repair_box, tool_selector=tool_selector, food=food,
+                         scene_refresh=scene_refresh, stable_navigation=stable_navigation,
+                         skip_unreachable=skip_unreachable).follow()
     except _Stopped:
         return False
     finally:
@@ -1257,8 +718,9 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
             if reader:
                 reader.close()
 
-
 def play_main(base, data):
+    from utils.drivers.town_window import TimelineInput, TownWindow
+    from utils.ui.recorder_feedback import Feedback
     base = Path(base)
     feedback, controls = Feedback(base), None
     try:

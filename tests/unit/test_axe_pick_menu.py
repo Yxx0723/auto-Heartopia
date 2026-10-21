@@ -7,7 +7,7 @@ from PIL import Image
 
 from utils.vision.axe_pick import AxePickMenu, LazyToolSelector
 
-TEMPLATE = Path(__file__).resolve().parents[2]/'webui/coordinate-monitor/axe_pick_icon.png'
+TEMPLATE = Path(__file__).resolve().parents[2]/'resources/monitor/axe_pick_icon.png'
 
 
 def frame(scale=1., held=False, neighbour=True, copies=1):

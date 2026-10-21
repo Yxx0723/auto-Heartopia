@@ -1,5 +1,9 @@
 """Only the monitored game PID may receive point playback input."""
+import sys
 import pytest
+if sys.platform != 'win32':
+    pytest.skip('Windows native input/window contract', allow_module_level=True)
+
 
 from utils.drivers.point_game_window import PointGameWindow
 

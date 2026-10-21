@@ -3,7 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 import tkinter as tk
 
-from utils.ui.native_coordinate_monitor import CoordinateWindow, DisplayValue, configure_changed
+from utils.ui.native_coordinate_monitor import CoordinateWindow
+from utils.ui.monitor_widgets import DisplayValue, configure_changed
 
 
 def window():
@@ -104,6 +105,8 @@ def test_tick_still_consumes_coordinate_scene_and_playback_updates_while_draggin
     ui.interacting_until = .15
     ui.view = MonitorView()
     ui.worker, ui.scene_worker, ui.playback = Mock(), Mock(), Mock()
+    from utils.ui.route_optimization import RouteOptimizationJob
+    ui.route_optimizer = RouteOptimizationJob()
     ui.worker.take_latest.return_value = {'state': 'connected', 'session': 'new', 'sequence': 2,
                                          'position': [8., 20., 9.], 'pid': 77}
     ui.scene_worker.set_pid.return_value = False

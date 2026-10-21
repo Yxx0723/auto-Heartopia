@@ -1,0 +1,17 @@
+{
+  "schema": "myrail-position-mono-v1",
+  "process_name": "xdt.exe",
+  "module": "mono-2.0-sgen.dll",
+  "read_only": true,
+  "verified_after_restart": true,
+  "verified_player_movement": true,
+  "verified_camera_independence": true,
+  "verified_after_scene_change": false,
+  "require_movement_calibration": true,
+  "sha256": "236fe6fc21a95a2b2b51aaeac53f8f8b0ebd60dc1014a59a8d952bf0ad6fc89b",
+  "file_size": 5199800,
+  "unity_player_sha256": "8db4464dd493c99f42f267a2e509f40632f59aca3fb542d573beb7bd695ba302",
+  "unity_player_file_size": 28724152,
+  "game_assembly_sha256": "8e44137ad5536b87fe46cc150980305bc866d12666cdbde9f0c59331cf0d8b0d",
+  "game_assembly_file_size": 52892600
+}

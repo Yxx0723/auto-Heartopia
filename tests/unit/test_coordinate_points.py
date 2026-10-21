@@ -1,6 +1,5 @@
 """Manual point capture must survive restarts and never destroy prior points."""
 import json
-import msvcrt
 
 import pytest
 
@@ -111,15 +110,10 @@ def test_busy_store_does_not_overwrite_and_lock_is_released(tmp_path):
     store = PointStore(tmp_path / '点位.json')
     store.append(SNAPSHOT, STAMP)
     before = store.path.read_bytes()
-    with store.path.with_suffix('.lock').open('r+b') as lock:
-        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-        try:
-            with pytest.raises(OSError, match='另一个窗口'):
-                store.append(SNAPSHOT, STAMP)
-            assert store.path.read_bytes() == before
-        finally:
-            lock.seek(0)
-            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+    with store.locked():
+        with pytest.raises(OSError, match='另一个窗口'):
+            store.append(SNAPSHOT, STAMP)
+        assert store.path.read_bytes() == before
     assert len(store.append(SNAPSHOT, STAMP)['points']) == 2
 
 

@@ -122,10 +122,10 @@ class MonoPositionLocator:
             found = [field for field in definition['fields'] if field['name'] == name]
             if found:
                 field = found[0]
-                width = 12 if code == 17 else 1 if code == 2 else 8
+                field_width = 12 if code == 17 else 1 if code == 2 else 8
                 if len(found) != 1 or field['code'] != code or bool(field['flags'] & 16) != static \
                         or field['flags'] & 64 or field['offset'] < (0 if static else 16) \
-                        or field['offset'] + width > definition['size']:
+                        or field['offset'] + field_width > definition['size']:
                     raise ValueError('角色字段布局不匹配：' + name)
                 return field
             klass = definition['parent']
@@ -143,6 +143,62 @@ class MonoPositionLocator:
         if definition['name'] != expected or definition['namespace'] != ROLE_TYPES[expected]:
             raise ValueError('读取对象不是本地角色：' + expected)
         return klass
+
+    def _world_position(self, hierarchy, checks, trace):
+        """Use the owned unparented entity anchor while riding.
+
+        Verified vehicle Socket hierarchies can retain world-space caches in
+        intermediate _position fields. Composing them as local TRS doubles
+        translation. The unparented LevelEntityComponent is a direct world
+        anchor; its position is intentionally distinct from the rider's feet.
+        """
+        current, seen, chain = hierarchy, set(), []
+        while current:
+            if current in seen or len(seen) >= limits.MONO_PARENT_LIMIT:
+                raise ValueError('角色附着层级存在循环或超出读取范围')
+            seen.add(current)
+            klass = self._object(current, 'Hierarchy')
+            checks.append((current, self._pointer(current)))
+            parent_field = self._field(klass, '_parent', 18)
+            parent_at = current + parent_field['offset']
+            parent = self._pointer(parent_at, allow_null=True)
+            checks.append((parent_at, parent))
+            field = self._field(klass, '_position', 17)
+            vector_type = self._class(field['type'])
+            if (vector_type['name'], vector_type['namespace'], vector_type['size']) != ('Vector3', 'UnityEngine', 28):
+                raise ValueError('角色位置字段类型不匹配')
+            chain.append((current, klass, current + field['offset']))
+            if parent:
+                self._object(parent, 'Hierarchy')
+                trace.append({'read_at': parent_at, 'pointer': parent,
+                              'offset': parent_field['offset'], 'field': '_parent'})
+            current = parent
+        root, _, world_address = chain[-1]
+        attached = len(chain) > 1
+        if attached:
+            def linked(obj, expected, name, target):
+                klass = self._object(obj, expected)
+                at = obj + self._field(klass, name, 18)['offset']
+                value = self._pointer(at)
+                self._object(value, target)
+                checks.append((at, value))
+                return value
+            owner = linked(root, 'Hierarchy', '_hierarchyObject', 'LevelEntityComponent')
+            if linked(owner, 'LevelEntityComponent', '_hierarchy', 'Hierarchy') != root:
+                raise ValueError('载具附着根节点归属不一致')
+            entity = linked(owner, 'LevelEntityComponent', '<entity>k__BackingField', 'Entity')
+            if linked(entity, 'Entity', '<transformComponent>k__BackingField', 'LevelEntityComponent') != owner:
+                raise ValueError('载具附着实体归属不一致')
+            alive_at = entity + self._field(self._object(entity, 'Entity'), '_alived', 2)['offset']
+            if self._bytes(alive_at, 1) != b'\x01':
+                raise ValueError('载具附着实体已失效')
+        raw = self._bytes(world_address, 12)
+        position = struct.unpack('<3f', raw)
+        if not valid_position(position):
+            raise ValueError('角色世界坐标数值无效')
+        if attached and (self._bytes(world_address, 12) != raw or self._bytes(alive_at, 1) != b'\x01'):
+            raise ValueError('角色附着变换在采样中发生变化，请等待下一次读取')
+        return position, chain[0][2], attached, len(chain)
 
     def snapshot(self):
         checks, trace = [], []
@@ -184,26 +240,18 @@ class MonoPositionLocator:
         hierarchy = follow(transform, 'LevelEntityComponent', '_hierarchy', 'Hierarchy')
         if follow(hierarchy, 'Hierarchy', '_hierarchyObject', 'LevelEntityComponent') != transform:
             raise ValueError('角色层级归属不一致')
-        hierarchy_class = self._object(hierarchy, 'Hierarchy')
-        parent_at = hierarchy + self._field(hierarchy_class, '_parent', 18)['offset']
-        if self._pointer(parent_at, allow_null=True):
-            raise ValueError('角色正附着于其他对象，暂停世界坐标读取')
-        field = self._field(hierarchy_class, '_position', 17)
-        vector_type = self._class(field['type'])
-        if vector_type['name'] != 'Vector3' or vector_type['namespace'] != 'UnityEngine' \
-                or vector_type['size'] != 28:
-            raise ValueError('角色位置字段类型不匹配')
-        address = hierarchy + field['offset']
-        position = struct.unpack('<3f', self._bytes(address, 12))
-        if not valid_position(position):
-            raise ValueError('角色坐标数值无效')
+        position, local_address, attached, depth = self._world_position(hierarchy, checks, trace)
+        address = None if attached else local_address
         # A scene transition can replace any link between reads. Recheck identity
         # after XYZ so one sample cannot combine two different role graphs.
         if any(self._pointer(at, allow_null=True) != value for at, value in checks) \
-                or self._pointer(parent_at, allow_null=True) \
                 or any(self._bytes(at, 1) != b'\x01' for at in flags):
             raise ValueError('角色或场景在采样中发生变化，请重新连接')
         return {'position': position, 'address': address, 'module_base': self.base,
+            'attached_to_parent': attached, 'position_computed': False,
+            'position_source': 'attachment-root' if attached else 'player',
+            'local_address': local_address, 'hierarchy_depth': depth,
             'locator': 'mono-local-player', 'valid_paths': 1, 'configured_paths': 1,
-            'paths': [{'label': 'Character → LocalPlayerComponent → Entity → Hierarchy._position',
+            'paths': [{'label': 'Character → LocalPlayerComponent → Entity → Hierarchy'
+                                + (' → attachment root world XYZ' if attached else '._position'),
                        'address': address, 'position': position, 'trace': trace}]}

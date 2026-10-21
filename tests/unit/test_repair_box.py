@@ -7,7 +7,7 @@ from PIL import Image
 from utils.vision.repair_box import RepairBoxMenu
 
 
-TEMPLATE = Path(__file__).resolve().parents[2]/'webui/coordinate-monitor/repair_box_menu.png'
+TEMPLATE = Path(__file__).resolve().parents[2]/'resources/monitor/repair_box_menu.png'
 
 
 def frame(scale=1., copies=1):

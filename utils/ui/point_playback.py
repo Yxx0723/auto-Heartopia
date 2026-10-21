@@ -13,14 +13,24 @@ from utils.core import thresholds as policy
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.drivers.playback_history import PlaybackHistory, RecordingPosition
-from utils.drivers.point_game_window import PointGameWindow
 from utils.drivers.timeline_hotkeys import PlaybackControls
-from utils.drivers.town_window import TimelineInput
-from utils.drivers.windows_input import PreciseClock
+from utils.drivers.clock import PreciseClock
 from utils.ui.playback_diagnostics import PlaybackDiagnostics
 
 
+def _window_for_pid(pid):
+    from utils.drivers.point_game_window import PointGameWindow
+    return PointGameWindow(pid)
+
+
+def _input_for_window(window):
+    from utils.drivers.town_window import TimelineInput
+    return TimelineInput(window)
+
+
 SPECIAL_FINISH_TEXT = {
+    'not_found': '本轮可用巡查区域已结束，尚未确认可继续采集的目标；不代表全图没有',
+    'unavailable': '已发现目标，但当前采集标志不可用，已停止采集；请核对冷却状态',
     None: '动态资源采集结束，请核对背包',
     special_verdict.GATHERED: '动态资源已确认采到，按键已释放',
     special_verdict.GONE: '动态资源已从场景消失，采集完成',
@@ -32,8 +42,8 @@ SPECIAL_FINISH_TEXT = {
 
 
 class PointPlayback:
-    def __init__(self, profile, runner=None, window_factory=PointGameWindow, controls_factory=PlaybackControls,
-                 reader_factory=ReadOnlyPosition, device_factory=TimelineInput, clock=PreciseClock,
+    def __init__(self, profile, runner=None, window_factory=_window_for_pid, controls_factory=PlaybackControls,
+                 reader_factory=ReadOnlyPosition, device_factory=_input_for_window, clock=PreciseClock,
                  scene_provider=None, navigator_factory=LocalNavigator, diagnostics_path=None, repair_factory=None,
                  tool_factory=None, food_factory=None, wall_clock=None, scene_refresh=None):
         self.profile = Path(profile)
@@ -59,6 +69,7 @@ class PointPlayback:
         self.total = 0
         self.cycle, self.loop_count = 1, policy.COORD_PLAYBACK_DEFAULT_LOOPS
         self.special_outcome = None
+        self.unresolved_points = []
 
     @property
     def active(self):
@@ -71,12 +82,14 @@ class PointPlayback:
                 message += f' · 完成时间 {completed_at:%Y-%m-%d %H:%M:%S}'
                 extra['completed_at'] = completed_at.isoformat(timespec='seconds')
             self.cycle = extra.get('cycle', self.cycle)
+            if 'unresolved_points' in extra:
+                self.unresolved_points = extra['unresolved_points']
             if 'resource_outcome' in extra:
                 self.special_outcome = extra['resource_outcome']
             if 'navigation_path' in extra:
                 self.navigation_path = extra.pop('navigation_path')
             if state in ('finished', 'stopped', 'error', 'reached', 'cycle_finished',
-                         'collecting', 'recovering', 'paused', 'blocked', 'repairing', 'repair_paused',
+                         'collecting', 'skipped', 'retrying', 'recovering', 'paused', 'blocked', 'repairing', 'repair_paused',
                          'equipping', 'equip_paused', 'eating', 'food_paused'):
                 self.navigation_path = []
             self.take_latest()
@@ -100,7 +113,7 @@ class PointPlayback:
     def start(self, data, pid, start_mode='first', recovery_attempts=policy.COORD_RECOVERY_DEFAULT_ATTEMPTS,
               jump_on_recovery=True, collect_wait_seconds=policy.COORD_COLLECTION_DEFAULT_WAIT,
               loop_count=policy.COORD_PLAYBACK_DEFAULT_LOOPS, auto_navigate=False, auto_repair=False, auto_eat=False,
-              route_path=None, remember_paths=True):
+              route_path=None, remember_paths=True, stable_navigation=False, skip_unreachable=False):
         if self.closed or self.active:
             raise ValueError('已有点位回放正在运行，请先停止。')
         if self.runner is None:
@@ -120,8 +133,12 @@ class PointPlayback:
             raise ValueError('自动吃水果选项无效。')
         if type(remember_paths) is not bool:
             raise ValueError('记忆走法选项无效。')
+        if type(stable_navigation) is not bool or type(skip_unreachable) is not bool:
+            raise ValueError('寻路稳定策略或跳过点位选项无效。')
         if auto_navigate and self.scene_provider is None:
             raise ValueError('场景导航尚未连接，请重新打开新版程序。')
+        if 'special_patrol' in data and not auto_navigate:
+            raise ValueError('动态资源巡查需要启用自动寻路。')
         self.total = len(ordered_waypoints(data))
         if type(pid) is not int or pid <= 0:
             raise ValueError('没有可用的游戏进程，请重新连接。')
@@ -130,22 +147,26 @@ class PointPlayback:
         self.stop_event.clear()
         self.cycle, self.loop_count = 1, loop_count
         self.special_outcome = None
+        self.unresolved_points = []
         self.navigation_path = []
         self.history = (PlaybackHistory(self.history_root, deepcopy(data),
                         Path(route_path).stem if route_path is not None else '未命名路线',
                         {'start_mode': start_mode, 'loop_count': loop_count,
                          'auto_navigate': auto_navigate, 'remember_paths': remember_paths,
                          'auto_repair': auto_repair, 'auto_eat': auto_eat,
+                         'stable_navigation': stable_navigation, 'skip_unreachable': skip_unreachable,
                          'collect_wait_seconds': collect_wait_seconds,
                          'recovery_attempts': recovery_attempts, 'jump_on_recovery': jump_on_recovery})
                         if self.history_root is not None else None)
         self.update('playback_wait', f'已就绪：{self.total} 个点 · 循环 {loop_count} 次 · 切回游戏按 F6 开始 · F9 停止')
         self.thread = threading.Thread(target=self._run, args=(deepcopy(data), pid, start_mode,
-                                                              recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat),
+                                                              recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat,
+                                                              stable_navigation, skip_unreachable),
                                        name='point-playback', daemon=True)
         self.thread.start()
 
-    def _run(self, data, pid, start_mode, recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat):
+    def _run(self, data, pid, start_mode, recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat,
+             stable_navigation, skip_unreachable):
         controls, device = None, None
         try:
             window = self.window_factory(pid)
@@ -155,6 +176,8 @@ class PointPlayback:
             controls.start()
             navigation = ({'navigator': self.navigator_factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic)}
                           if auto_navigate else {})
+            if stable_navigation or skip_unreachable:
+                navigation.update(stable_navigation=stable_navigation, skip_unreachable=skip_unreachable)
             if auto_navigate and self.scene_refresh is not None:
                 navigation['scene_refresh'] = lambda: self.scene_refresh(pid)
             if auto_navigate and self.path_memory is not None:
@@ -180,11 +203,15 @@ class PointPlayback:
                                      continuous_recovery=True, **navigation)
             finish_message = (('本次点位回放完成' if loop_count == 1 else f'已完成 {loop_count} 轮回放')
                               if completed else '回放已停止，按键已释放')
+            if completed and self.unresolved_points:
+                names = '、'.join(dict.fromkeys(p['name'] for p in self.unresolved_points))
+                finish_message = f'回放已结束 · 有 {len(self.unresolved_points)} 项点位未完成：{names} · 详情见回放记录'
             if completed and any('special_resource' in point for point in data.get('points', [])):
                 finish_message = SPECIAL_FINISH_TEXT.get(self.special_outcome, SPECIAL_FINISH_TEXT[None])
             if self.path_memory is not None:
                 finish_message += f' · 已更新路线学习 · 已记忆 {self.path_memory.count} 段走法'
             self.update('finished' if completed else 'stopped', finish_message,
+                        unresolved_points=self.unresolved_points,
                         cycle=loop_count if completed else self.cycle)
         except Exception as exc:
             self.update('error', f'点位回放停止：{exc}')

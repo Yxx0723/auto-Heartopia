@@ -87,12 +87,14 @@ class GlobalMineralReader:
             enum = meta.cls(kind['type'])
             if (enum['name'], enum['namespace']) != ('ResType', _POINT_NS):
                 raise ValueError('资源种类枚举不符')
-            if meta.integer(obj+kind['offset']) != 2:
+            resource_kind = meta.integer(obj+kind['offset'])
+            if resource_kind not in (1, 2, 3):
                 continue
             item = self.field(info, 'itemTypeId', 8, 4)
             item_id = meta.integer(obj+item['offset'])
             category = self.item_types.get(item_id)
-            if category not in ('rock', 'ore'):
+            allowed = {1: ('tree',), 2: ('rock', 'ore'), 3: ('bush', 'blueberry', 'raspberry')}
+            if category not in allowed[resource_kind]:
                 continue
             identity = self.field(info, 'resourceId', 9, 4)
             resource_id = struct.unpack('<I', meta.data(obj+identity['offset'], 4))[0]
@@ -103,17 +105,17 @@ class GlobalMineralReader:
             xyz = list(struct.unpack('<3f', meta.data(obj+position['offset'], 12)))
             if not resource_id or resource_id in seen or not valid_position(xyz):
                 raise ValueError('全图资源点位无效或重复')
-            if meta.integer(obj+item['offset']) != item_id or meta.integer(obj+kind['offset']) != 2:
+            if meta.integer(obj+item['offset']) != item_id or meta.integer(obj+kind['offset']) != resource_kind:
                 raise ValueError('资源定义正在变化')
             seen.add(resource_id)
             result.append({'category': category, 'position': xyz, 'resource_id': resource_id,
-                           'item_type_id': item_id, 'map_definition': True,
+                           'item_type_id': item_id, 'resource_kind': resource_kind, 'map_definition': True,
                            'source': 'main-map-resource-definition'})
         if not result:
-            raise ValueError('主地图石矿定义尚未加载')
+            raise ValueError('主地图采集资源定义尚未加载')
         return result
 
-    def snapshot(self):
+    def main_context(self):
         meta = self.meta
         if meta.pointer(self.base+0x4d3878) != meta.domain:
             raise ValueError('资源运行时已切换')
@@ -121,6 +123,11 @@ class GlobalMineralReader:
         self.expected(node, 'LevelNode', 'XDTGame.Core')
         level = meta.ref(node, '_instance')
         self.expected(level, 'GameLevel_Main', 'XDTGameSystem.GameLevels')
+        return node, level
+
+    def snapshot(self):
+        meta = self.meta
+        node, level = self.main_context()
         engine = meta.static_ref(self.engine_class, '<Instance>k__BackingField')
         self.expected(engine, 'ScriptEngine', 'MonoGame.ScriptFramework')
         registry = meta.ref(engine, '_holdingObjs')
@@ -130,8 +137,7 @@ class GlobalMineralReader:
         if cached and cached['context'] == context and cached['held'] in held_objects:
             if self.unwrap(cached['held']) == cached['config']:
                 layout = self.config_points(cached['config'])
-                if layout == cached['layout'] and now-cached['at'] < policy.COORD_SCENE_CACHE_FAR_SECONDS \
-                        and self.current_context(context):
+                if layout == cached['layout'] and self.current_context(context):
                     return cached['points']
         self.cache = None
         candidates = {}

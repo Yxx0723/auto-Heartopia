@@ -1,14 +1,18 @@
 """Search must precede fruit selection; real captures also contain recipes."""
+import sys
+import pytest
+if sys.platform != 'win32':
+    pytest.skip('Windows native input/window contract', allow_module_level=True)
+
 from pathlib import Path
 from unittest.mock import Mock
 import ctypes
-import pytest
 from PIL import Image
 from utils.vision.food_menu import FruitMenu
 from utils.drivers.town_window import TimelineInput
 from utils.drivers.windows_input import WindowsInput, Input
 
-ROOT = Path(__file__).resolve().parents[2]/'webui/coordinate-monitor'
+ROOT = Path(__file__).resolve().parents[2]/'resources/monitor'
 FIXTURES = Path(__file__).with_name('fixtures')
 
 

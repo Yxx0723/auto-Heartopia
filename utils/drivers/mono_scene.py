@@ -16,14 +16,19 @@ BUSH_ITEM_TYPES = {101: 'bush', 102: 'blueberry', 103: 'raspberry'}
 # (0.407 units), using exact gather components and their own _itemTypeID fields.
 # Unknown stone IDs stay generic until their actual resource identity is checked.
 STONE_ITEM_TYPES = {301: 'rock', 302: 'ore'}
+# Main-map ResType.Tree records contain these 12 item types on the pinned build.
+# They establish tree locations, not current fruit/interaction availability.
+GATHER_ITEM_TYPES = {**STONE_ITEM_TYPES, **BUSH_ITEM_TYPES, **dict.fromkeys(range(201, 213), 'tree')}
 # Both exact types are present in the inspected game's vegetation metadata.
 TREE_COMPONENTS = {('CollectableTreeComponent', 'XDTLevelAndEntity.Gameplay.Component.Gather'),
                    ('CollectableAdvancedTreeComponent', 'XDTLevelAndEntity.Gameplay.Component.Gather')}
 FAUNA_COMPONENTS = {
     ('InsectComponent', 'XDTLevelAndEntity.Gameplay.Component.Insect'): 'insect',
     ('BirdComponent', 'ScriptsRefactory.LevelAndEntity.Entity.Components'): 'bird',
+    ('FishComponent', 'XDTLevelAndEntity.Gameplay.Component.Fish'): 'fish',
     ('AnimalMovementComponent', 'XDTLevelAndEntity.Gameplay.Component.Animal'): 'animal',
 }
+HARVEST_COMPONENTS = {('CropComponent', 'XDTLevelAndEntity.Gameplay.Component.Homeland'): 'crop'}
 # Exact live processor identities inspected on 2026-10-15. Their own collider
 # target lists establish ownership; shape, names and static ID ranges do not.
 _BAKE_NAMESPACE = 'XDTLevelAndEntity.BaseSystem.RenderingManager.BakeRendering'
@@ -430,8 +435,21 @@ class MemorySceneMap:
             version_at = components + meta.field(container['address'], '_version')['offset']
             before = meta.integer(version_at)
             categories, resource_reads, identity_reads = set(), [], []
+            generic_resource = False
             for component in meta.dictionary(components, max_items=policy.COORD_SCENE_ENTITY_COMPONENT_LIMIT):
                 component_info = meta.obj(component)
+                if (component_info['name'], component_info['namespace']) == (
+                        'CollectableObjectComponent', 'XDTLevelAndEntity.Gameplay.Component.Gather'):
+                    if meta.ref(component, '<entity>k__BackingField') != entity:
+                        return 'other'
+                    generic_resource = True
+                    identity_reads.append(component)
+                harvest = HARVEST_COMPONENTS.get((component_info['name'], component_info['namespace']))
+                if harvest:
+                    if meta.ref(component, '<entity>k__BackingField') != entity:
+                        return 'other'
+                    categories.add(harvest)
+                    identity_reads.append(component)
                 special = (component_info['name'], component_info['namespace']) in SPECIAL_COMPONENTS
                 if special:
                     try:
@@ -479,9 +497,9 @@ class MemorySceneMap:
                 return 'other'
             if len(categories) == 1:
                 return categories.pop()
-            if categories & {'tree', 'rock', 'ore', 'fluorite', 'roaming_oak', 'insect', 'butterfly', 'bird', 'animal', 'other'}:
+            if categories & {'tree', 'rock', 'ore', 'fluorite', 'roaming_oak', 'insect', 'butterfly', 'bird', 'animal', 'fish', 'crop', 'other'}:
                 return 'other'
-            return 'shrub' if categories else 'other'
+            return 'shrub' if categories else 'resource' if generic_resource else 'other'
         except ValueError:
             # An unloading entity or incompatible component layout must not hide the scene.
             return 'other'
@@ -630,11 +648,31 @@ class MemorySceneMap:
         global_resources, global_state = [], 'unavailable'
         try:
             if getattr(self, 'global_minerals', None) is None:
-                self.global_minerals = GlobalMineralReader(meta, self.memory.base, STONE_ITEM_TYPES)
+                self.global_minerals = GlobalMineralReader(meta, self.memory.base, GATHER_ITEM_TYPES)
             global_resources = self.global_minerals.snapshot()
             global_state = 'ready'
         except ValueError:
             pass  # Optional display definitions must never discard live navigation geometry.
+        fixed_context = None
+        try:
+            if self.global_minerals is not None:
+                self.global_minerals.main_context()
+                fixed_context = {'map': 'main', 'build': self.memory.profile.get('game_assembly_sha256')}
+        except ValueError:
+            pass
+        global_special, global_map, special_state, special_context = [], [], 'unavailable', None
+        try:
+            from utils.drivers.global_map_resources import GlobalMapResourceReader
+            if getattr(self, 'global_special', None) is None:
+                self.global_special = GlobalMapResourceReader(meta, self.memory.base)
+            all_resources = self.global_special.snapshot()
+            context = self.global_special.context()
+            special_context = (self.memory.pid, context[2], context[3])
+            global_special = [obj for obj in all_resources if obj['category'] in ('roaming_oak', 'fluorite')]
+            global_map = [obj for obj in all_resources if obj['category'] not in ('roaming_oak', 'fluorite')]
+            special_state = 'ready'
+        except ValueError:
+            pass
         terrain = ()
         if world_state == 'ready' and global_state == 'ready':
             try:
@@ -649,8 +687,12 @@ class MemorySceneMap:
                 'scope': 'loaded-scene-partial', 'objects': objects, 'colliders': colliders,
                 'position': current['position'], 'barrier_state': barrier_state, 'world_state': world_state,
                 'global_resources': global_resources, 'global_resource_state': global_state,
+                'fixed_resource_context': fixed_context,
+                'global_special_resources': global_special, 'global_special_state': special_state,
+                'global_special_context': special_context,
+                'global_map_resources': global_map, 'global_map_state': special_state,
                 'global_resource_counts': {category: sum(p['category'] == category for p in global_resources)
-                                           for category in ('rock', 'ore')},
+                                           for category in ('rock', 'ore', 'tree', 'bush', 'blueberry', 'raspberry')},
                 'cache_context': (self.memory.pid, self.native.scene_key) if world_state == 'ready' else None,
                 'statistics': {'hierarchies': len(entries), 'terrain_walls': len(terrain),
                     **world_stats,

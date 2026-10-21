@@ -1,0 +1,3025 @@
+{
+  "created_at": "2026-10-21T12:02:15.304886+08:00",
+  "description": "Content-preserving archive migration. Shared current modules remain active.",
+  "files": [
+    {
+      "source": "fhoe.py",
+      "target": "legacy/fhoe.py",
+      "sha256": "09158705b12728738ef5842a3be4faa3067c91073ebf9a00ed521b75cd60134b",
+      "action": "move"
+    },
+    {
+      "source": "get_width.py",
+      "target": "legacy/get_width.py",
+      "sha256": "83caee6ccfbe1fb7f0aa61584252b6b1955ef9212341430eaea1f3d1adc3b6f8",
+      "action": "move"
+    },
+    {
+      "source": "tools/convert.py",
+      "target": "legacy/tools/convert.py",
+      "sha256": "b29e2b51a141e701c1a49755080bf547f5f4a7ef1906ec7311b9fa53d15a7566",
+      "action": "move"
+    },
+    {
+      "source": "tools/convert_to_webp.py",
+      "target": "legacy/tools/convert_to_webp.py",
+      "sha256": "c9cd47632544471ccd07aba214a6ff9e4975a69580c6ad4a36a3f948888bd380",
+      "action": "move"
+    },
+    {
+      "source": "tools/format_maps.py",
+      "target": "legacy/tools/format_maps.py",
+      "sha256": "67fae73124fa574d52ed442308ccab22684dd5fbab901e012c8907355f430636",
+      "action": "move"
+    },
+    {
+      "source": "tools/install_requirements.py",
+      "target": "legacy/tools/install_requirements.py",
+      "sha256": "9e44622714b4958c378997590239015f3833b13f28b87f32e528763ea59937c3",
+      "action": "move"
+    },
+    {
+      "source": "tools/map_res_list.py",
+      "target": "legacy/tools/map_res_list.py",
+      "sha256": "7fa5ccb0fb250f3e011ba69975fcf8b669d0abdc41b410cb6a55c34933715549",
+      "action": "move"
+    },
+    {
+      "source": "tools/map_simplify.py",
+      "target": "legacy/tools/map_simplify.py",
+      "sha256": "1e5f4ab1484d7d499ce919b82a541c8fa3ba120c86875b5d0b6f3500a19867a8",
+      "action": "move"
+    },
+    {
+      "source": "tools/shutdown.py",
+      "target": "legacy/tools/shutdown.py",
+      "sha256": "0e7d0720b80ef70c15385e5ba7528d47792b29a7dd28984f3947de86bd8955a0",
+      "action": "move"
+    },
+    {
+      "source": "tools/test.py",
+      "target": "legacy/tools/test.py",
+      "sha256": "dd866861979e52aa9de4afcf3c1dd09331ff1735a91b4c7ce1a31a832554c895",
+      "action": "move"
+    },
+    {
+      "source": "tools/update_file.py",
+      "target": "legacy/tools/update_file.py",
+      "sha256": "ce45eae14c046096ba785f43a72a0e784e5bad6ee280867d29477a577a834654",
+      "action": "move"
+    },
+    {
+      "source": "tools/validate_maps.py",
+      "target": "legacy/tools/validate_maps.py",
+      "sha256": "ced5b6f85613bff0553d9ca6fc8abb7db39b29bf7910a93e7455e151c062c843",
+      "action": "move"
+    },
+    {
+      "source": "utils/config/config.py",
+      "target": "legacy/utils/config/config.py",
+      "sha256": "5e88cc56b36119179336a82cac0db537eeff03bd3ca9d2dd3f125f1cb9f93ec0",
+      "action": "move"
+    },
+    {
+      "source": "utils/core/exceptions.py",
+      "target": "legacy/utils/core/exceptions.py",
+      "sha256": "280143464264130ce1757363ac031633aebe4727bbe59e4c7cea5ec1a1fe37db",
+      "action": "move"
+    },
+    {
+      "source": "utils/core/log.py",
+      "target": "legacy/utils/core/log.py",
+      "sha256": "4cff8b0b483fcd8bb44088906db0c2c97c532c90969bdfcaac06d8fc9a017a9f",
+      "action": "move"
+    },
+    {
+      "source": "utils/core/map_info.py",
+      "target": "legacy/utils/core/map_info.py",
+      "sha256": "a1b9852de5dd5f1d5f9ec26c4ab492ea8c3a5c1adba78ade607bd1ad3de00f06",
+      "action": "move"
+    },
+    {
+      "source": "utils/core/map_move.py",
+      "target": "legacy/utils/core/map_move.py",
+      "sha256": "058f6db625e06a6b861b2878afb8993bf3c7b846dd848a0bade092fd87a69d37",
+      "action": "move"
+    },
+    {
+      "source": "utils/core/map_names.py",
+      "target": "legacy/utils/core/map_names.py",
+      "sha256": "2cc910319ed12e57ea466a7503781a5c1a288d04e0d798bd02510254a566d4f0",
+      "action": "move"
+    },
+    {
+      "source": "utils/core/map_statu.py",
+      "target": "legacy/utils/core/map_statu.py",
+      "sha256": "328148ef168d4b903fe905e9ad4908e07ea3f37a00f40ae31f802fbf45a22a5a",
+      "action": "move"
+    },
+    {
+      "source": "utils/core/notify.py",
+      "target": "legacy/utils/core/notify.py",
+      "sha256": "3c749988c3b3b23f81d3ce79a18e96129f8d09eff53c1f409b954d3679db8e93",
+      "action": "move"
+    },
+    {
+      "source": "utils/core/requests.py",
+      "target": "legacy/utils/core/requests.py",
+      "sha256": "20ef28b2e832f6d5105ce7fad18b83d0a478de20b9420a08b5d28a7b46624ed8",
+      "action": "move"
+    },
+    {
+      "source": "utils/core/singleton.py",
+      "target": "legacy/utils/core/singleton.py",
+      "sha256": "059d47864366a59ed8de9f7486bdcbd5840821e60486a02d24ee5a81b7b0a01c",
+      "action": "move"
+    },
+    {
+      "source": "utils/core/time_utils.py",
+      "target": "legacy/utils/core/time_utils.py",
+      "sha256": "b00c0d6d7663b573e0439ea2f3a36b7fdc91444a366ed081844284b3163283f8",
+      "action": "move"
+    },
+    {
+      "source": "utils/drivers/coordinate_sampler.py",
+      "target": "legacy/utils/drivers/coordinate_sampler.py",
+      "sha256": "418efcb27420240d68454d7adcc194554bdf5828d04178fe8b2770b40ca52a02",
+      "action": "move"
+    },
+    {
+      "source": "utils/drivers/keyboard_event.py",
+      "target": "legacy/utils/drivers/keyboard_event.py",
+      "sha256": "3d6d7ff77466d04f26f3c03883b5ce65222b331843c1fd6ec8d63cf7ae12beb0",
+      "action": "move"
+    },
+    {
+      "source": "utils/drivers/mouse_event.py",
+      "target": "legacy/utils/drivers/mouse_event.py",
+      "sha256": "5ebabbe029652958faa4f3403063b1cf36be7a4a4ee89921f88b0b6b32ef99c9",
+      "action": "move"
+    },
+    {
+      "source": "utils/drivers/personal_input.py",
+      "target": "legacy/utils/drivers/personal_input.py",
+      "sha256": "fca40e12005a44c60275bbff3411a66717a9d9862e1d6d085f36e6c99cd9c254",
+      "action": "move"
+    },
+    {
+      "source": "utils/drivers/screen.py",
+      "target": "legacy/utils/drivers/screen.py",
+      "sha256": "d6ddb394e9379b651ac1ee401644be917da04fde0055a0e61450dc1e17d62ef8",
+      "action": "move"
+    },
+    {
+      "source": "utils/drivers/window.py",
+      "target": "legacy/utils/drivers/window.py",
+      "sha256": "c6649c916398db175e428b169d32226b9c1bf7d9534f30bdc9f465279f7e18a5",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/calculated.py",
+      "target": "legacy/utils/flows/calculated.py",
+      "sha256": "f7c1dac6a035bad47c0539b71952499143d9e0d58a56e4f1b80aa334a415a2f3",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/combat.py",
+      "target": "legacy/utils/flows/combat.py",
+      "sha256": "bcb8b14ab05ce86ae80695dda3880bdd1b6b68da4e362706b5211e26cddd9531",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/handle.py",
+      "target": "legacy/utils/flows/handle.py",
+      "sha256": "e7c4490b52e1ee9ae00584edb81e828d485fc82a681e644a041ed61c23d43669",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/map.py",
+      "target": "legacy/utils/flows/map.py",
+      "sha256": "a089e62ef48054af31e94713fdf8cc991164e5254f220424e3557a0c8f97e5ed",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/map_operations.py",
+      "target": "legacy/utils/flows/map_operations.py",
+      "sha256": "d80baddd2c0054a946b97e1819bf165d23363d73c5a8c205a05c379dccec36eb",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/monthly_pass.py",
+      "target": "legacy/utils/flows/monthly_pass.py",
+      "sha256": "ac43dea848d5cc4e803a598156db2934e5674c1cb0141e92a70682bd2801e65a",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/movement.py",
+      "target": "legacy/utils/flows/movement.py",
+      "sha256": "38e05181a4e9330a28334930907b3dac6c400854076b6a015d5c044903d71cd9",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/orientation.py",
+      "target": "legacy/utils/flows/orientation.py",
+      "sha256": "86561d07f05c43fb5be60ef4627458dd5fd227810a5f38551281e519874727a7",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/puzzle_exit.py",
+      "target": "legacy/utils/flows/puzzle_exit.py",
+      "sha256": "d02b628e8db82cb047bcb4ef0a83ed425166e3b86f30fafc368c53b37496f23e",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/report.py",
+      "target": "legacy/utils/flows/report.py",
+      "sha256": "124827df9734783398b7b51da7f4165f80591aa3d42c3bdad2b3121c63d3a25c",
+      "action": "move"
+    },
+    {
+      "source": "utils/flows/timeline_player.py",
+      "target": "legacy/utils/flows/timeline_player.py",
+      "sha256": "3a9467b7c781803d9da386a546ea1929b949d7a632e5e62d2ac2897a15da4110",
+      "action": "move"
+    },
+    {
+      "source": "utils/ui/coordinate_dashboard.py",
+      "target": "legacy/utils/ui/coordinate_dashboard.py",
+      "sha256": "ce9ddb34c276a42d1e5251bef7f49252cdb350bd39a429d8eee886144776d169",
+      "action": "move"
+    },
+    {
+      "source": "utils/ui/coordinate_record.py",
+      "target": "legacy/utils/ui/coordinate_record.py",
+      "sha256": "e101befa0a94c69b6cbad1e424af053fc7a1182255f7b17057e9a8367e9e68db",
+      "action": "move"
+    },
+    {
+      "source": "utils/ui/map_selector.py",
+      "target": "legacy/utils/ui/map_selector.py",
+      "sha256": "2da6236fa97e3166156f6ab6946e8c8d580b0efcf12243325d6b3ccec226152e",
+      "action": "move"
+    },
+    {
+      "source": "utils/ui/pause.py",
+      "target": "legacy/utils/ui/pause.py",
+      "sha256": "a5802cb17d6dc3c42a275a05d9648154c3fb4582415a1e36dd5fe41064d4c2bc",
+      "action": "move"
+    },
+    {
+      "source": "utils/ui/personal_record.py",
+      "target": "legacy/utils/ui/personal_record.py",
+      "sha256": "79f882c35bdd84810be1e58c69547336815558f927b93386e2f3450bb6f46b9b",
+      "action": "move"
+    },
+    {
+      "source": "utils/ui/record.py",
+      "target": "legacy/utils/ui/record.py",
+      "sha256": "1619e76b3329993001f1cedddfc4789fcfc54907f5c61238ce2a3e2f7ea31e9e",
+      "action": "move"
+    },
+    {
+      "source": "utils/ui/setting.py",
+      "target": "legacy/utils/ui/setting.py",
+      "sha256": "f675ac00147c3bbf17550800f35d9e4e944eadb2797a062ce06a8edda581859e",
+      "action": "move"
+    },
+    {
+      "source": "utils/ui/text_window.py",
+      "target": "legacy/utils/ui/text_window.py",
+      "sha256": "f60a73b4f1a2933e02c5b85e262393f8c3d74882317f9b604b67a23627e6f534",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/arrow.py",
+      "target": "legacy/utils/vision/arrow.py",
+      "sha256": "006e0f365f93ca44ba0dd8b848be6742013747b8c72a0882136d3a5d4f0d629d",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/blackscreen.py",
+      "target": "legacy/utils/vision/blackscreen.py",
+      "sha256": "8630642961b6011d7f3a16d47202e85f573d9837470c6ac7c51beeea08a6c754",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/colors.py",
+      "target": "legacy/utils/vision/colors.py",
+      "sha256": "8886398fc72cacdcf87ba0b764cce9180cb25d806471fe63f17d8218f43e2216",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/diagnostics.py",
+      "target": "legacy/utils/vision/diagnostics.py",
+      "sha256": "0dca668a361e9756067607437d2ef5fd2f56ba77a4a88bde08ece50b76ef6566",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/get_angle.py",
+      "target": "legacy/utils/vision/get_angle.py",
+      "sha256": "018b8007b2a25417ce109431d309f9b67bea86c154827d22dd891ad6292f9039",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/images.py",
+      "target": "legacy/utils/vision/images.py",
+      "sha256": "de3559b9dd5ab636264ea5b8e0d5607bdf9c47a8c00315e70b11f6c3111ccafa",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/img.py",
+      "target": "legacy/utils/vision/img.py",
+      "sha256": "dca7cf64f28fa5f5a47cf16b68c3939322df1a02bb9ec2b1ece2a878d0653128",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/matcher.py",
+      "target": "legacy/utils/vision/matcher.py",
+      "sha256": "04f0f6560ae9d4d85bf4869e090c619f15d2f6957e15bae33d42a5dd63ea10ec",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/mini_asu.py",
+      "target": "legacy/utils/vision/mini_asu.py",
+      "sha256": "6daeaba2ba6abd8e67857c8b6fb373834814f96c5a0e8f58435ec1576b8c2e32",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/puzzle_exit.py",
+      "target": "legacy/utils/vision/puzzle_exit.py",
+      "sha256": "d10b324bd2d62574e9895bdc1d973ed786c85b5517410673a72c2803dafa0384",
+      "action": "move"
+    },
+    {
+      "source": "utils/vision/viewer.py",
+      "target": "legacy/utils/vision/viewer.py",
+      "sha256": "f6c3dc11170699adb8ad27817f42d1939eb57f63ed86b804a8f42f3a5b56760d",
+      "action": "move"
+    },
+    {
+      "source": "webui/launch.py",
+      "target": "legacy/webui/launch.py",
+      "sha256": "99b54cbf23d88eef7f12e533d1342a7a9053f194eb35705d3262d23525f1a288",
+      "action": "move"
+    },
+    {
+      "source": "webui/server.py",
+      "target": "legacy/webui/server.py",
+      "sha256": "685771b1738bcf60b7d1a377eb1c5596019ea96971a6f139aee37fffbc967820",
+      "action": "move"
+    },
+    {
+      "source": "webui/start_webui.py",
+      "target": "legacy/webui/start_webui.py",
+      "sha256": "92117545d4cbf09e72377a7b92d46738a3184aa2df91cfd6bc4d3c987ecb9acd",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_blackscreen.py",
+      "target": "legacy/tests/test_blackscreen.py",
+      "sha256": "6f8da8561b254262057f58254d9182c3a47c606d99bc90994b5cc779004a1ca2",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_calculated.py",
+      "target": "legacy/tests/test_calculated.py",
+      "sha256": "470825739607fb0360058ed615c2e8af222cc5f675185a39c6e51123785cc050",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_config.py",
+      "target": "legacy/tests/test_config.py",
+      "sha256": "0795eff42271fae0f98a3c34292d4a7f230d9170c93381e3caab094d35f14cd1",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_convert.py",
+      "target": "legacy/tests/test_convert.py",
+      "sha256": "047478aaa9ce572d04c1bf91f52f6d032b7a92dfb6f01cc2a9c33d03484f5fb3",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_exceptions.py",
+      "target": "legacy/tests/test_exceptions.py",
+      "sha256": "89626d54a7aba62f686cf750bc6c3aed59fd499e362ab17380df7ba27aeb64c9",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_fhoe_end_notification.py",
+      "target": "legacy/tests/test_fhoe_end_notification.py",
+      "sha256": "e89b5fa0765a78f8ce7e2acf3bd64db3489b4b098df0940d5ab0f3c66a4e4824",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_format_maps.py",
+      "target": "legacy/tests/test_format_maps.py",
+      "sha256": "4514ffc9bb07715d7d38695d0b23ebb971d6cfda30a9d327134b86506a7cc21c",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_get_angle.py",
+      "target": "legacy/tests/test_get_angle.py",
+      "sha256": "cdbfffb0f7f97d8650d9442fd59295153bf45e8a3aaa79639c29bd7bf14e090d",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_handle.py",
+      "target": "legacy/tests/test_handle.py",
+      "sha256": "e956abb5bf51508fbbbe192fd8df0a69e2ee76ebaa6a14945e230752f2f06a89",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_img.py",
+      "target": "legacy/tests/test_img.py",
+      "sha256": "012ae5eb19d6bde77dd9359d6265548df35a2878364a3603a830bf870130517c",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_install_requirements.py",
+      "target": "legacy/tests/test_install_requirements.py",
+      "sha256": "0616c53fcc9c94d19326365ed079097ab9bba2d0998658b6eb3e89fb8446bddc",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_keyboard_event.py",
+      "target": "legacy/tests/test_keyboard_event.py",
+      "sha256": "872705f9e6dc87b629be0e165599f3f9e1fb6766965b420db311b356d501c765",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_log.py",
+      "target": "legacy/tests/test_log.py",
+      "sha256": "2af08c3b42e7ec7f2279925cc412b961ec411550bb7efee2d10727f4c3a7fa1b",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_map.py",
+      "target": "legacy/tests/test_map.py",
+      "sha256": "6f0d3002a9e63b5e628c444835e0b572fb2de88c34d9b807757221077ee87473",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_map_info.py",
+      "target": "legacy/tests/test_map_info.py",
+      "sha256": "c13042c44616ac3a97b5ff730dfe6555a15f062f65fba9ecdbd4a955d77cefd0",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_map_names.py",
+      "target": "legacy/tests/test_map_names.py",
+      "sha256": "ce8074fcfb5dd9c55510901b8103b24efaef0cf1fd443be53d77f0ceae7ad9db",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_map_operations.py",
+      "target": "legacy/tests/test_map_operations.py",
+      "sha256": "96b40b150023c94d0ce3ef270f4a1dc3bfe7a3ee96233db976de6a52ba6ad89a",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_map_selector.py",
+      "target": "legacy/tests/test_map_selector.py",
+      "sha256": "567284856fcdf04aff74ab032da5aa510a5ede0e92d235867115d33921cc4b80",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_matcher.py",
+      "target": "legacy/tests/test_matcher.py",
+      "sha256": "7ef6c8812446fedf8a2025def9c13c9d22eb85ad2e7374f7275ec9a4eee64bfa",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_mini_asu.py",
+      "target": "legacy/tests/test_mini_asu.py",
+      "sha256": "c9adbc2c204bd10ecce0b8cc58e1d898fe922c539c24c5331a2a90956441736c",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_monthly_pass.py",
+      "target": "legacy/tests/test_monthly_pass.py",
+      "sha256": "eded28c2f12d1bf1e45b8e139d97745df4a09c87581694c0d358521349f15116",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_mouse_event.py",
+      "target": "legacy/tests/test_mouse_event.py",
+      "sha256": "b82be9a8a66a8c096cfc2e9841df1712ec4ce1ab9a5ffb8ad7a673a030cbc02b",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_notify.py",
+      "target": "legacy/tests/test_notify.py",
+      "sha256": "237fd390e14b55930d8032f13c1b71e499c5d622c7ce512892964d897c49caf3",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_pause.py",
+      "target": "legacy/tests/test_pause.py",
+      "sha256": "e31d83f241a0a2059018cc6ae7e6384cbbc535d866ebdbeeb82a39b1eb6a93d2",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_puzzle_exit.py",
+      "target": "legacy/tests/test_puzzle_exit.py",
+      "sha256": "f6747ddca89e40868296d5bdd7a7e3de22928e51c0fddd3eb96e425882b2dd69",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_record.py",
+      "target": "legacy/tests/test_record.py",
+      "sha256": "2ebff870c109c580b051b1e86c62a653332fcd36e7e9b9900a506a68fb57eab3",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_report.py",
+      "target": "legacy/tests/test_report.py",
+      "sha256": "11f96ad7d3788adc9dddd80a40a470a19b6cedaaddc91bdf204bbe5460e1db3f",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_requests.py",
+      "target": "legacy/tests/test_requests.py",
+      "sha256": "92622228558b1fd3aa9cfaf0f98f20730a341560a4c7213b6221fbeb70be0dc0",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_setting.py",
+      "target": "legacy/tests/test_setting.py",
+      "sha256": "dbe560aa40452be163632155aae537926d23179599c80c1814b72459d717b36a",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_shutdown.py",
+      "target": "legacy/tests/test_shutdown.py",
+      "sha256": "53017fdbbe204507bca98a8cc5301d2597728409417b37c71e6351fc4e8e7619",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_singleton.py",
+      "target": "legacy/tests/test_singleton.py",
+      "sha256": "34d73174a7220fa63bc03e88fb77bdfbc5e8cad274069d93603066f9a33df6c2",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_text_window.py",
+      "target": "legacy/tests/test_text_window.py",
+      "sha256": "917ac17902cb274cc2d3a43dc448b3bc07bf62d391eefedf33f0648b2bfe8604",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_time_utils.py",
+      "target": "legacy/tests/test_time_utils.py",
+      "sha256": "84bb9ffc8544f50e50ab527757b447bf9f35884009ef5b0cdad0b26fbfd5f1c5",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_update_file.py",
+      "target": "legacy/tests/test_update_file.py",
+      "sha256": "f06b45f616118772ef4e89a20d80701e9f3567e9be90828425b7c30cd6d38be2",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_validate_maps.py",
+      "target": "legacy/tests/test_validate_maps.py",
+      "sha256": "45117e68672634add1fd2d48ec1f137a7b6677c7b7b0ebadae20a4cf4d32117e",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_webui_takeover.py",
+      "target": "legacy/tests/test_webui_takeover.py",
+      "sha256": "bb081e2c89a1e4b3972d173026f35025c75e6ad32ccbf492197df87304a02a2d",
+      "action": "move"
+    },
+    {
+      "source": "tests/test_window.py",
+      "target": "legacy/tests/test_window.py",
+      "sha256": "366f08c9d19117d726922c3b23a99bb227ff63449dd0a0ea0c0ecec71f5f8d75",
+      "action": "move"
+    },
+    {
+      "source": "tests/unit/test_coordinate_dashboard.py",
+      "target": "legacy/tests/unit/test_coordinate_dashboard.py",
+      "sha256": "f2a70c4ee9713a48844621c152b5ffc5816f987898e486dcfec55b73f16b81c9",
+      "action": "move"
+    },
+    {
+      "source": "tests/unit/test_coordinate_sampler.py",
+      "target": "legacy/tests/unit/test_coordinate_sampler.py",
+      "sha256": "0f8b3874145209dcee38c3b994486b242c1bab351130c39b96b5c4c69c50b63b",
+      "action": "move"
+    },
+    {
+      "source": "personal_tests/test_record_driver.py",
+      "target": "legacy/personal_tests/test_record_driver.py",
+      "sha256": "1d1004b3246cd09803c5a2e4fee4556d4c7dc69c9735540a9664ad12cbb04a41",
+      "action": "move"
+    },
+    {
+      "source": "personal_tests/test_town_player.py",
+      "target": "legacy/personal_tests/test_town_player.py",
+      "sha256": "3db97ded6b86ac847753603099f0f8d2d235b62f9b3689ebfbecf37ac5a3b3ea",
+      "action": "move"
+    },
+    {
+      "source": "personal_tests/test_route_delete.py",
+      "target": "legacy/personal_tests/test_route_delete.py",
+      "sha256": "0216b4a5ba55620a8eeadb96cd9426e3c831ee6efb8dee544e03c2b8660dc0e3",
+      "action": "move"
+    },
+    {
+      "source": "personal_tests/test_webui.py",
+      "target": "legacy/personal_tests/test_webui.py",
+      "sha256": "1e3827a80c492aeaf0553d707650569998154ffda0b4b43ce6b25aff16788d15",
+      "action": "move"
+    },
+    {
+      "source": "tests/conftest.py",
+      "target": "legacy/tests/conftest.py",
+      "sha256": "849eba26707f77d981804deda6ae7ff269e05320d9c294e00a9be00f86545bb6",
+      "action": "copy"
+    },
+    {
+      "source": "tests/test_architecture.py",
+      "target": "legacy/tests/test_architecture.py",
+      "sha256": "c9400b93c484ee4d839ba89ef5e6d3abc8b30d0db5dcfee4ead408f1f2eaf4c6",
+      "action": "copy"
+    },
+    {
+      "source": "tests/test_map_json_format.py",
+      "target": "legacy/tests/test_map_json_format.py",
+      "sha256": "609f84c6238c7b55741697fcd48fc8183f98ebea0cf6801d6e0015a6f73b55d5",
+      "action": "copy"
+    },
+    {
+      "source": "CLAUDE.md",
+      "target": "legacy/CLAUDE.md",
+      "sha256": "2dbd58fb61587682e1e5c1c2d49532efe940c97afe1bac78cb5388dd4bd8fc82",
+      "action": "copy"
+    },
+    {
+      "source": "requirements.txt",
+      "target": "legacy/requirements.txt",
+      "sha256": "1bace7e8992cb0fcfc570def4a1f199cb5a83b9c4ec53f70179aa6434505ec75",
+      "action": "copy"
+    },
+    {
+      "source": "requirements-lock.txt",
+      "target": "legacy/requirements-lock.txt",
+      "sha256": "8c0ae51023f593c89de277a61990c2154763566f22257c8642fd705786fe448b",
+      "action": "copy"
+    },
+    {
+      "source": "README-upstream.md",
+      "target": "legacy/README-upstream.md",
+      "sha256": "7ae94b3a6c39e7df8cd4ded64ff18ed373f26719f5c80ccfd580132e90420724",
+      "action": "copy"
+    },
+    {
+      "source": "logo.ico",
+      "target": "legacy/logo.ico",
+      "sha256": "754e0e6514694a43389cbe56f3301e10952580c1bc6108e1b24f11d75a888a16",
+      "action": "copy"
+    },
+    {
+      "source": "picture/1.ico",
+      "target": "legacy/picture/1.ico",
+      "sha256": "698fa5f39000ea03eae6b10002463718532756b2ecb91cf5d37acfb34d4ae01b",
+      "action": "move"
+    },
+    {
+      "source": "picture/1floor.webp",
+      "target": "legacy/picture/1floor.webp",
+      "sha256": "0dbfca3c15feb38aecbff8001b80cd9b4e898f1697d4a3b2e1cc0961a59590b3",
+      "action": "move"
+    },
+    {
+      "source": "picture/2.webp",
+      "target": "legacy/picture/2.webp",
+      "sha256": "e6910f98bd5beee661775fc32dc95d8d645e8cdb64d913170301d17185f7143f",
+      "action": "move"
+    },
+    {
+      "source": "picture/2floor.webp",
+      "target": "legacy/picture/2floor.webp",
+      "sha256": "e2dd7951ebba308db608490f4ff5381e40941aad89ffa1ea28cde99f0cf0edc5",
+      "action": "move"
+    },
+    {
+      "source": "picture/3floor.webp",
+      "target": "legacy/picture/3floor.webp",
+      "sha256": "b44daa30a72e8c0f614225d11a556d78326944f5c5c86e4213aa0c4735dac1b8",
+      "action": "move"
+    },
+    {
+      "source": "picture/4floor.webp",
+      "target": "legacy/picture/4floor.webp",
+      "sha256": "dd0aca63e171b5fd77d7e60bac85d25783d1933fcebe4cbbecb9baa03061fc98",
+      "action": "move"
+    },
+    {
+      "source": "picture/attack.webp",
+      "target": "legacy/picture/attack.webp",
+      "sha256": "3f613b72cfea556409e55106b82bb0130760973fb64f881c0a4621ac7bb160bd",
+      "action": "move"
+    },
+    {
+      "source": "picture/auto.webp",
+      "target": "legacy/picture/auto.webp",
+      "sha256": "8552b0c36b2ba90b87dda1fb780ec15109e8d0923760872dac9294f9b51ba530",
+      "action": "move"
+    },
+    {
+      "source": "picture/auto_use_technique_consumable.webp",
+      "target": "legacy/picture/auto_use_technique_consumable.webp",
+      "sha256": "471e7d8c5318db3ec73a7961f23fef0fb9d852b2ea804b501001af63bed7557c",
+      "action": "move"
+    },
+    {
+      "source": "picture/b1floor.webp",
+      "target": "legacy/picture/b1floor.webp",
+      "sha256": "5a24c348d198ca91f544d4dc8712f4b12a7896d5f1b96ccdf842bbf097ce006c",
+      "action": "move"
+    },
+    {
+      "source": "picture/b2floor.webp",
+      "target": "legacy/picture/b2floor.webp",
+      "sha256": "82defe0a5cf2e76b98291343e8b1adeaf3cd434329ddfc0b5cc40d3bd8f3d427",
+      "action": "move"
+    },
+    {
+      "source": "picture/b3floor.webp",
+      "target": "legacy/picture/b3floor.webp",
+      "sha256": "f398981aa2b596f79e30ad2ca3ba826abb2dd89c35ec6b72512e37ed361c5868",
+      "action": "move"
+    },
+    {
+      "source": "picture/b4floor.webp",
+      "target": "legacy/picture/b4floor.webp",
+      "sha256": "73f6bbb9d34912823f40665cabf6b5b4bcfaa4b348e28213ee749fbf2fdc911e",
+      "action": "move"
+    },
+    {
+      "source": "picture/battle_esc_check.webp",
+      "target": "legacy/picture/battle_esc_check.webp",
+      "sha256": "9ffa94be65386e533408d9d377fdf0d5673a247e5c567017bd235667cea6c6ca",
+      "action": "move"
+    },
+    {
+      "source": "picture/buy.webp",
+      "target": "legacy/picture/buy.webp",
+      "sha256": "54d4448a05cf48b7f9380abf41a90852dce4fa6ee90b60cd20855afa2183bd48",
+      "action": "move"
+    },
+    {
+      "source": "picture/cancel.webp",
+      "target": "legacy/picture/cancel.webp",
+      "sha256": "bd03b954a0e445912289e9fe170f93de82f7821c1d6106576aed08cff06fd758",
+      "action": "move"
+    },
+    {
+      "source": "picture/check_4-1_point_1.webp",
+      "target": "legacy/picture/check_4-1_point_1.webp",
+      "sha256": "4aebc8e4d9b58616c5030b04d8c23ed6caf97ac92cde39cb3eadb37749d6c229",
+      "action": "move"
+    },
+    {
+      "source": "picture/check_4-1_point_2.webp",
+      "target": "legacy/picture/check_4-1_point_2.webp",
+      "sha256": "702bfddd6d6288ecb8accf969695294f0db90f787bb0a1e4fa8767af51321000",
+      "action": "move"
+    },
+    {
+      "source": "picture/check_4-1_point_3.webp",
+      "target": "legacy/picture/check_4-1_point_3.webp",
+      "sha256": "443bcffa7f65ad3d0fb26adef7fc118e2e0cef681d4a9fbcc096c83e818b9789",
+      "action": "move"
+    },
+    {
+      "source": "picture/confirm.webp",
+      "target": "legacy/picture/confirm.webp",
+      "sha256": "03d15e6f6725fc4f0a53bd6472f6513ceea936a9442564d638363212eb580ba6",
+      "action": "move"
+    },
+    {
+      "source": "picture/continue_fighting.webp",
+      "target": "legacy/picture/continue_fighting.webp",
+      "sha256": "c4df9536d000c3d066404a1c43428bb8fb8c1fe8a055f3dede06c297bee4a4bb",
+      "action": "move"
+    },
+    {
+      "source": "picture/contraction.webp",
+      "target": "legacy/picture/contraction.webp",
+      "sha256": "6a05b9ddb67b072e3c02203086dca72eedb3e4f88410a4d46832efb52d649712",
+      "action": "move"
+    },
+    {
+      "source": "picture/death.webp",
+      "target": "legacy/picture/death.webp",
+      "sha256": "cae8bf53f2af8a165c9edffd1b3c83a860bf2ab5274b74360e15c27eb3a5743f",
+      "action": "move"
+    },
+    {
+      "source": "picture/defeat.webp",
+      "target": "legacy/picture/defeat.webp",
+      "sha256": "285aaaf86bdd0ce6167bff7f1bdb78657f005bb731f5684ad6ca2a7814da1385",
+      "action": "move"
+    },
+    {
+      "source": "picture/dialogue_skip.webp",
+      "target": "legacy/picture/dialogue_skip.webp",
+      "sha256": "149fcf70537259f0cfc7d2d301e4fce831f7022cdcfd0773795ed9578dfeff9f",
+      "action": "move"
+    },
+    {
+      "source": "picture/doubt.webp",
+      "target": "legacy/picture/doubt.webp",
+      "sha256": "6fcae752e056640ae29ed4f07d47d1d254863c7adbae7148b17c67496c717f12",
+      "action": "move"
+    },
+    {
+      "source": "picture/eat.webp",
+      "target": "legacy/picture/eat.webp",
+      "sha256": "d0187cb0ba6951afc96596ee191596bf21a4ccc52a5ca752b17aeb54d844f837",
+      "action": "move"
+    },
+    {
+      "source": "picture/F_DreamModule.webp",
+      "target": "legacy/picture/F_DreamModule.webp",
+      "sha256": "01ca546fb51d5443f0c96ddb00b034f405336a650cd9792908708933c8cd75d1",
+      "action": "move"
+    },
+    {
+      "source": "picture/F_DreamPop.webp",
+      "target": "legacy/picture/F_DreamPop.webp",
+      "sha256": "a0db2e7a61bb17394c07ba8470355668c10d8232cebe8de72d15a58e32d3178e",
+      "action": "move"
+    },
+    {
+      "source": "picture/F_DreamScape.webp",
+      "target": "legacy/picture/F_DreamScape.webp",
+      "sha256": "108c7386fc2b6d2cb2799b018581ce13fcbef6e02ddc2dc493e48f6201e1a0b2",
+      "action": "move"
+    },
+    {
+      "source": "picture/F_Goto.webp",
+      "target": "legacy/picture/F_Goto.webp",
+      "sha256": "25de15836914c115aff43ab472b7d8a01ee716e3e9e9513b4119580b622af88d",
+      "action": "move"
+    },
+    {
+      "source": "picture/F_Listen.webp",
+      "target": "legacy/picture/F_Listen.webp",
+      "sha256": "1866a9cc1021436d6f1ee5ebbc7d919d3a189ea72c35ea18f399f10d7e3cd4c8",
+      "action": "move"
+    },
+    {
+      "source": "picture/F_SpaceAnchor.webp",
+      "target": "legacy/picture/F_SpaceAnchor.webp",
+      "sha256": "f5aa20dac4a77ad061798b7c44b2128eeed15452e338b309eabfa28aeed9aa32",
+      "action": "move"
+    },
+    {
+      "source": "picture/F_Teleport.webp",
+      "target": "legacy/picture/F_Teleport.webp",
+      "sha256": "c99d0da42fa49dce4f4de908ea06b4dc13317a5f09bf7aea53b6f4514ec1a283",
+      "action": "move"
+    },
+    {
+      "source": "picture/fanhui_1.webp",
+      "target": "legacy/picture/fanhui_1.webp",
+      "sha256": "6245b802b151d9630b3d4124d453eac9b3ad61b8e75ab8d7f0589f92bab0119d",
+      "action": "move"
+    },
+    {
+      "source": "picture/fanhui_2.webp",
+      "target": "legacy/picture/fanhui_2.webp",
+      "sha256": "67ada0a1dce4d8925bd9815c8c14ca8d67a60ecce9dbe7350e6b6eddde255ebc",
+      "action": "move"
+    },
+    {
+      "source": "picture/filter.webp",
+      "target": "legacy/picture/filter.webp",
+      "sha256": "bc6d8543e15c02ea27e0d95be9521f940e775a7f95fae7201d95590d46d7db4f",
+      "action": "move"
+    },
+    {
+      "source": "picture/filter_energy.webp",
+      "target": "legacy/picture/filter_energy.webp",
+      "sha256": "14b782cfd4fbb947cd00d835f7534eb67c1aa0604d21056cbbb447dd456e8cf8",
+      "action": "move"
+    },
+    {
+      "source": "picture/finish_fighting.webp",
+      "target": "legacy/picture/finish_fighting.webp",
+      "sha256": "0bd5ffba4b4a5ff995e4e75eac4bc1076aead03be8fbe0fb3d223002ccc2be9d",
+      "action": "move"
+    },
+    {
+      "source": "picture/finish_fighting2.webp",
+      "target": "legacy/picture/finish_fighting2.webp",
+      "sha256": "259fbe0e414828374e83b18e402604cf182a6d2f1d18b263dc2b8ef5c8b21527",
+      "action": "move"
+    },
+    {
+      "source": "picture/finish_fighting2_1.webp",
+      "target": "legacy/picture/finish_fighting2_1.webp",
+      "sha256": "41fa1e8d60f2466c097d90b7f384d7f4e30f8737424ae4b383b510c24f4912f2",
+      "action": "move"
+    },
+    {
+      "source": "picture/finish_fighting2_2.webp",
+      "target": "legacy/picture/finish_fighting2_2.webp",
+      "sha256": "cfb6a53760d47b51b82782258a2c8ad1f0a86e795dd4b3f8c3548be77e1d6d67",
+      "action": "move"
+    },
+    {
+      "source": "picture/finish_fighting3.webp",
+      "target": "legacy/picture/finish_fighting3.webp",
+      "sha256": "bc1a632c586a1bff9c38612eee10d3318a849754603667dbf1bd207d95f1dd68",
+      "action": "move"
+    },
+    {
+      "source": "picture/finish_fighting4.webp",
+      "target": "legacy/picture/finish_fighting4.webp",
+      "sha256": "fe51aecd1b705ef3c39da700c11fcdc1ef2a5d2ce752a69fd18cfb9131fb9b2d",
+      "action": "move"
+    },
+    {
+      "source": "picture/finish_fighting5.webp",
+      "target": "legacy/picture/finish_fighting5.webp",
+      "sha256": "dc1e260d1260db37d1e98a8e992ed285d226b225024c7f2cd3f46f12a68543d5",
+      "action": "move"
+    },
+    {
+      "source": "picture/first_floor.webp",
+      "target": "legacy/picture/first_floor.webp",
+      "sha256": "a19101331dc67ec465718b2fa8618e8a7ba83bd06b601aa0d5af296be72c029c",
+      "action": "move"
+    },
+    {
+      "source": "picture/follow.webp",
+      "target": "legacy/picture/follow.webp",
+      "sha256": "1dc8ce751cd4718fd87410fa662d174b8e031b5b91b847fadec2f1b669a607f1",
+      "action": "move"
+    },
+    {
+      "source": "picture/guide.webp",
+      "target": "legacy/picture/guide.webp",
+      "sha256": "41b6578f7cad7da91f14710a26ffa1e7f06af6db72645c2974578c7effc20c0c",
+      "action": "move"
+    },
+    {
+      "source": "picture/hecheng.webp",
+      "target": "legacy/picture/hecheng.webp",
+      "sha256": "03e9c786576f34b04640b1e06b60cae76ea4afa03de6a30edd3ac743013cb016",
+      "action": "move"
+    },
+    {
+      "source": "picture/hechengji.webp",
+      "target": "legacy/picture/hechengji.webp",
+      "sha256": "54b11292e9c426fd886708fd03241176432515b191ac46a25d1f473d423ab6e6",
+      "action": "move"
+    },
+    {
+      "source": "picture/index.webp",
+      "target": "legacy/picture/index.webp",
+      "sha256": "4dc3daf4e5339a28552871fbce45da2d0203fe7f3f6bb0337ada453e1e46f191",
+      "action": "move"
+    },
+    {
+      "source": "picture/index_2.webp",
+      "target": "legacy/picture/index_2.webp",
+      "sha256": "e371a57291367b9c6d7f93c4e84b90141062e329de59a52e313b841423883548",
+      "action": "move"
+    },
+    {
+      "source": "picture/index_3.webp",
+      "target": "legacy/picture/index_3.webp",
+      "sha256": "82a388306777c4d4f11b85f83a48d218176ab935554e646daeea32c647a08fa8",
+      "action": "move"
+    },
+    {
+      "source": "picture/index_4.webp",
+      "target": "legacy/picture/index_4.webp",
+      "sha256": "18dc8659d80e50c8ff3058e6fbb2454363f5a5181382df6288e4ea211712c676",
+      "action": "move"
+    },
+    {
+      "source": "picture/kaituoli_1.webp",
+      "target": "legacy/picture/kaituoli_1.webp",
+      "sha256": "9d3d0371368d766b42724f8ffa17af4e6092caeb256a8d7e5b51227a4b9b9f6d",
+      "action": "move"
+    },
+    {
+      "source": "picture/liuti.webp",
+      "target": "legacy/picture/liuti.webp",
+      "sha256": "6954e72ac9b5bfcd085cedb7e9aa54255bfb055a874954838b4bb080e13abcab",
+      "action": "move"
+    },
+    {
+      "source": "picture/loc_arrow.webp",
+      "target": "legacy/picture/loc_arrow.webp",
+      "sha256": "85c0c78548d4b9878e5f252426c083b044693b1ab2dde4df4eb57ed364abd07d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_0.webp",
+      "target": "legacy/picture/map_0.webp",
+      "sha256": "83e9c0ebe615cef0d48e3f8f3882c0abe2e779760e884c5f0f9653cb150280ba",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_0_point.webp",
+      "target": "legacy/picture/map_0_point.webp",
+      "sha256": "9bdba0e4a5da67cc54d35443a02e11930734a8cc2eee84696e3326c3109728d5",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-2.webp",
+      "target": "legacy/picture/map_1-2.webp",
+      "sha256": "7ab1259a0a1fddb878948052d4be8ccaf9a02ab9ef0c3815cbe4ee8bde9510b4",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-2_point_1.webp",
+      "target": "legacy/picture/map_1-2_point_1.webp",
+      "sha256": "1ae97db5b2034b014b85edc880d18f08628e1d1f37a0c45483bd4a3389863bb5",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-2_point_2.webp",
+      "target": "legacy/picture/map_1-2_point_2.webp",
+      "sha256": "fffa521edb0e021392c8567d245b1b56e8438bcf4e204424676d4470bac7dd18",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-2_point_3.webp",
+      "target": "legacy/picture/map_1-2_point_3.webp",
+      "sha256": "18c158822efa324e9bfe6d8aa1bcda821cf51a59e4078a86c61baf698177de8d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-2_point_4.webp",
+      "target": "legacy/picture/map_1-2_point_4.webp",
+      "sha256": "6b5e38f178ecc516fff8d1639094defaba2cc7bec9181b9f51a65708a89d841a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-2_point_5.webp",
+      "target": "legacy/picture/map_1-2_point_5.webp",
+      "sha256": "4446c4776b992822dc511131c0e98663bb8a8d8cffdaae866e3491587c499a51",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-3.webp",
+      "target": "legacy/picture/map_1-3.webp",
+      "sha256": "3e698b986528ad88e7a0d8045990e808b951eb5bae99960caf18e436a5af8821",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-3_point_1.webp",
+      "target": "legacy/picture/map_1-3_point_1.webp",
+      "sha256": "306053ae2c988bcbe71493315353cd0841165bc0b1b1f6ef0df58742cb2c78ca",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-3_point_2.webp",
+      "target": "legacy/picture/map_1-3_point_2.webp",
+      "sha256": "c7a14d4753d81fe1bf1bc2403a67c16326952764568e80f9f166acdcc6e2e2fa",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-3_point_3.webp",
+      "target": "legacy/picture/map_1-3_point_3.webp",
+      "sha256": "ebfc5e58421b672f89324edce6e70c5d35acd6297a445d2404c1127e32f37325",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-3_point_4.webp",
+      "target": "legacy/picture/map_1-3_point_4.webp",
+      "sha256": "3dee54d795682e54462c0be60cf98e99949b0e3e920a756a6606e0aebd2891ba",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-4.webp",
+      "target": "legacy/picture/map_1-4.webp",
+      "sha256": "29288da6971333eb11da1044698b2c6ef11138a68079bf38e086eab8b53dbac3",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-4_point_1.webp",
+      "target": "legacy/picture/map_1-4_point_1.webp",
+      "sha256": "ca216e6590a3a8b7e6a7c390ecd8771f6e2e747f007509799b10a7558c1ff4ba",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-4_point_2.webp",
+      "target": "legacy/picture/map_1-4_point_2.webp",
+      "sha256": "788cf008a8abef68d34fb1d49352085f765c1cea188fdedda9988cc61df90db9",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1-4_point_3.webp",
+      "target": "legacy/picture/map_1-4_point_3.webp",
+      "sha256": "2a52353b3b39cb162bc8df93401efe6b31f7489800d74e1d4c97047ae49bb263",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1.webp",
+      "target": "legacy/picture/map_1.webp",
+      "sha256": "ea7b81ec111b75ee82841fb87609daa993f7e56e5a80bad715bafd5087d33150",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_1_point.webp",
+      "target": "legacy/picture/map_1_point.webp",
+      "sha256": "a91a8b66f7485a66f53b509978b20d82b4873a8cd58be2c4122058b60b5511ff",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-1.webp",
+      "target": "legacy/picture/map_2-1.webp",
+      "sha256": "3e7931624256c4c3e8137d7972be0ba27d4b012f3412a059c8a03562b33e31a3",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-1_point_1.webp",
+      "target": "legacy/picture/map_2-1_point_1.webp",
+      "sha256": "acc5f6c89594a11da96b927ca7b1c72d95814ed18e6ed5ad9fb80e6844e07892",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-1_point_2.webp",
+      "target": "legacy/picture/map_2-1_point_2.webp",
+      "sha256": "61af0153974bf4364977a8ca1b55d1c22f97a896c267036241b0648f5197ea12",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-1_point_3.webp",
+      "target": "legacy/picture/map_2-1_point_3.webp",
+      "sha256": "7c09a203decbf266b31897affca3fac8c1d29289edd726a36fb01dd67d401ab7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-1_point_4.webp",
+      "target": "legacy/picture/map_2-1_point_4.webp",
+      "sha256": "8ad68a9ae74f965b01832afb89f51dce157e932b0aa5ae2bb4886f1be2eb9784",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-1_point_5.webp",
+      "target": "legacy/picture/map_2-1_point_5.webp",
+      "sha256": "3a3709d88b079317d7aff0af509ab484946bffb9d0cf04c96f45d124fc5829f6",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-1_point_6.webp",
+      "target": "legacy/picture/map_2-1_point_6.webp",
+      "sha256": "1f43239be3666bf931c5296057af39ed054483a01a6a7c264d48951eca1e6c51",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-1_point_7.webp",
+      "target": "legacy/picture/map_2-1_point_7.webp",
+      "sha256": "a957e9a6e8ac1cbdfbf3f5483f8a504ea3ce2c84f7915e747e0bc70cede7c041",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-1_point_8.webp",
+      "target": "legacy/picture/map_2-1_point_8.webp",
+      "sha256": "5d19595b461bc7b6dd284a53f94626c9975d6f399dd347e112ee15acb7135bfe",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-1_point_9.webp",
+      "target": "legacy/picture/map_2-1_point_9.webp",
+      "sha256": "19dbf0d39e6c8c9e49e13c99170925eee9b1017f58ee3c5fd8bd57f6202594bd",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-2.webp",
+      "target": "legacy/picture/map_2-2.webp",
+      "sha256": "8efe86d23964a5f6a520197f4d827d996c82ced71b544461938c773008af900f",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-2_point_1.webp",
+      "target": "legacy/picture/map_2-2_point_1.webp",
+      "sha256": "fdaff553275d9cb3e2208d8893b8549a86f84b35d1720ab1fba6afac3723f1e6",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-2_point_2.webp",
+      "target": "legacy/picture/map_2-2_point_2.webp",
+      "sha256": "0e7a9fff0bddfab60507b9e412a79a1ebc915c8d5fba9a314aa14429f0fe4719",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-2_point_3.webp",
+      "target": "legacy/picture/map_2-2_point_3.webp",
+      "sha256": "3e1709bc0f951abc909bf9b5ae6034adf31d3c212e23a02040910c81ab88c40a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-2_point_4.webp",
+      "target": "legacy/picture/map_2-2_point_4.webp",
+      "sha256": "e72f5ef4994752c730e64be69f9a3e6a41a3e0b3003da5897419d6656296f84d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-3.webp",
+      "target": "legacy/picture/map_2-3.webp",
+      "sha256": "bc234af51406db39dd94f52816f027ef0989fec165cb6b6dbf1db96c38f07b41",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-3_point_1.webp",
+      "target": "legacy/picture/map_2-3_point_1.webp",
+      "sha256": "c80bbc0097badcbb034e7107bf1b4c839c217dd05a10813cae50e320c8e002da",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-3_point_2.webp",
+      "target": "legacy/picture/map_2-3_point_2.webp",
+      "sha256": "6eea30e60164d75eb82163b53e66648478868d978f8d2660379816d372de5865",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-3_point_3.webp",
+      "target": "legacy/picture/map_2-3_point_3.webp",
+      "sha256": "76e7302c9f8bdfa5cad8734f0b78d422d93a09d71d930aca1104b78cc0606869",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-3_point_4.webp",
+      "target": "legacy/picture/map_2-3_point_4.webp",
+      "sha256": "e22031038200b3eea5573e036555cedaebe4cadd73cb8ca4815229626acf7310",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-3_point_5.webp",
+      "target": "legacy/picture/map_2-3_point_5.webp",
+      "sha256": "a3c7aa0e1113d43d46fa1b5b599fbc5420241384b99a2b733aa06a5ea76d8f0f",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-4.webp",
+      "target": "legacy/picture/map_2-4.webp",
+      "sha256": "ae2c5822e8a8d51f8e7988e20886e5aef751f1445cee4aae12448ad34c22fc36",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-4_point_1.webp",
+      "target": "legacy/picture/map_2-4_point_1.webp",
+      "sha256": "16f97fc3423ffdba102d793f31decf272cc0d407b3974fbfdc612c172cac4f1d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-4_point_2.webp",
+      "target": "legacy/picture/map_2-4_point_2.webp",
+      "sha256": "6c6932c1a67a720ca171a968a171707cae483e4545f979c552d60bf881b049b0",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-4_point_3.webp",
+      "target": "legacy/picture/map_2-4_point_3.webp",
+      "sha256": "7203e5947d126e7b3bea61c75e794f14eb21485e3b3d00bd5c807ae9ffc5384d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-5.webp",
+      "target": "legacy/picture/map_2-5.webp",
+      "sha256": "a9f6256dc0586fa9ce6b773d5ed9447f53e5d2e96e43f77bf271d037b621585d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-5_point_1.webp",
+      "target": "legacy/picture/map_2-5_point_1.webp",
+      "sha256": "c9c035dfd738cf0baacb2e7e6936368c0db25ec9810326ca11bf9045c4b838c6",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-5_point_2.webp",
+      "target": "legacy/picture/map_2-5_point_2.webp",
+      "sha256": "6d8d423770bfbc66d2ac8a4cb57624220c50698c8dd5b97ca6ca9e5f01a9df1d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-5_point_3.webp",
+      "target": "legacy/picture/map_2-5_point_3.webp",
+      "sha256": "048002e1e581d1497fc033d75135b178e8ce8c8976d32fbea2efde0488206183",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-5_point_4.webp",
+      "target": "legacy/picture/map_2-5_point_4.webp",
+      "sha256": "793454a04aee849a29045dbaed4480584dba4ee644cd3dc6f26d940a4dd32e71",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-5_point_5.webp",
+      "target": "legacy/picture/map_2-5_point_5.webp",
+      "sha256": "d200206a1af3a3985e64205c7bb6300a49a29115e7eb01cd2650785ec10ede34",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-5_point_6.webp",
+      "target": "legacy/picture/map_2-5_point_6.webp",
+      "sha256": "f5ddaef73ac2434c84d8cc29d3e339652da262734a03d6336f9bde8c3ff26e57",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-5_point_7.webp",
+      "target": "legacy/picture/map_2-5_point_7.webp",
+      "sha256": "ca74a6046f262dc346d6ec6a6eaf14021a6eebd9736525240f89a0eb2f94b1bb",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-6.webp",
+      "target": "legacy/picture/map_2-6.webp",
+      "sha256": "2714b990caeb33f1a0fd1634cc32e337daebb5f83efe708fa7120e90a9129519",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-6_point_1.webp",
+      "target": "legacy/picture/map_2-6_point_1.webp",
+      "sha256": "ded73a7523b29778bb03d7c2aaa13eec818736d45f9ed9683d05182f5720fa8c",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-6_point_2.webp",
+      "target": "legacy/picture/map_2-6_point_2.webp",
+      "sha256": "46dca596c4302bd673344f0489560a3d678acb80c6b2c7978f1b8691c8e46f4e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-6_point_3.webp",
+      "target": "legacy/picture/map_2-6_point_3.webp",
+      "sha256": "70dcc017c7b6b3e4b17fdeedf2653a55df0cb617e0f617cad9235d9584d916c4",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-6_point_4.webp",
+      "target": "legacy/picture/map_2-6_point_4.webp",
+      "sha256": "6f09c0fd8770437ffee84143e7f4af131b6c526567869e05888016821a18923e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-7.webp",
+      "target": "legacy/picture/map_2-7.webp",
+      "sha256": "0f617619499aa91e09b34d4c13ea07ff5323a9ba89f35072fb72fddc57a5f936",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-7_point_1.webp",
+      "target": "legacy/picture/map_2-7_point_1.webp",
+      "sha256": "4947ac6fd1cc2f1302ed07eea6807515bf3fffe86f08c7ffa137a3061789f796",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-7_point_2.webp",
+      "target": "legacy/picture/map_2-7_point_2.webp",
+      "sha256": "d0a8d03c936287adb488e76759da26b6ded18d078cd160cf7c7b4081f48ef751",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_2-7_point_3.webp",
+      "target": "legacy/picture/map_2-7_point_3.webp",
+      "sha256": "dde0ca1f7479e32d39000ed52117332a3453e30753f6efbcbab4bb14e2eeb15d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-0.webp",
+      "target": "legacy/picture/map_3-0.webp",
+      "sha256": "f80b28277db41db771c2cd97f33db6d7caf6c917c447476d57b8e1927640f332",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-0_point_1.webp",
+      "target": "legacy/picture/map_3-0_point_1.webp",
+      "sha256": "2bfe347f90e47d58174c4436d360b566837c33201dc7cd33cb22cc58162a08a9",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-1.webp",
+      "target": "legacy/picture/map_3-1.webp",
+      "sha256": "6514dca6973e03cdbd771da327a9f622c396332aca9553dbf9f694ee7789bc9b",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-1_point_1.webp",
+      "target": "legacy/picture/map_3-1_point_1.webp",
+      "sha256": "a4164add13b3d45e16ad28254d8adefa6a505874b1d1f9db1ab519acd08e3e19",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-1_point_2.webp",
+      "target": "legacy/picture/map_3-1_point_2.webp",
+      "sha256": "e6190fa4e4f7e27236a175566920a307f9235336eadb13698559fe564004481f",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-1_point_3.webp",
+      "target": "legacy/picture/map_3-1_point_3.webp",
+      "sha256": "996eeb5e77658e2ee50ca72966c7e111dbe6bb873464c7d8075d159c97689ba5",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-1_point_4.webp",
+      "target": "legacy/picture/map_3-1_point_4.webp",
+      "sha256": "aae8d49a351b3af496c2d71ca53953949d5ec882d7451ae03ebbaef70a653afe",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-1_point_5.webp",
+      "target": "legacy/picture/map_3-1_point_5.webp",
+      "sha256": "2e7083baf2125e41666aa02bd013f16ad212cd4d7df4b6eddb90235510dab45c",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-1_point_6.webp",
+      "target": "legacy/picture/map_3-1_point_6.webp",
+      "sha256": "6604ceeb66009f77091901ee4426dfb1b16132b8c7035ee497c30a954090ec19",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-1_point_7.webp",
+      "target": "legacy/picture/map_3-1_point_7.webp",
+      "sha256": "0a695dd96c34aa2fb5389ac1d056c10fd9bc3347e217858a0231ce579c91c54f",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-2.webp",
+      "target": "legacy/picture/map_3-2.webp",
+      "sha256": "941ff4dbac8d613cc89c30150b48bdf42f5ceec5ecf31718a96c0b3387031768",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-2_point_1.webp",
+      "target": "legacy/picture/map_3-2_point_1.webp",
+      "sha256": "d5156651be3471f7cdc2aa4917fd2f07847631a98333733772850266d6a4095b",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-2_point_2.webp",
+      "target": "legacy/picture/map_3-2_point_2.webp",
+      "sha256": "ade038b02aa118203b8779609f70ee64fb477cfadd7ddbe1fb81d09034865bf5",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-2_point_3.webp",
+      "target": "legacy/picture/map_3-2_point_3.webp",
+      "sha256": "07da5e75cf73a495fc97a0e7daba41b851e411944d6da337b33d5e38be6decf3",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-2_point_4.webp",
+      "target": "legacy/picture/map_3-2_point_4.webp",
+      "sha256": "28be05761b20aaa1164c8ea1ac5eace9f968b4f1b49db5b6b99c8f4b54495037",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-2_point_5.webp",
+      "target": "legacy/picture/map_3-2_point_5.webp",
+      "sha256": "01cfa54da07a86b81c9db2768311659f078f9b6855d1c8857641a0f49f4fc604",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-2_point_6.webp",
+      "target": "legacy/picture/map_3-2_point_6.webp",
+      "sha256": "a116fb2dc34ad5bd390cbc966c2e0e667f6b925a92cf6388c5c9fd1e2d70cd6b",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-3.webp",
+      "target": "legacy/picture/map_3-3.webp",
+      "sha256": "900f1cec87068634efb8ef693ab228924e453fa08d01879fa1c0b8774e1ea955",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-3_point_1.webp",
+      "target": "legacy/picture/map_3-3_point_1.webp",
+      "sha256": "0e7a5cb233ed08420373b902755ae5243413b43cbe6f49059dddcf4e62009dbf",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-3_point_2.webp",
+      "target": "legacy/picture/map_3-3_point_2.webp",
+      "sha256": "3b4e9e0a1281c5631262a59be420dbd5017f0561a86fcef4f27fb48b696f57aa",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-3_point_3.webp",
+      "target": "legacy/picture/map_3-3_point_3.webp",
+      "sha256": "65b019515fb394b21201d9ff372255f6943c47ba9718986d4e690d0a83d590b0",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-3_point_4.webp",
+      "target": "legacy/picture/map_3-3_point_4.webp",
+      "sha256": "676311f69f56706e9c1eccfcaa0d9851f7fc4acf75b8142a67b1d91f99de5b4c",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-3_point_5.webp",
+      "target": "legacy/picture/map_3-3_point_5.webp",
+      "sha256": "1a0e3f6461dd2ff3bc788f0dd3755adc1ec843b2deb298acb01fb1ad07a8314c",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-3_point_6.webp",
+      "target": "legacy/picture/map_3-3_point_6.webp",
+      "sha256": "f2e1c03385a99e55faaabae034bc09c7d47a5eb55c893714028bf94e2a83c916",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-4.webp",
+      "target": "legacy/picture/map_3-4.webp",
+      "sha256": "355c939ab33bed3a875eda397e1d4dc06815f94f3108b655e2792b2b1236a1c7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-4_point_1.webp",
+      "target": "legacy/picture/map_3-4_point_1.webp",
+      "sha256": "c331f7812da09d7d6e25e9ed4ba7a74a2acbf68c753df7be072023d4d0891869",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-4_point_2.webp",
+      "target": "legacy/picture/map_3-4_point_2.webp",
+      "sha256": "fe2844603a65182fb0f130e45a5d5d7ebde77af016c935b04b1f50685ca424d1",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-4_point_3.webp",
+      "target": "legacy/picture/map_3-4_point_3.webp",
+      "sha256": "9feb66c0cf795099945beb32f25f276a340424cabf4ad41bad49dad658a77779",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-4_point_4.webp",
+      "target": "legacy/picture/map_3-4_point_4.webp",
+      "sha256": "d116000ce19b8b89abbcf2871d7b9105fa494c1b2aae3ac6c972e1113e25d90d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5.webp",
+      "target": "legacy/picture/map_3-5.webp",
+      "sha256": "0193327423c3f141b5f9ab963bc4519b4d4d1e5d5ffab5ddae9c0bbfdca6d3a2",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5_point_1.webp",
+      "target": "legacy/picture/map_3-5_point_1.webp",
+      "sha256": "d048fca24c0ccc8554a1686db3888bc1fc7c813932c316af40963836f6c7f52e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5_point_10.webp",
+      "target": "legacy/picture/map_3-5_point_10.webp",
+      "sha256": "6ef9cd77e5e665993ab18518497b9e9b462a6b2f175680e707ab60fd92decdf7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5_point_2.webp",
+      "target": "legacy/picture/map_3-5_point_2.webp",
+      "sha256": "4ed550b29f0fa9a290e1a679a12c8c15ce8289686e0d922204014af74fe1205d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5_point_3.webp",
+      "target": "legacy/picture/map_3-5_point_3.webp",
+      "sha256": "182b3fee451bfb9f1327450abfb47bb84eb61fde3a4616b074a733bb1d753cdc",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5_point_4.webp",
+      "target": "legacy/picture/map_3-5_point_4.webp",
+      "sha256": "56e21aa857adc4cae489161ef5b6e35a0024d9451d9e70ddbe677e36d2f0ed18",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5_point_5.webp",
+      "target": "legacy/picture/map_3-5_point_5.webp",
+      "sha256": "bd29854a4f290609104f89288921af39ba6199b3e5f2fab708d7f9fb38bdbac7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5_point_6.webp",
+      "target": "legacy/picture/map_3-5_point_6.webp",
+      "sha256": "5a3276b6d8bed15fbece74d82fcf3725f826c7c7c6518af4248f9870eb285ba2",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5_point_7.webp",
+      "target": "legacy/picture/map_3-5_point_7.webp",
+      "sha256": "c2133a7783d0aa6885b88cb940f56b5a5591eb98588bd473ef3834e68a712d4d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5_point_8.webp",
+      "target": "legacy/picture/map_3-5_point_8.webp",
+      "sha256": "f03a9420322630b47548d46847dd48eb6a791f7685f08c26ecec69d9eccfc8e7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-5_point_9.webp",
+      "target": "legacy/picture/map_3-5_point_9.webp",
+      "sha256": "d216b12b879ff3369645e8249095b52ab51a2d91c7202e03f05bb204bf71c916",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-6.webp",
+      "target": "legacy/picture/map_3-6.webp",
+      "sha256": "224ffe87e4b01d7c4918ed54ec27cfeef8320813c1aa666d1c3f0447323e204a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-6_point_1.webp",
+      "target": "legacy/picture/map_3-6_point_1.webp",
+      "sha256": "379d546ba407c5e4fb47ef52fd8f9d80cb6b2b7034fee1e535ae40351064ce41",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-6_point_2.webp",
+      "target": "legacy/picture/map_3-6_point_2.webp",
+      "sha256": "da1ffbe42ca252185df92ad65cda2b612a083d7955e7e092eb8333f23ff09c5d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-6_point_3.webp",
+      "target": "legacy/picture/map_3-6_point_3.webp",
+      "sha256": "182b3fee451bfb9f1327450abfb47bb84eb61fde3a4616b074a733bb1d753cdc",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-6_point_4.webp",
+      "target": "legacy/picture/map_3-6_point_4.webp",
+      "sha256": "56e21aa857adc4cae489161ef5b6e35a0024d9451d9e70ddbe677e36d2f0ed18",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-6_point_5.webp",
+      "target": "legacy/picture/map_3-6_point_5.webp",
+      "sha256": "bd29854a4f290609104f89288921af39ba6199b3e5f2fab708d7f9fb38bdbac7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-6_point_6.webp",
+      "target": "legacy/picture/map_3-6_point_6.webp",
+      "sha256": "5a3276b6d8bed15fbece74d82fcf3725f826c7c7c6518af4248f9870eb285ba2",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-6_point_7.webp",
+      "target": "legacy/picture/map_3-6_point_7.webp",
+      "sha256": "22613395e72bc00508ed27c71dd5685a26d567298b0029d65c5ed823501320ad",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-6_point_8.webp",
+      "target": "legacy/picture/map_3-6_point_8.webp",
+      "sha256": "5791d8668f8142b561fc2cac0f7f846f971e8a5ac670e693455e7de710d49882",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-7.webp",
+      "target": "legacy/picture/map_3-7.webp",
+      "sha256": "07c65d9d1bfcec2d5041af8e759fe3c16de50eedc2878c45c44ab8cbdb25ee10",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-7_point_1.webp",
+      "target": "legacy/picture/map_3-7_point_1.webp",
+      "sha256": "a4bc4258f8bda6f3179a8842175429e76016b94889bebbd7024a2511a5880c73",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-7_point_2.webp",
+      "target": "legacy/picture/map_3-7_point_2.webp",
+      "sha256": "506d5048ff9d4577b158e1e0ec110aac2bc26f715d2c78c6b7ffee73412afc16",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-7_point_3.webp",
+      "target": "legacy/picture/map_3-7_point_3.webp",
+      "sha256": "c5f7c8cef81a412ed8020a25002a04097abd1fc7adc066ba74d05027c25ff597",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-7_point_4.webp",
+      "target": "legacy/picture/map_3-7_point_4.webp",
+      "sha256": "fb1c5d0a019d05951b8984697a0a5d20828d7801cc95e1758ae0a9241d8730ac",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-7_point_5.webp",
+      "target": "legacy/picture/map_3-7_point_5.webp",
+      "sha256": "01074700a0fd05a87dfef4d552cb75846946fe0ad4671a77268344dd36d29a89",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-8.webp",
+      "target": "legacy/picture/map_3-8.webp",
+      "sha256": "e30a6c24bc45da7a7bf38943318871d3bbeadbf3ddc78747b7de7d9751aff831",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-8_point_1.webp",
+      "target": "legacy/picture/map_3-8_point_1.webp",
+      "sha256": "d1d1f4e67ecd745fb33717501434977b1f025166c964bd9270e9f26d09876eba",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-8_point_2.webp",
+      "target": "legacy/picture/map_3-8_point_2.webp",
+      "sha256": "f9934c4adfe3914ec9c5004be827841639b3b3f73faff2d34797390b23b8f2d9",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-8_point_3.webp",
+      "target": "legacy/picture/map_3-8_point_3.webp",
+      "sha256": "bb207c34f9d9d503195da76af0f4b35d5ad7bdd7dd99d23181748fb2ccf9fc21",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-8_point_4.webp",
+      "target": "legacy/picture/map_3-8_point_4.webp",
+      "sha256": "6643f0c8c34d15eeb490c2c3ff711ad95ccd82b40cc6ab73e0cb1e661a8903a0",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_3-8_point_5.webp",
+      "target": "legacy/picture/map_3-8_point_5.webp",
+      "sha256": "0633903f4dc38a3dc5ad1da974dad827c8f4b9f2fa6449c93ab21250396c2dd7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-0.webp",
+      "target": "legacy/picture/map_4-0.webp",
+      "sha256": "edbdd102852a3c553ff4a4bbd5fcca6386e9ad70293b1d72928f4e71a26e6d5d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-0_point_1.webp",
+      "target": "legacy/picture/map_4-0_point_1.webp",
+      "sha256": "a69a26a305edc444a782f10ccffdff01548c642fb0daddac94fc5a5ede7a3a1e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-0_point_2.webp",
+      "target": "legacy/picture/map_4-0_point_2.webp",
+      "sha256": "e538ed16c60fb6c18ed1d9bfe189dfc920f2e2db281c1071eddfca556e8b2498",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-0_point_3.webp",
+      "target": "legacy/picture/map_4-0_point_3.webp",
+      "sha256": "90dd66dad7648b46ab6b4426b2b6e3e9d493650f33770659b744b7fb1683e417",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-0_point_4.webp",
+      "target": "legacy/picture/map_4-0_point_4.webp",
+      "sha256": "f9bd0dde6aa9e23e8b8df15565fd5e775feddf255054aaccdf2fc83f49da76b4",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-0_point_5.webp",
+      "target": "legacy/picture/map_4-0_point_5.webp",
+      "sha256": "cdb9226fac2ba1ba802d5547b2f2c9c5a40ac64c4c7f92c4cde5ad5f3233db9a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-1.webp",
+      "target": "legacy/picture/map_4-1.webp",
+      "sha256": "cf5ca9418916a6524e1311ce2a493e9a3b90d52d567dc979cb80be466a32919a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-1_point_0.webp",
+      "target": "legacy/picture/map_4-1_point_0.webp",
+      "sha256": "664b53aea590f90ee9bd1707234728e35b9093c6197612c27f224e5c1eced95d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-1_point_1.webp",
+      "target": "legacy/picture/map_4-1_point_1.webp",
+      "sha256": "357c23c946a247dfdea40c0ea78561a78142697dceceecc8d79950867b290603",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-1_point_2.webp",
+      "target": "legacy/picture/map_4-1_point_2.webp",
+      "sha256": "c2590f215bb376c3d9fd540d4758f1f5453cf1eee75b2648bed991cffb796442",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-1_point_3.webp",
+      "target": "legacy/picture/map_4-1_point_3.webp",
+      "sha256": "d9af3403ca2725793aad4cd38de9488c9b86f8baccff380b4ea08011f40dcad2",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-1_point_4.webp",
+      "target": "legacy/picture/map_4-1_point_4.webp",
+      "sha256": "f472b3cca9099543d8731331c841b48e459d345560f7e0c0a893a94c8a8db628",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-1_point_5.webp",
+      "target": "legacy/picture/map_4-1_point_5.webp",
+      "sha256": "a7bf9c8b1942e08a7faeafe350216b695ac574fe505519ff7e7ce59dc6f3e5d9",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-1_point_6.webp",
+      "target": "legacy/picture/map_4-1_point_6.webp",
+      "sha256": "48f27392cecbf6aef967a34faef10d6b2cf6d3189e98aa8bf7bd3ee76ca3c43f",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-1_point_7.webp",
+      "target": "legacy/picture/map_4-1_point_7.webp",
+      "sha256": "b36abe6d5edee3e7271a2d29186bb5672ba173d175ec09ac13701e926928647a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-1_point_8.webp",
+      "target": "legacy/picture/map_4-1_point_8.webp",
+      "sha256": "9ab1aff79d42249def63132645553b1bac300ff428cbb8f9325633693621aa14",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-2.webp",
+      "target": "legacy/picture/map_4-2.webp",
+      "sha256": "2aab948519167f402452b0c576d937f58bdd1d53ec9014be1e92fdbab4ce47d6",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-2_point_1.webp",
+      "target": "legacy/picture/map_4-2_point_1.webp",
+      "sha256": "12536967e338c50f95fa003548fe6d7021452579eedf67e33cf940de2dd21382",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-2_point_2.webp",
+      "target": "legacy/picture/map_4-2_point_2.webp",
+      "sha256": "d97c9d64c051cb82f2c92bad3c39be8c4bff10afbb8ebb73ac98ce6d660b014e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-2_point_3.webp",
+      "target": "legacy/picture/map_4-2_point_3.webp",
+      "sha256": "6245b802b151d9630b3d4124d453eac9b3ad61b8e75ab8d7f0589f92bab0119d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-2_point_4.webp",
+      "target": "legacy/picture/map_4-2_point_4.webp",
+      "sha256": "a3c6c3f5f6e6de0664f41a3ca9eba7ae15be9bdd75ee06e24a07ab2aff34a889",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-3.webp",
+      "target": "legacy/picture/map_4-3.webp",
+      "sha256": "aa33d8b029b6d2a4af814e55cbacdf003e1b75bb16db6a55b2c0ccbb8a6bdbe1",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-3_point_1.webp",
+      "target": "legacy/picture/map_4-3_point_1.webp",
+      "sha256": "0c51688b0e46981fa65ca6c5c0324df29c7ea1a73e2fe76d1e4d6741ea82ff86",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-3_point_2.webp",
+      "target": "legacy/picture/map_4-3_point_2.webp",
+      "sha256": "2b85c1b371aeac692025ae46d362af7e058fc77601ecdcab45c0724488f922a5",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-3_point_3.webp",
+      "target": "legacy/picture/map_4-3_point_3.webp",
+      "sha256": "c09a6440ec0dbe69c0f20ea67936f8deabf8dd14573e2f4ea0edfbc8344f8802",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-3_point_4.webp",
+      "target": "legacy/picture/map_4-3_point_4.webp",
+      "sha256": "edb654fcd9bcaccf06c9554726dc4471b7b7bb989afde6c2c11886a83173abd9",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-3_point_5.webp",
+      "target": "legacy/picture/map_4-3_point_5.webp",
+      "sha256": "86dc337a6c11fdee817672c10af9c5a57c92332b0c71b48ea61643484dfe6dc0",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-3_point_6.webp",
+      "target": "legacy/picture/map_4-3_point_6.webp",
+      "sha256": "43dd75c2a32a56ce053897b483a238b202dbeba76a8493d9927d4744ae553b4b",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-3_point_7.webp",
+      "target": "legacy/picture/map_4-3_point_7.webp",
+      "sha256": "05dd598356df408466ceb76f763890447bf494ddebc66e9607f328d351cafe88",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-3_point_8.webp",
+      "target": "legacy/picture/map_4-3_point_8.webp",
+      "sha256": "6f06fd9caa9965d3869e249d6fe64f6e76a87f4f815045acf02aac4693e2c418",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-3_point_9.webp",
+      "target": "legacy/picture/map_4-3_point_9.webp",
+      "sha256": "ee1dbcab69bffbcd5ca905850600b842da17891165998a109b8c3c2a1ad028bb",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-4.webp",
+      "target": "legacy/picture/map_4-4.webp",
+      "sha256": "9f5c3bde81cca4b9512c2f3c24f9ed07328eb59b6df10b82b6e98a78047a64ef",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-4_point_1.webp",
+      "target": "legacy/picture/map_4-4_point_1.webp",
+      "sha256": "1142145845023f5e0c40fed93c1d24e84be3c3fdb17e051bb1166182c20f9b10",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-4_point_2.webp",
+      "target": "legacy/picture/map_4-4_point_2.webp",
+      "sha256": "50b6ef692b3e4b412fa558614cc61abc5ee9d2777a45c48347329ed2a8120a56",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-4_point_3.webp",
+      "target": "legacy/picture/map_4-4_point_3.webp",
+      "sha256": "82893097f35747e5b7f5d8422d80a342569dc38824df963783606b9c230234a1",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-4_point_4.webp",
+      "target": "legacy/picture/map_4-4_point_4.webp",
+      "sha256": "7d4390d066bface26c15061f803dfbd1c5d424a7d2daced22f7e155dece07d78",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-4_point_5.webp",
+      "target": "legacy/picture/map_4-4_point_5.webp",
+      "sha256": "97817cd0da0e5fe6bb507818d401eddd850c141b1697e85dd1c70589896321a4",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-4_point_6.webp",
+      "target": "legacy/picture/map_4-4_point_6.webp",
+      "sha256": "3847ecf9b36c62aa45d616f4954e91b191beb4841726b83fa587a453a77f0a20",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-5.webp",
+      "target": "legacy/picture/map_4-5.webp",
+      "sha256": "979710cbf2add59265cd9f56aca1a95625e08364b706b63f9238f3f44cf72d58",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-5_point_1.webp",
+      "target": "legacy/picture/map_4-5_point_1.webp",
+      "sha256": "82c002f4e2ba7f3f52a2480adae74e3f33c0029e11e2ddbc4e625f623837f394",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-5_point_2.webp",
+      "target": "legacy/picture/map_4-5_point_2.webp",
+      "sha256": "fdec2cd40ed661841334763f8265fa16730138d7a6f3d409670721af3140e53a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-5_point_3.webp",
+      "target": "legacy/picture/map_4-5_point_3.webp",
+      "sha256": "0b77ec8fdd34425bdc752158744393e51cf91d99f35ec1523cae869cd77bb8ba",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-5_point_4.webp",
+      "target": "legacy/picture/map_4-5_point_4.webp",
+      "sha256": "b1c25a673285810300a7101bc50c63cb13813cc3d82397d0c6bc8bd4797755b1",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-5_point_5.webp",
+      "target": "legacy/picture/map_4-5_point_5.webp",
+      "sha256": "ca095ca064598c2a7f4f53dd149982adb011c0abe6bd30bbd17b4974361a0aa8",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-5_point_6.webp",
+      "target": "legacy/picture/map_4-5_point_6.webp",
+      "sha256": "922cb57c662dbbdf70bd5e3e83cb9beb07c71db5232d9da4a7e21703120a2fb3",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-5_point_7.webp",
+      "target": "legacy/picture/map_4-5_point_7.webp",
+      "sha256": "6173c5e35db81961630c6a78431498e9d77c2a9341a81648e83830df5ba66f44",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-5_point_8.webp",
+      "target": "legacy/picture/map_4-5_point_8.webp",
+      "sha256": "7ef197e802fd7d050903f53779043a7b22672af13a3ffe2fcbc1211b28c2470e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-5_point_9.webp",
+      "target": "legacy/picture/map_4-5_point_9.webp",
+      "sha256": "2e057dba48189606006746d98f64f94db0a11be96f4c534a22f57edb9370bbfe",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-6.webp",
+      "target": "legacy/picture/map_4-6.webp",
+      "sha256": "a67cb0261b87e2a6819985ad2db30104437e4328ff298a8d5e0f19429d3a3e99",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-6_point_1.webp",
+      "target": "legacy/picture/map_4-6_point_1.webp",
+      "sha256": "2b1ad4056649c5321056778b22d0e18050492311c6bd8a44b630db69e183f8ec",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-6_point_10.webp",
+      "target": "legacy/picture/map_4-6_point_10.webp",
+      "sha256": "aa67aa2ac580352223d59de203c97bcd3035b29546b9de060139f021bf116f42",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-6_point_2.webp",
+      "target": "legacy/picture/map_4-6_point_2.webp",
+      "sha256": "167fbdd8099bc4af7456089747de57143d9f5c2a03a97fbffe3e71f8495ec778",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-6_point_3.webp",
+      "target": "legacy/picture/map_4-6_point_3.webp",
+      "sha256": "0d442d610d12f02cac83c9e08b4a28d160d1b4f9bc8b96a9857dffdda581b5e7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-6_point_7.webp",
+      "target": "legacy/picture/map_4-6_point_7.webp",
+      "sha256": "174d314f5c3f90ad30633f033dc4da81ea385d9fe2ecccaf2a7a5a236f7bbb93",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-6_point_8.webp",
+      "target": "legacy/picture/map_4-6_point_8.webp",
+      "sha256": "ddb8b87c1b9c6577df7edc49dda04700be5afdc48f25f4bcb3caf2af9eb470ab",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-6_point_9.webp",
+      "target": "legacy/picture/map_4-6_point_9.webp",
+      "sha256": "2b5b404a5545c03dc2ff62b0bae9c12c4f2323c627235bc8460163ecbda67368",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-7.webp",
+      "target": "legacy/picture/map_4-7.webp",
+      "sha256": "e037c08b5d9ab27b8362704c32553902552a230e62d2debb982f559563ee0b6a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-7_point_1.webp",
+      "target": "legacy/picture/map_4-7_point_1.webp",
+      "sha256": "5f169effba5bc7d22ffaf6d8fe2948335adacf4f0bddb3e2d72cb57ed341db69",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-7_point_2.webp",
+      "target": "legacy/picture/map_4-7_point_2.webp",
+      "sha256": "65ef1b811343bd372f458221a9ace9ba7ae741e884864ebc6145e78bb016d703",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-7_point_3.webp",
+      "target": "legacy/picture/map_4-7_point_3.webp",
+      "sha256": "7a9021a76d92bc589c7ea4599856a5f6b084bfccf74185b1c04edf543b6a2f92",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-7_point_4.webp",
+      "target": "legacy/picture/map_4-7_point_4.webp",
+      "sha256": "bf2ed7edc6d160a4c4ef69a323e0c160084940816331eac545e8c6ef6c957b00",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-7_point_5.webp",
+      "target": "legacy/picture/map_4-7_point_5.webp",
+      "sha256": "9b63b41a0d9a3360649d442f9c0a523318d71fa60881411b13cac291513e2dd7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-7_point_6.webp",
+      "target": "legacy/picture/map_4-7_point_6.webp",
+      "sha256": "9594993db1bca259cbe7fd3fa2f05cd73e705bc6c4c7f60e81dfabdc831c770e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_4-7_point_7.webp",
+      "target": "legacy/picture/map_4-7_point_7.webp",
+      "sha256": "3bec4a1bc32ea39c2131657de1a9b861de725021a35131cf7690a611c9b5a34d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-0.webp",
+      "target": "legacy/picture/map_5-0.webp",
+      "sha256": "ea8e2ef113dcb53d2190d1a7fded44a8d1ee6b188c8e7416afa710d07e94d2d0",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-0_point_1.webp",
+      "target": "legacy/picture/map_5-0_point_1.webp",
+      "sha256": "6d9f11d2f55ed8fa4d0432eab8d1f35e4a918f651a355ada4059e9d95fc5e6e8",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-0_point_2.webp",
+      "target": "legacy/picture/map_5-0_point_2.webp",
+      "sha256": "7219e2e00a421df57aeefc1d58eb2fbef64e98538bdc3eb6caa00e6c0fcd9dfb",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-1.webp",
+      "target": "legacy/picture/map_5-1.webp",
+      "sha256": "8c65105cd77842bc8af18b9b3628e34c78ea7ba7db07ab6f124927e9ed89a86f",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-1_point_1.webp",
+      "target": "legacy/picture/map_5-1_point_1.webp",
+      "sha256": "62ac9b31859c4701abfe90756628dc440dae8695c52dee4df589f1d843375edf",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-1_point_2.webp",
+      "target": "legacy/picture/map_5-1_point_2.webp",
+      "sha256": "92a4085a886bb9e22e0910581818be0666a34487f6ba857af02a944d47c15aa1",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-1_point_3.webp",
+      "target": "legacy/picture/map_5-1_point_3.webp",
+      "sha256": "a9c8cea385d390806690f00fd374f05b2094d326793aaf54fae101262f1d6350",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-1_point_4.webp",
+      "target": "legacy/picture/map_5-1_point_4.webp",
+      "sha256": "2352a25c3e18f86fc7a02c1221a42a9d1978a1f32bd63b8fdcfcee4cc06d75d9",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-1_point_5.webp",
+      "target": "legacy/picture/map_5-1_point_5.webp",
+      "sha256": "3f00f4cb2bbe23104479be180f98b2b3c0a702c085c63015546029eeab3386f6",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-1_point_6.webp",
+      "target": "legacy/picture/map_5-1_point_6.webp",
+      "sha256": "34008c39b2a1343208081030490b6465360512d1e69c5e7de0a11fdca1ad6f7e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-1_point_7.webp",
+      "target": "legacy/picture/map_5-1_point_7.webp",
+      "sha256": "17ee9f64f3eaa8650433771dd137c0518cb671d3a9d4d347ee17b13d7322d49f",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-2.webp",
+      "target": "legacy/picture/map_5-2.webp",
+      "sha256": "f12a174bcbd0d9d2c905cc0f371693862c5b5e0ba88a295759cd47a68db389f4",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-2_point_1.webp",
+      "target": "legacy/picture/map_5-2_point_1.webp",
+      "sha256": "e9188bf958afae51d862cd93d23e73b24bdc6eda10e9034e178a10fb5f0e972c",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-2_point_2.webp",
+      "target": "legacy/picture/map_5-2_point_2.webp",
+      "sha256": "36515f79fd4343718eb0cfe573c447320fdda4e13757f8f233287da72fbc163a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-2_point_3.webp",
+      "target": "legacy/picture/map_5-2_point_3.webp",
+      "sha256": "e6151cfc7b955f1de2c13855161ed20089a22fe68c1fff155534940e83c2d8c3",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-2_point_4.webp",
+      "target": "legacy/picture/map_5-2_point_4.webp",
+      "sha256": "7953ba102c3653eac143928bd004cdc4c86fc50580fc24e6940e40e5b1ed9efb",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-2_point_5.webp",
+      "target": "legacy/picture/map_5-2_point_5.webp",
+      "sha256": "aab69008709749512ed3fbd329f5d7a930ded0296f83df22587053ab7090e683",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-2_point_6.webp",
+      "target": "legacy/picture/map_5-2_point_6.webp",
+      "sha256": "8ed47235f3506bac4996bd6c92a60d6ff2087fec1342ef39ad628a801c465647",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-2_point_7.webp",
+      "target": "legacy/picture/map_5-2_point_7.webp",
+      "sha256": "57273882283f8b8b4a56f3f46b14d3eb92c795651f64082bf59f200821b4db70",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-2_point_8.webp",
+      "target": "legacy/picture/map_5-2_point_8.webp",
+      "sha256": "d0c5557961420366d4ff0633098b0f6ff27be53d249db187498cd96ebcd41fa0",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-2_point_9.webp",
+      "target": "legacy/picture/map_5-2_point_9.webp",
+      "sha256": "b16bd310ba1df69c8cf472edbd36ffd81cfba84273aa0af1f9112d58a2bb181a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-3.webp",
+      "target": "legacy/picture/map_5-3.webp",
+      "sha256": "4495a73de62988348e0e1c80c9aeaf0e8e288fceac3d8388ef3da8e41a6b05cb",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-3_point_1.webp",
+      "target": "legacy/picture/map_5-3_point_1.webp",
+      "sha256": "03eb63fab390b57a688ee7ed1a2d7e435b885675d4e90e181f49b119aeba113e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-3_point_2.webp",
+      "target": "legacy/picture/map_5-3_point_2.webp",
+      "sha256": "0ce9c4428bfffdf6fa695cd3277b0f752161d73b8d563f11a0365e9d30a2fd2a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-3_point_3.webp",
+      "target": "legacy/picture/map_5-3_point_3.webp",
+      "sha256": "b78fd579a87fad42131fbfb19c0edad2fe6cfe616666d864f800167955e631cc",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-3_point_4.webp",
+      "target": "legacy/picture/map_5-3_point_4.webp",
+      "sha256": "5e0b447b589b7c9980873061d69bd699e8e98c3e6cde0388f6e3cec21c4a91e0",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-4.webp",
+      "target": "legacy/picture/map_5-4.webp",
+      "sha256": "fb5e42ce32911a2ea2f62b9030513061de725cda699fb2389c008f7dc0345d38",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-4_point_1.webp",
+      "target": "legacy/picture/map_5-4_point_1.webp",
+      "sha256": "06951021d9acdcc79dea11137dfe22cac717c219bdb921b22fc7f9938ffbddbf",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-4_point_2.webp",
+      "target": "legacy/picture/map_5-4_point_2.webp",
+      "sha256": "609fe8021e95c392c4888ae56b947b76af57421d62535e9eda329ef942005f17",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-4_point_3.webp",
+      "target": "legacy/picture/map_5-4_point_3.webp",
+      "sha256": "caedad165f4bf71a40353e9db4fd8e1b9bb04162966e384e60986c683cb5360d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-4_point_4.webp",
+      "target": "legacy/picture/map_5-4_point_4.webp",
+      "sha256": "9149aa3cfae433ab171bc2b4b07ba16a3a3445739f124efe60021f8ed674b1df",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-4_point_5.webp",
+      "target": "legacy/picture/map_5-4_point_5.webp",
+      "sha256": "d5790f98d12533d1f28fe850d3d4d9e9c8fec07024ea9267ee2fd45f5f8937cd",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-5.webp",
+      "target": "legacy/picture/map_5-5.webp",
+      "sha256": "6e4a527d32c52d96a5c309597a0130017a7d01d66e8dc255c29572f47c2709e5",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-5_point_1.webp",
+      "target": "legacy/picture/map_5-5_point_1.webp",
+      "sha256": "0a7d8287e3467e09eb4c1bf819100134eb965c1e401b4f33894467e96b1d6d33",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-5_point_2.webp",
+      "target": "legacy/picture/map_5-5_point_2.webp",
+      "sha256": "0d199f70db01cca4f20bbf0b9efada344034320171e8254cd801b4f933528cfe",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-5_point_3.webp",
+      "target": "legacy/picture/map_5-5_point_3.webp",
+      "sha256": "46d5143babe2ff04ac63b31c03b83d4360e5d8b3fb7fa88dcfcd8510a032ae70",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-5_point_4.webp",
+      "target": "legacy/picture/map_5-5_point_4.webp",
+      "sha256": "c493306f04ca395394fab4e2159c4674c8a083da1f02d234ef9f78c20ab8de59",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-5_point_5.webp",
+      "target": "legacy/picture/map_5-5_point_5.webp",
+      "sha256": "f585fa49de9a6d5013e1dd8a0aa6e4c2904a221fc80d6e572a5bb7dc4371a8e7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-5_point_6.webp",
+      "target": "legacy/picture/map_5-5_point_6.webp",
+      "sha256": "4fa7019a7f3858d7c6f5e6b335dd14721b4c5ce3958a51fb291dcfdbf308fd3c",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-6.webp",
+      "target": "legacy/picture/map_5-6.webp",
+      "sha256": "1e1bb74ba4b34fab87596f3c3ae0e6fd877edaa0ef1178911a7df170e1518c9d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-6_point_1.webp",
+      "target": "legacy/picture/map_5-6_point_1.webp",
+      "sha256": "b29ba1f260978d996a72bae6045914e0257d2da80bc23e5d36b86c7706891f33",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-6_point_2.webp",
+      "target": "legacy/picture/map_5-6_point_2.webp",
+      "sha256": "fd455ff5b4609595dfa2a0cafb226e65756a0ffc193e54608330b56b2666ccc1",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-6_point_3.webp",
+      "target": "legacy/picture/map_5-6_point_3.webp",
+      "sha256": "485dc12e2adfe5d3054b110b6ac37ce96e0122e6334a3add342b01a3ee016f01",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-6_point_4.webp",
+      "target": "legacy/picture/map_5-6_point_4.webp",
+      "sha256": "1b57b063106e995d8365e6b1062e9ce3d97d66112a236d22280a4054b9a878b9",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-6_point_5.webp",
+      "target": "legacy/picture/map_5-6_point_5.webp",
+      "sha256": "bc10d611e674ebb8bce3a8349f40eb857bb958ba4c1979b0b0f7f5a02fb57bde",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-7.webp",
+      "target": "legacy/picture/map_5-7.webp",
+      "sha256": "0a676f2a8cbda800b8722b7aaccdf1dd3f676004e95aa600e5e5d2bab3ad7a6d",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-7_point_1.webp",
+      "target": "legacy/picture/map_5-7_point_1.webp",
+      "sha256": "6f9d717e62ac460e241e09c174c7b4e53624a58b926e593b7b4ff3e29b0bd41e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-7_point_2.webp",
+      "target": "legacy/picture/map_5-7_point_2.webp",
+      "sha256": "9585e67f6f75c5ebe1492f24296f27953a4792059477ad7990134841e5a3c4b1",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-7_point_3.webp",
+      "target": "legacy/picture/map_5-7_point_3.webp",
+      "sha256": "a74ecd23f0897d0176b3ac053a59e99ba69d632318c0936ee6ca25a8c14dc83f",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-7_point_4.webp",
+      "target": "legacy/picture/map_5-7_point_4.webp",
+      "sha256": "fb774f35e2a9566cd895c1a564f4daa60271448ea42a1c1d2a39f4bfa1682304",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-7_point_5.webp",
+      "target": "legacy/picture/map_5-7_point_5.webp",
+      "sha256": "5a2a2e2365b7ce2038c5ef4b6fe85fbc050b99e55962530698cf3ccb69f54b2a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-8.webp",
+      "target": "legacy/picture/map_5-8.webp",
+      "sha256": "62bd60b16831fdc6172948802f9411c743dc5c6343339840c3aac6bba9c5a41b",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-8_point_1.webp",
+      "target": "legacy/picture/map_5-8_point_1.webp",
+      "sha256": "ccc5de7dfdd9a0e89eb0c24e2fd930e34199478111a82c576d0ba5aee5b78d98",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-8_point_2.webp",
+      "target": "legacy/picture/map_5-8_point_2.webp",
+      "sha256": "683793707aa2fe21c6d11cdb977370be51a3c291d45646c5434c9e062eecb963",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-8_point_3.webp",
+      "target": "legacy/picture/map_5-8_point_3.webp",
+      "sha256": "9c66b1e0987034b45eb42e63bf11559379a44d25405db58b3444fefa2fa58929",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-8_point_4.webp",
+      "target": "legacy/picture/map_5-8_point_4.webp",
+      "sha256": "c4573548ccb4e4e87757039e54860978d9d4533f2602b79911f770ab98d8210b",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-8_point_5.webp",
+      "target": "legacy/picture/map_5-8_point_5.webp",
+      "sha256": "49273d9a45182c8d3b4107c66f4d8d8c18de831f985b43be635be7976e632548",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-8_point_6.webp",
+      "target": "legacy/picture/map_5-8_point_6.webp",
+      "sha256": "25fa181b116264d05fee21a001fcab45fe4e2ba78ef22ff4c4f0019437831cfe",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-8_point_7.webp",
+      "target": "legacy/picture/map_5-8_point_7.webp",
+      "sha256": "8c26b2502bf6a41ea194189fe9ccc2ba974364b6402bb55530359cfe0c52c438",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-9.webp",
+      "target": "legacy/picture/map_5-9.webp",
+      "sha256": "a48dc1bda540a1425be2c9bac7cb7023454c6014b43ad32a050c4f400fa089a6",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-9_point_1.webp",
+      "target": "legacy/picture/map_5-9_point_1.webp",
+      "sha256": "086942467b53b157783fe48d19aef4a9814a905c6303e5d7f25c35451bf6454e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-9_point_2.webp",
+      "target": "legacy/picture/map_5-9_point_2.webp",
+      "sha256": "0cfe0b4e5de9ba2566c5e4b8d2d03c376d9f2ca863e7f150f485098cb6373288",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_5-9_point_3.webp",
+      "target": "legacy/picture/map_5-9_point_3.webp",
+      "sha256": "a8b502321fa429e3f811ce9476ed839cde198b0d11dd453baba981d8b37fac0b",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-1.webp",
+      "target": "legacy/picture/map_6-1.webp",
+      "sha256": "d813fb7320ee294b40822fd10bcee4b80b43db02fd952c887611e5645bb16573",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-1_point_1.png",
+      "target": "legacy/picture/map_6-1_point_1.png",
+      "sha256": "dc1cfb5d1b9aba77cfde8354c5579b532aad07d2312982538bc6bc085a9b1a83",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-1_point_2.webp",
+      "target": "legacy/picture/map_6-1_point_2.webp",
+      "sha256": "88f447968048d754630671d725fa14d8c91945a617d61c110fe86384c84726f7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-1_point_3.webp",
+      "target": "legacy/picture/map_6-1_point_3.webp",
+      "sha256": "15c467ec06b36f30611c8f63f3d59fed4f58c9fe77350852cd429c0695e888a9",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-1_point_4.webp",
+      "target": "legacy/picture/map_6-1_point_4.webp",
+      "sha256": "fcffd80b782d2af74630e1a7a625a0f33c1e9f06fabf6dae5638768b3e7feab1",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-2.webp",
+      "target": "legacy/picture/map_6-2.webp",
+      "sha256": "c9def270145fd35d4b9776acc86efb034d0e4559630f1f5ed38e4ad4793e3fb8",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-2_point_1.webp",
+      "target": "legacy/picture/map_6-2_point_1.webp",
+      "sha256": "4cf4d75f7138416901f0f336d9bdd03cb1258166b1a8421091eb1c0a9f35cb16",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-2_point_2.webp",
+      "target": "legacy/picture/map_6-2_point_2.webp",
+      "sha256": "6772c86ba0d94c89a8a8560e237cc630b39ea6175aae9c68c20f856bae9f8808",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-3.webp",
+      "target": "legacy/picture/map_6-3.webp",
+      "sha256": "94cced4c4f808165e24989c5e55f00dd51554c99b5d7efe3f286169dcaaa83a7",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-3_point_1.webp",
+      "target": "legacy/picture/map_6-3_point_1.webp",
+      "sha256": "e0dad79fae33684d0ed2665a335d9c5d2458c1b3649f176f399c183bfe467ca2",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-3_point_2.webp",
+      "target": "legacy/picture/map_6-3_point_2.webp",
+      "sha256": "72c5ec733d9178a943443817ba5f7d03e1380234589471938805a71ac135eecf",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-3_point_3.webp",
+      "target": "legacy/picture/map_6-3_point_3.webp",
+      "sha256": "d9b1e2003bb7f56f27deeef3eef0441cd9c915f42e053eef8216cdc97bd60409",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-3_point_4.webp",
+      "target": "legacy/picture/map_6-3_point_4.webp",
+      "sha256": "c3d7664db9f5c98111ad3abee23502bace33c3d3d10085c4c0a006af309afb0f",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-3_point_5.webp",
+      "target": "legacy/picture/map_6-3_point_5.webp",
+      "sha256": "33a770d4ff56921b7ca3db296d2d23028c84dc8fede1cc1486110f51b395631a",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-4.webp",
+      "target": "legacy/picture/map_6-4.webp",
+      "sha256": "af3b4744194ae2ce817cc90b3fdd0c268e19807a1dd4b06cbae867b5d413ba51",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-4_point_1.webp",
+      "target": "legacy/picture/map_6-4_point_1.webp",
+      "sha256": "850da3253d0912d759b68ec4f33dbe15181721aa5840cc971529b12a306aeca2",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-4_point_2.webp",
+      "target": "legacy/picture/map_6-4_point_2.webp",
+      "sha256": "49f49e05dc1ccb8273f3dc0e135730682cf5632d6daecb74cfe0965ead471ada",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-5.webp",
+      "target": "legacy/picture/map_6-5.webp",
+      "sha256": "d511089efeecdfac6f43fe67a6ba2180da5d47b0f0fed361740e465026d4154e",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-5_point_1.webp",
+      "target": "legacy/picture/map_6-5_point_1.webp",
+      "sha256": "128689ad229c6d67984626a5a7e784ca39fab2c9499e7773363512e27b8cb2af",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_6-5_point_2.webp",
+      "target": "legacy/picture/map_6-5_point_2.webp",
+      "sha256": "3e298af6942e59c706bb1b78a5715b886da672cda5e692567c1c163f2d635bd5",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_9-7.webp",
+      "target": "legacy/picture/map_9-7.webp",
+      "sha256": "f2d64f750fd4341f267214d8f545a007dc84e9999c7a0f70484abc26f2618784",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_back.webp",
+      "target": "legacy/picture/map_back.webp",
+      "sha256": "a1d7951fec5ed3f2cb697c342a8900f0e7fea74eb0cb0fa49e3adb921c5e8636",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_index.webp",
+      "target": "legacy/picture/map_index.webp",
+      "sha256": "3ba35b13f65be9012b3c54c394f3edf176b586a4d69c080e1ed50396aad4a1c2",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_index_1.webp",
+      "target": "legacy/picture/map_index_1.webp",
+      "sha256": "e17c0dfda7b737f1b606f53fbd165c5794ac4a57d6d3cf7b787532d7ce032008",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_index_2.webp",
+      "target": "legacy/picture/map_index_2.webp",
+      "sha256": "2b8664503fbb4ddb2361b5aba12125e6b74dea6af03f7b5b3bd62ff30467f735",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_index_3.webp",
+      "target": "legacy/picture/map_index_3.webp",
+      "sha256": "cd75ee860d63990610acdeffb0e92028750cd2401e3f989c05cdcd4be4886e31",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_load.webp",
+      "target": "legacy/picture/map_load.webp",
+      "sha256": "2f5de3094e3a2690a7b56ef80552b687812d107e6fc37e465c7d33ec4b71fb00",
+      "action": "move"
+    },
+    {
+      "source": "picture/map_shrink.webp",
+      "target": "legacy/picture/map_shrink.webp",
+      "sha256": "c1b88f97488d6ec902ddad41bafe69709a0af68c727677f061841f8e4ecef1ee",
+      "action": "move"
+    },
+    {
+      "source": "picture/max.webp",
+      "target": "legacy/picture/max.webp",
+      "sha256": "348df1197df931abaa40788cb514ae7e4595699c31aa4c4e0d0fa6b6aeb02b90",
+      "action": "move"
+    },
+    {
+      "source": "picture/monthly_pass_pic.webp",
+      "target": "legacy/picture/monthly_pass_pic.webp",
+      "sha256": "4924371f8cb532998673eeab54de00a7a0fc00c4b1b838cc874aa62ea5d5204b",
+      "action": "move"
+    },
+    {
+      "source": "picture/monthly_pass_pic_2.webp",
+      "target": "legacy/picture/monthly_pass_pic_2.webp",
+      "sha256": "525d7850a1566758cabf4ef436c1e9eef49d94b2490656a7c91b16e65dd035f3",
+      "action": "move"
+    },
+    {
+      "source": "picture/monthly_pass_pic_3.webp",
+      "target": "legacy/picture/monthly_pass_pic_3.webp",
+      "sha256": "3829b535dd9f5d60d1220edca97193cce58a2a0602eac68062933103ef3fe132",
+      "action": "move"
+    },
+    {
+      "source": "picture/not_auto.webp",
+      "target": "legacy/picture/not_auto.webp",
+      "sha256": "bc9a2d693532f075e06c8efe87a57d17f5cab2219d7d59f72325f3cc1b3086e1",
+      "action": "move"
+    },
+    {
+      "source": "picture/orientation_1.webp",
+      "target": "legacy/picture/orientation_1.webp",
+      "sha256": "f68416f5b82c95453f825d006e1942fabad44b77c6d7cefa4a31dda4cf98a719",
+      "action": "move"
+    },
+    {
+      "source": "picture/orientation_2.webp",
+      "target": "legacy/picture/orientation_2.webp",
+      "sha256": "237083392c684e5d4e7892e6415a036105f63442967dd9de709a94abc5f9f2aa",
+      "action": "move"
+    },
+    {
+      "source": "picture/orientation_3.webp",
+      "target": "legacy/picture/orientation_3.webp",
+      "sha256": "f4c5c9d4c15355fde851b07fff39804cc1d8f13ae3631d53d4d9470680fbb893",
+      "action": "move"
+    },
+    {
+      "source": "picture/orientation_4.webp",
+      "target": "legacy/picture/orientation_4.webp",
+      "sha256": "e8cb2cfc64c0551ccd9ed86f92b3bab0900cecd0963a143f71f31e7234259ec1",
+      "action": "move"
+    },
+    {
+      "source": "picture/orientation_5.webp",
+      "target": "legacy/picture/orientation_5.webp",
+      "sha256": "5e74c249c7ac858c9db001d8745601712b9892d33eb6ec727648d8b5d09d37ce",
+      "action": "move"
+    },
+    {
+      "source": "picture/orientation_6.webp",
+      "target": "legacy/picture/orientation_6.webp",
+      "sha256": "ebce8da9de5c987fcdb5e7bf64ed43eefbd7f99ad1a7ecf971299750579bbb53",
+      "action": "move"
+    },
+    {
+      "source": "picture/orientation_7.webp",
+      "target": "legacy/picture/orientation_7.webp",
+      "sha256": "b237c98840dd1614f22334b9ecda2c008a8b3585e84e468e4e804d86d5577f8d",
+      "action": "move"
+    },
+    {
+      "source": "picture/orientation_close.webp",
+      "target": "legacy/picture/orientation_close.webp",
+      "sha256": "5894e923281e0461e40b298885a4773716f4a70593b22a34d254175853d94bf7",
+      "action": "move"
+    },
+    {
+      "source": "picture/parcel.webp",
+      "target": "legacy/picture/parcel.webp",
+      "sha256": "7411e06841f407792110b96331ab10d3fdde22404a96d227609fad0a81825010",
+      "action": "move"
+    },
+    {
+      "source": "picture/puzzle_exit_confirm.png",
+      "target": "legacy/picture/puzzle_exit_confirm.png",
+      "sha256": "a11ddde54431334951227c9360294aaa443ce1016161de8bf1136fcc2bd05256",
+      "action": "move"
+    },
+    {
+      "source": "picture/puzzle_exit_prompt.png",
+      "target": "legacy/picture/puzzle_exit_prompt.png",
+      "sha256": "122fb2608b8a8c45124dfbdc4e5c5781ce851b11955c7d503a931af6d47d5387",
+      "action": "move"
+    },
+    {
+      "source": "picture/qiqiao.webp",
+      "target": "legacy/picture/qiqiao.webp",
+      "sha256": "be7f1915caae3d1d315dbe401f04c6452435fa53d5963ef5912cf7d1a9e53039",
+      "action": "move"
+    },
+    {
+      "source": "picture/qiqiao_lab.webp",
+      "target": "legacy/picture/qiqiao_lab.webp",
+      "sha256": "20606ee8a3f2d8295b1a8ed0df5812073a60b46a13d02ea65761206e8179db91",
+      "action": "move"
+    },
+    {
+      "source": "picture/round.webp",
+      "target": "legacy/picture/round.webp",
+      "sha256": "c1718e229bf6a8a5a01a95dd8a49258f8893d54b84cdba24286e14aa237c09d0",
+      "action": "move"
+    },
+    {
+      "source": "picture/round_disable.webp",
+      "target": "legacy/picture/round_disable.webp",
+      "sha256": "0e0fa67d8daedb1a46df3b4850587ac0ea176fb26725f0b38fb18b8082c6715e",
+      "action": "move"
+    },
+    {
+      "source": "picture/screenshot_arrow.webp",
+      "target": "legacy/picture/screenshot_arrow.webp",
+      "sha256": "334abf5337b9925a6e0e2030840de98bc650d06385188e3d35dc23a821aee9f8",
+      "action": "move"
+    },
+    {
+      "source": "picture/second_floor.webp",
+      "target": "legacy/picture/second_floor.webp",
+      "sha256": "695b73b67460f4c4917749d32f126fa60037b37ecc08ae4393932a15738b4c70",
+      "action": "move"
+    },
+    {
+      "source": "picture/setting_icon.webp",
+      "target": "legacy/picture/setting_icon.webp",
+      "sha256": "07b36a0ef3a17befb7c295a5e73d3b30844bba5ec60b859eaa53475f38860be3",
+      "action": "move"
+    },
+    {
+      "source": "picture/setting_other.webp",
+      "target": "legacy/picture/setting_other.webp",
+      "sha256": "ee18faf4d2a0fe073a2a49383d7b2191b8f70c75b8c19e9934ed7e1710a476f1",
+      "action": "move"
+    },
+    {
+      "source": "picture/setting_yes.webp",
+      "target": "legacy/picture/setting_yes.webp",
+      "sha256": "193d73cc23f21d96b80e15a5a13d427d9fb7477bca1cd3e1e7391ed840ddb355",
+      "action": "move"
+    },
+    {
+      "source": "picture/sw.webp",
+      "target": "legacy/picture/sw.webp",
+      "sha256": "85de62acf9f0da84e13977fe418969970b6d3fa745150f23f47bf526bcd007f2",
+      "action": "move"
+    },
+    {
+      "source": "picture/switch_run.webp",
+      "target": "legacy/picture/switch_run.webp",
+      "sha256": "11f352c4f8d1c8f60995e66b29dbc121f093bb4864c40023e4288f9eedd0f59c",
+      "action": "move"
+    },
+    {
+      "source": "picture/tagz.webp",
+      "target": "legacy/picture/tagz.webp",
+      "sha256": "92a095d5ccb9804f7940d7e86de5870856b20859d2472568bec98aad3cc506c1",
+      "action": "move"
+    },
+    {
+      "source": "picture/third_floor.webp",
+      "target": "legacy/picture/third_floor.webp",
+      "sha256": "25a04782f12634ae68bfb83e7c1313ec26fa1d08238f755cad83ba7fcc11c27d",
+      "action": "move"
+    },
+    {
+      "source": "picture/token.webp",
+      "target": "legacy/picture/token.webp",
+      "sha256": "291033a05be65d046fd87dd96951d1b20f38f80f148dac30e43f4d1937b7d350",
+      "action": "move"
+    },
+    {
+      "source": "picture/transfer.webp",
+      "target": "legacy/picture/transfer.webp",
+      "sha256": "31637786ad2d5eef11117f2abfd9f905565f192dc08da8e7df4ec0e37ea6e492",
+      "action": "move"
+    },
+    {
+      "source": "picture/warn.webp",
+      "target": "legacy/picture/warn.webp",
+      "sha256": "7897f97c7118bbd1f61571f6fd8d9c2cadabe6df8b7968433aa52f2218b6de4c",
+      "action": "move"
+    },
+    {
+      "source": "picture/xiaohaoping.webp",
+      "target": "legacy/picture/xiaohaoping.webp",
+      "sha256": "1ca19a26e899aace63c8217e1043664bc5d36d18a56cea55042a81e4a8b1ae1e",
+      "action": "move"
+    },
+    {
+      "source": "picture/zengjia.webp",
+      "target": "legacy/picture/zengjia.webp",
+      "sha256": "43357aaed3d24205f4d50e4c3116f57baccd7dcda3c61948e70854bcf0e0b4e2",
+      "action": "move"
+    },
+    {
+      "source": "picture/zhongzi.webp",
+      "target": "legacy/picture/zhongzi.webp",
+      "sha256": "377ca6618f79e87da3271d37987b122225fdf28ebbc7508c746f50c6fe2c0cbf",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/axe_pick_icon.png",
+      "target": "resources/monitor/axe_pick_icon.png",
+      "sha256": "82ce765e2f2a6ec27d8c8a98696db93cb1b0ccb70bc69bcd8ead1491186554dc",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/coordinates.CT",
+      "target": "legacy/webui/coordinate-monitor/coordinates.CT",
+      "publication": "local_only",
+      "sha256": "3fc65385d2589a168d225e5a21127374fce4f08f7b1ac8da91031362c034007f",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/coordinates.html",
+      "target": "legacy/webui/coordinate-monitor/coordinates.html",
+      "sha256": "3bcaa78d147f479d108a7b90290efb099d5b744fe149c09c36a296c453b0d428",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/food_bag_close.png",
+      "target": "resources/monitor/food_bag_close.png",
+      "sha256": "74fb582e6e068da722deefad2cca578b179277975f0c50995dadc512ce544f20",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/food_bag_marker.png",
+      "target": "resources/monitor/food_bag_marker.png",
+      "sha256": "82288f97fa1f460c53d28af4ecade97ac06dbb8855d273a2061b64b43845056d",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/food_category.png",
+      "target": "resources/monitor/food_category.png",
+      "sha256": "be40ff8cb199f99284d7772f72f8b8c7db64ecc61bc2eaeb1ebe2db626b5b93a",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/food_eat_button.png",
+      "target": "resources/monitor/food_eat_button.png",
+      "sha256": "635e8beeabda823040abef17aae3ab78e278e7426360805a66ee24dbecdb5958",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/food_search_end.png",
+      "target": "resources/monitor/food_search_end.png",
+      "sha256": "e130a0f979b33acac32236fbcd5f30925db27f0dd0f81cdf9da56f2754be4c99",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/food_search_header.png",
+      "target": "resources/monitor/food_search_header.png",
+      "sha256": "25136f9b24e934740f42e5e1f8fbe48c91c4081fcff88d5195c3958c9d0412e2",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/food_search_results.png",
+      "target": "resources/monitor/food_search_results.png",
+      "sha256": "14f82615e3e44af113924f726afeb332848cee004d4a2b2968524536f15e1ab0",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/fruit_apple.png",
+      "target": "resources/monitor/fruit_apple.png",
+      "sha256": "67c9fbee4c9e85ae1a90c70fb4e0ddfe334c1ee95c098569454f9bd9015e70d1",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/fruit_blueberry.png",
+      "target": "resources/monitor/fruit_blueberry.png",
+      "sha256": "37ac9e07c372a32f49bbca46e25a704dad03c86006fa3ef0e80331ae5dda8744",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/fruit_orange.png",
+      "target": "resources/monitor/fruit_orange.png",
+      "sha256": "0c8fb53b7ec5c286a9c9d45f1c40ff464682e5ad0e2dff5fdede81f281ca32aa",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/fruit_raspberry.png",
+      "target": "resources/monitor/fruit_raspberry.png",
+      "sha256": "cae7a6ef2c549fa5d4dde9230f1bf8f824491f8daa37908c9cb0d8e3e060a974",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/monitor.ico",
+      "target": "legacy/webui/coordinate-monitor/monitor.ico",
+      "sha256": "730a53d09573b7d4bb5d6faa3c228a3c035e0c6a6b5a8b80ad1811475c4a20a2",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/profile.json",
+      "target": "resources/monitor/profile.json",
+      "sha256": "6ba3e89c164b73512aa17ad0c1460936882df5db5237d8008f4f0a9aa951041f",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/repair_box_menu.png",
+      "target": "resources/monitor/repair_box_menu.png",
+      "sha256": "cba8e4045964d4080cec6b2a9e640af83b792d3868886b1ad6dca24ef24069b9",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/repair_menu_marker.png",
+      "target": "resources/monitor/repair_menu_marker.png",
+      "sha256": "ac32f66eba8a09106f3e6da754329f11ef7092ab4a04985cf27865493ea61a72",
+      "action": "move"
+    },
+    {
+      "source": "webui/coordinate-monitor/tool_tablet_marker.png",
+      "target": "resources/monitor/tool_tablet_marker.png",
+      "sha256": "a456a946274077ef9b511d55745bac55e99a64e437ed2dc336f54dc8f383265a",
+      "action": "move"
+    },
+    {
+      "source": "webui/index.html",
+      "target": "legacy/webui/index.html",
+      "sha256": "125cf1cfc0414713fdb5332af344ddeb3d8c2f1946afb6e826a0fed00ddb07af",
+      "action": "move"
+    },
+    {
+      "source": "webui/readme.md",
+      "target": "legacy/webui/readme.md",
+      "sha256": "bc3d1c2510d8f1346d0fc587dbb2e12b299a10284b54b33e6d63bb750a0d2fe5",
+      "action": "move"
+    }
+  ]
+}

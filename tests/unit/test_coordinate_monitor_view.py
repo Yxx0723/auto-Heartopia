@@ -24,6 +24,14 @@ def test_legacy_pointer_details_still_show_the_original_root():
     assert validation == '2 / 3 条读数一致'
 
 
+def test_computed_world_position_details_have_no_fake_xyz_address():
+    from utils.core.coordinate_monitor_view import locator_details
+    text, _ = locator_details({'locator': 'mono-local-player', 'paths': [
+        {'label': 'Hierarchy → parent transforms → world XYZ', 'address': None}]})
+    assert '根节点世界坐标' in text
+    assert '0x' not in text
+
+
 def sample(position=(1., 2., 3.), sequence=1, session='a', **extra):
     return {'state': 'connected', 'position': position, 'session': session,
             'sequence': sequence, 'sample_age': 0., 'paths': [], **extra}

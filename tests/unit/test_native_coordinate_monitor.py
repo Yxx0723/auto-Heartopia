@@ -7,7 +7,9 @@ import pytest
 from utils.core.coordinate_monitor_view import MonitorView
 from utils.drivers.coordinate_point_store import PointStore
 from utils.drivers.coordinate_point_routes import PointRoutes
-from utils.ui.native_coordinate_monitor import CoordinateWindow, MonitorWorker, SCENE_CATEGORIES, SCENE_RANKS
+from utils.ui.native_coordinate_monitor import CoordinateWindow
+from utils.ui.monitor_worker import MonitorWorker
+from utils.ui.monitor_style import SCENE_CATEGORIES, SCENE_RANKS, MAP_PIXELS_PER_UNIT
 from utils.ui.map_draw_cache import MapDrawCache
 from utils.core.lake_areas import WATER_AREAS
 from utils.core.map_reference_roads import REFERENCE_ROADS
@@ -23,7 +25,7 @@ from utils.core.map_reference_roads import REFERENCE_ROADS
     ('已暂停 · 最后读数', '已暂停 · 最后读数'),
 ])
 def test_user_feedback_preserves_actions_without_showing_memory_details(raw, expected):
-    from utils.ui.native_coordinate_monitor import user_feedback
+    from utils.ui.monitor_feedback import user_feedback
     assert user_feedback(raw) == expected
 
 
@@ -562,7 +564,7 @@ def test_rapid_zoom_requests_coalesce_and_render_the_latest_value(tmp_path):
     assert window.root.after.call_count == 1
     window.draw()
     window.root.after_cancel.assert_called_once_with('draw-pending')
-    assert window.map_cache.viewport.scale == pytest.approx(3 * 1.3)
+    assert window.map_cache.viewport.scale == pytest.approx(MAP_PIXELS_PER_UNIT * 1.3)
     assert window.draw_job is None
 
 
@@ -570,7 +572,7 @@ def test_save_button_reports_write_error_without_claiming_success(tmp_path, monk
     window = capture_window(tmp_path)
     window.point_store.append = Mock(side_effect=PermissionError('不可写'))
     error = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', error)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.save_point()
     assert window.saved_points == []
     assert not window.point_store.path.exists()
@@ -582,7 +584,7 @@ def test_save_button_checks_freshness_at_click_time(tmp_path, monkeypatch):
     window = capture_window(tmp_path)
     window.clock = lambda: 12.
     error = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', error)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.save_point()
     assert window.saved_points == []
     assert not window.point_store.path.exists()
@@ -605,7 +607,7 @@ def test_playback_button_uses_saved_file_order_and_current_game_pid(tmp_path):
 def test_empty_points_cannot_start_playback(tmp_path, monkeypatch):
     window = capture_window(tmp_path)
     error = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', error)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.start_playback()
     window.playback.start.assert_not_called()
     error.assert_called_once()
@@ -625,18 +627,20 @@ def test_nearest_mode_is_passed_to_worker_without_selecting_from_ui_cached_posit
     window.start_mode_var.get.return_value = '最近点接入'
     window.start_playback()
     assert window.playback.start.call_args.kwargs == {'start_mode': 'nearest',
+        'stable_navigation': True, 'skip_unreachable': True,
                                                      'recovery_attempts': 3, 'jump_on_recovery': False,
                                                      'collect_wait_seconds': 3., 'loop_count': 1, 'auto_navigate': True,
                                                      'auto_repair': True, 'auto_eat': True,
-                                                     'route_path': window.point_store.path, 'remember_paths': True}
+                                                     'route_path': window.point_store.path, 'remember_paths': False}
 
 
-def test_path_memory_switch_is_passed_to_playback_worker(tmp_path):
+@pytest.mark.parametrize('requested', [False, True])
+def test_path_memory_is_temporarily_disabled_even_if_option_is_set(tmp_path, requested):
     window = capture_window(tmp_path)
     window.save_point()
     window.view.status['pid'] = 77
     window.path_memory_var = Mock()
-    window.path_memory_var.get.return_value = False
+    window.path_memory_var.get.return_value = requested
     window.start_playback()
     assert window.playback.start.call_args.kwargs['remember_paths'] is False
 
@@ -651,7 +655,7 @@ def test_clear_path_memory_preserves_saved_collection_points(tmp_path, monkeypat
     target = window.saved_points[0]['position']
     assert memory.remember(0, [[target[0] + 2, target[1], target[2]], target])
     window.path_memory_label = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.askyesno', Mock(return_value=confirm))
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.askyesno', Mock(return_value=confirm))
     window.clear_path_memory()
     assert memory.path.exists() is not confirm
     assert window.point_store.path.read_bytes() == before
@@ -672,7 +676,7 @@ def test_ui_rejects_invalid_loop_count_without_starting_playback(tmp_path, monke
     window.save_point()
     window.loop_count_var.get.return_value = '0'
     error = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', error)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.start_playback()
     window.playback.start.assert_not_called()
     error.assert_called_once()
@@ -744,7 +748,7 @@ def test_semantic_ce_export_uses_current_live_address_and_never_copies_the_old_t
     window = capture_window(tmp_path)
     window.view.status.update(locator='mono-local-player', pid=77, address=0x123450)
     file = tmp_path / 'current.CT'
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.filedialog.asksaveasfilename',
+    monkeypatch.setattr('utils.ui.monitor_controller.filedialog.asksaveasfilename',
                         lambda **kwargs: str(file))
     window.export_ct()
     assert '123450' in file.read_text(encoding='utf-8')
@@ -756,10 +760,10 @@ def test_semantic_ce_export_refuses_expired_display_data(tmp_path, monkeypatch):
     window.view.status.update(locator='mono-local-player', pid=77, address=0x123450)
     window.clock = lambda: 100.
     file = tmp_path / 'current.CT'
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.filedialog.asksaveasfilename',
+    monkeypatch.setattr('utils.ui.monitor_controller.filedialog.asksaveasfilename',
                         lambda **kwargs: str(file))
     error = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', error)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.export_ct()
     assert not file.exists()
     error.assert_called_once()
@@ -771,10 +775,10 @@ def test_disconnected_ce_export_never_exports_an_old_bundled_pointer_table(tmp_p
     (tmp_path / 'coordinates.CT').write_text('stale pointer table', encoding='utf-8')
     window.view.accept({'state': 'disconnected', 'position': None}, 10.1)
     file = tmp_path / 'export.CT'
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.filedialog.asksaveasfilename',
+    monkeypatch.setattr('utils.ui.monitor_controller.filedialog.asksaveasfilename',
                         lambda **kwargs: str(file))
     error = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', error)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.export_ct()
     assert not file.exists()
     error.assert_called_once()
@@ -784,7 +788,7 @@ def test_legacy_live_reader_exports_the_current_observation_without_a_static_tem
     window = capture_window(tmp_path)
     window.view.status.update(pid=77, address=0x234560)
     file = tmp_path / 'current.CT'
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.filedialog.asksaveasfilename',
+    monkeypatch.setattr('utils.ui.monitor_controller.filedialog.asksaveasfilename',
                         lambda **kwargs: str(file))
     window.export_ct()
     assert '234560' in file.read_text(encoding='utf-8')
@@ -812,7 +816,7 @@ def test_route_switch_during_playback_is_rejected_without_changing_store(tmp_pat
     window.routes.create('蓝莓')
     window.playback.active = True
     error = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', error)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.switch_route('蓝莓')
     assert window.route_name == '点位' and window.point_store.path.name == '点位.json'
     error.assert_called_once()
@@ -823,7 +827,7 @@ def test_failed_route_selection_keeps_current_points_and_wait_editor_store(tmp_p
     window.save_point()
     before = window.saved_points.copy()
     (tmp_path / '蓝莓.json').write_text('{bad', encoding='utf-8')
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', Mock())
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', Mock())
     window.switch_route('蓝莓')
     assert window.route_name == '点位' and window.saved_points == before
     assert window.routes.selected_name() == '点位'
@@ -834,7 +838,7 @@ def test_new_and_save_as_route_buttons_keep_original_points(tmp_path, monkeypatc
     window.save_point()
     original = window.point_store.path.read_bytes()
     ask = Mock(side_effect=['苹果', '蓝莓'])
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.simpledialog.askstring', ask)
+    monkeypatch.setattr('utils.ui.monitor_controller.simpledialog.askstring', ask)
     window.manage_route('copy')
     assert window.route_name == '苹果' and len(window.saved_points) == 1
     window.manage_route('new')
@@ -849,7 +853,7 @@ def test_delete_route_requires_user_confirmation_and_archives_only_current_file(
     window.routes.create('苹果', window.point_store.load())
     window.switch_route('苹果')
     confirm = Mock(side_effect=[False, True])
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.askyesno', confirm)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.askyesno', confirm)
     window.manage_route('delete')
     assert window.route_name == '苹果' and window.point_store.path.exists()
     window.manage_route('delete')
@@ -865,7 +869,7 @@ def test_route_switch_while_wait_editor_is_open_cannot_retarget_its_callback(tmp
     window.wait_editor = Mock()
     window.wait_editor.root.winfo_exists.return_value = True
     error = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', error)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.switch_route('蓝莓')
     assert window.route_name == '点位' and window.point_store.path.name == '点位.json'
     error.assert_called_once()
@@ -877,7 +881,7 @@ def test_clear_saved_points_confirms_current_route_and_refreshes_preview(tmp_pat
     original = window.point_store.path.read_bytes()
     window.routes.create('蓝莓', window.point_store.load())
     confirm = Mock(side_effect=[False, True])
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.askyesno', confirm)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.askyesno', confirm)
     window.clear_saved_points()
     assert window.point_store.path.read_bytes() == original and len(window.saved_points) == 1
     window.clear_saved_points()
@@ -894,8 +898,8 @@ def test_clear_points_while_playing_or_editing_is_rejected_before_confirmation(t
     window.save_point()
     before = window.point_store.path.read_bytes()
     confirm, error = Mock(), Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.askyesno', confirm)
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', error)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.askyesno', confirm)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.playback.active = True
     window.clear_saved_points()
     window.playback.active = False
@@ -910,9 +914,9 @@ def test_failed_clear_keeps_visible_and_persisted_points(tmp_path, monkeypatch):
     window = capture_window(tmp_path)
     window.save_point()
     before = window.point_store.path.read_bytes()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.askyesno', Mock(return_value=True))
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.askyesno', Mock(return_value=True))
     error = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showerror', error)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.routes.clear_points = Mock(side_effect=PermissionError('busy'))
     window.clear_saved_points()
     assert window.point_store.path.read_bytes() == before and len(window.saved_points) == 1
@@ -931,7 +935,7 @@ def test_export_walk_trail_writes_segmented_xz_json(tmp_path, monkeypatch):
     ]
     window.trail_export_dir = tmp_path / '道路数据' / '实走轨迹'
     target = window.trail_export_dir / '森林西侧支路.json'
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.filedialog.asksaveasfilename',
+    monkeypatch.setattr('utils.ui.monitor_controller.filedialog.asksaveasfilename',
                         Mock(return_value=str(target)))
 
     window.export_walk_trail()
@@ -952,8 +956,8 @@ def test_export_walk_trail_without_data_does_not_open_save_dialog(monkeypatch):
     window.root = Mock()
     info = Mock()
     picker = Mock()
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.messagebox.showinfo', info)
-    monkeypatch.setattr('utils.ui.native_coordinate_monitor.filedialog.asksaveasfilename', picker)
+    monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showinfo', info)
+    monkeypatch.setattr('utils.ui.monitor_controller.filedialog.asksaveasfilename', picker)
 
     window.export_walk_trail()
 

@@ -68,15 +68,3 @@ class WindowsInput:
         nx = round((x - left) * 65535 / max(1, width - 1))
         ny = round((y - top) * 65535 / max(1, height - 1))
         self.mouse(0x8000 | 0x4000 | 1, max(0, min(65535, nx)), max(0, min(65535, ny)))
-
-
-class PreciseClock:
-    @staticmethod
-    def monotonic():
-        import time
-        return time.perf_counter()
-
-    @staticmethod
-    def sleep(seconds):
-        import time
-        time.sleep(seconds)

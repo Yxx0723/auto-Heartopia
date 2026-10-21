@@ -40,6 +40,19 @@ def validate_points(data):
             count = target.get('press_count', 10)
             if type(count) is not int or not 1 <= count <= 100:
                 raise ValueError('动态采集连按次数应为1～100次。')
+    if 'special_patrol' in data:
+        from utils.core.special_patrol import SPECIAL_IDS
+        patrol = data['special_patrol']
+        if not isinstance(patrol, dict) or patrol.get('category') not in SPECIAL_IDS \
+                or patrol.get('static_id') != SPECIAL_IDS[patrol['category']] \
+                or type(patrol.get('press_count')) is not int or not 1 <= patrol['press_count'] <= 100 \
+                or not isinstance(patrol.get('checkpoints'), list) \
+                or len(patrol['checkpoints']) > policy.COORD_PATROL_MAX_CHECKPOINTS \
+                or any(not valid_position(p) for p in patrol['checkpoints']) \
+                or len(data['points']) != 1 \
+                or data['points'][0].get('special_resource') != {
+                    k: patrol[k] for k in ('category', 'static_id', 'press_count')}:
+            raise ValueError('动态巡查计划或资源身份无效。')
     return data
 
 
@@ -81,6 +94,19 @@ def set_collect_wait(data, point_id, seconds):
         if point_id is None or point['id'] == point_id:
             point['collect_wait'] = seconds
     return result
+
+
+def remove_point(data, point_id):
+    validate_points(data)
+    if type(point_id) is not int or not 1 <= point_id <= len(data['points']):
+        raise ValueError('要删除的点位不存在，请重新选择。')
+    result = deepcopy(data)
+    del result['points'][point_id-1]
+    for number, point in enumerate(result['points'], 1):
+        if point['name'] == f'点位 {point["id"]}':
+            point['name'] = f'点位 {number}'
+        point['id'] = number
+    return validate_points(result)
 
 
 def ordered_waypoints(data):

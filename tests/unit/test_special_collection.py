@@ -4,7 +4,8 @@ import pytest
 from tests.unit.test_coordinate_player import Game
 from utils.flows.coordinate_player import _Follower, _Stopped, _Paused
 from utils.core.coordinate_points import ordered_waypoints, empty_points, append_point
-from utils.ui.native_coordinate_monitor import CoordinateWindow, SCENE_CATEGORIES
+from utils.ui.native_coordinate_monitor import CoordinateWindow
+from utils.ui.monitor_style import SCENE_CATEGORIES
 from utils.core.coordinate_navigation import LocalNavigator, ObstacleMap
 from utils.core.special_approach import interaction_standpoint, in_interaction_range
 
@@ -176,3 +177,80 @@ def test_a_press_only_happens_inside_the_interaction_envelope():
     point['position'] = [0., 0., 0.]
     assert not f.collect_point(point, 0, 1)
     assert not game.events
+
+
+def global_hint(target):
+    return {k:v for k,v in target.items() if k!='resource_available'} | {
+        'resource_global_validated':True,'resource_global_only':True}
+
+
+def test_global_position_can_guide_navigation_but_never_authorize_f():
+    f,game,point,target,nav=follower()
+    hint=global_hint(target)
+    nav.scene_provider.return_value={'state':'ready','objects':[],
+        'global_special_state':'ready','global_special_resources':[hint]}
+    assert f.special_target(point,allow_global=True) is hint
+    with pytest.raises(ValueError):f.collect_point(point,0,1)
+    assert not game.events
+
+
+def test_arrival_waits_for_live_object_before_any_f_press():
+    f,game,point,target,nav=follower()
+    hint=global_hint(target)
+    def scene():
+        return {'state':'ready','objects':[target] if game.time>=.6 else [],
+            'global_special_state':'ready','global_special_resources':[hint]}
+    nav.scene_provider.side_effect=scene
+    f.calibrate=Mock(side_effect=AssertionError('No calibration at resource'))
+    assert f.follow()
+    assert min(t for t,e in game.events if e.get('key')=='f')>=.6
+    assert all(e['key']=='f' for _,e in game.events)
+
+
+def test_arrival_without_model_has_bounded_wait_and_no_input(monkeypatch):
+    from utils.core import thresholds as policy
+    f,game,point,target,nav=follower()
+    nav.scene_provider.return_value={'state':'ready','objects':[],
+        'global_special_state':'ready','global_special_resources':[global_hint(target)]}
+    monkeypatch.setattr(policy,'COORD_SPECIAL_LOAD_WAIT_SECONDS',.4)
+    with pytest.raises(ValueError,match='仍未加载'):f.follow()
+    assert not game.events and not game.keys
+
+@pytest.mark.parametrize('historical',[False,True])
+def test_far_resource_navigation_loads_live_object_before_collecting(historical):
+    f,game,point,target,_=follower()
+    game.position=[5.,0.,0.]
+    hint=global_hint(target)
+    field='global_special_resources'
+    if historical:
+        hint.pop('resource_global_validated')
+        hint['resource_search_hint']=True
+        field='special_search_hints'
+    def scene():
+        return {'state':'ready','objects':[target] if game.position[0]<3 else [],
+                'global_special_state':'ready',field:[hint],'colliders':[]}
+    f.navigator=LocalNavigator(scene,clock=game.monotonic,water_areas=())
+    def on_input(event):
+        if event=={'type':'key_down','key':'f'}:
+            assert in_interaction_range(game.position,target['position'])
+            assert scene()['objects']
+    game.on_input=on_input
+    assert f.follow()
+    assert sum(e=={'type':'key_down','key':'f'} for _,e in game.events)==2
+
+
+def test_transient_scene_loss_waits_and_resumes_without_stopping_or_pressing_early():
+    f,game,point,target,nav=follower()
+    nav.scene_provider.side_effect=lambda: {'state':'loading'} if game.time<.8 else {'state':'ready','objects':[target]}
+    f.calibrate=Mock(side_effect=AssertionError('No movement while waiting at target'))
+    assert f.follow()
+    assert min(t for t,e in game.events if e.get('key')=='f')>=.8
+    assert all(e['key']=='f' for _,e in game.events)
+
+
+def test_stop_remains_available_while_scene_is_unavailable():
+    f,game,point,target,nav=follower()
+    game.stop_at=.5
+    nav.scene_provider.return_value={'state':'loading'}
+    with pytest.raises(_Stopped):f.follow()
+    assert not game.events and not game.keys

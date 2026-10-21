@@ -1,3 +1,8 @@
+import sys
+import pytest
+if sys.platform != 'win32':
+    pytest.skip('Windows native input/window contract', allow_module_level=True)
+
 import ctypes
 import unittest
 from unittest.mock import Mock, patch

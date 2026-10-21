@@ -27,3 +27,9 @@ def test_unavailable_or_stale_coordinates_cannot_be_exported(extra):
               'address': 0x123450, 'sample_age': 0., **extra}
     with pytest.raises(ValueError):
         current_position_table(status)
+
+
+def test_computed_attached_world_position_never_exports_the_local_address():
+    with pytest.raises(ValueError, match='下车'):
+        current_position_table({'state': 'connected', 'position': [100., 20., 50.],
+                                'address': 0x123450, 'position_computed': True})

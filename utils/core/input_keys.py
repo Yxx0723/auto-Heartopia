@@ -39,3 +39,10 @@ def key_from_vk(vk, scan=0, extended=False):
     if vk == 13 and extended:
         return 'numpad_enter'
     return next((name for name, value in KEY_VK.items() if value == vk), '')
+
+
+def key_name(key):
+    vk = getattr(key, 'vk', None)
+    if isinstance(vk, int):
+        return key_from_vk(vk) or (getattr(key, 'char', '') or '').lower()
+    return (getattr(key, 'char', None) or getattr(key, 'name', '') or '').lower()

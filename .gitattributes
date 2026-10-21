@@ -6,3 +6,10 @@
 *.png binary
 *.webp binary
 *.ico binary
+*.ini text eol=lf
+*.yml text eol=lf
+/requirements*.txt text eol=lf
+# Archives retain the exact bytes recorded by the migration manifest.
+/legacy/** -text
+# Retain the version profile bytes recorded in the migration ledger too.
+/resources/monitor/profile.json -text

@@ -26,7 +26,8 @@ class PlaybackHistory:
                         'created_at': now.isoformat(timespec='milliseconds'),
                         'started_at': None, 'ended_at': None, 'state': 'waiting',
                         'options': options, 'sample_count': 0, 'distance_xz': 0.,
-                        'reached_count': 0, 'cycle_finished_count': 0}
+                        'reached_count': 0, 'cycle_finished_count': 0,
+                        'skipped_count': 0, 'unresolved_points': []}
         self.events = self.trajectory = None
         try:
             self.path.mkdir(parents=True, exist_ok=False)
@@ -68,6 +69,10 @@ class PlaybackHistory:
                     self.summary['reached_count'] += 1
                 if state == 'cycle_finished':
                     self.summary['cycle_finished_count'] += 1
+                if state == 'skipped':
+                    self.summary['skipped_count'] += 1
+                if 'unresolved_points' in status:
+                    self.summary['unresolved_points'] = status['unresolved_points']
                 if state in ('finished', 'stopped', 'error'):
                     self.summary['ended_at'] = stamp
                 if previous_state != state or self.summary_at is None or now.timestamp()-self.summary_at >= 1:
@@ -133,6 +138,11 @@ class RecordingPosition:
 
     def read(self):
         position = self.reader.read()
+        self.history.sample(position, self.monotonic())
+        return position
+
+    def read_for_playback(self):
+        position = getattr(self.reader, 'read_for_playback', self.reader.read)()
         self.history.sample(position, self.monotonic())
         return position
 

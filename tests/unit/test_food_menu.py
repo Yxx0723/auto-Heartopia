@@ -6,7 +6,7 @@ import pytest
 
 from utils.vision.food_menu import FruitMenu
 
-ROOT = Path(__file__).resolve().parents[2]/'webui/coordinate-monitor'
+ROOT = Path(__file__).resolve().parents[2]/'resources/monitor'
 FIXTURES = Path(__file__).with_name('fixtures')
 
 

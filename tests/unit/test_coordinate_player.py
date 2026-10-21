@@ -116,6 +116,16 @@ def test_missing_position_releases_keys():
     assert not game.keys and game.closed
 
 
+def test_attached_coordinate_observation_cannot_drive_the_vehicle():
+    game = Game()
+    def read_for_playback():
+        raise ValueError('请先下车再开始步行回放')
+    game.read_for_playback = read_for_playback
+    with pytest.raises(ValueError, match='下车'):
+        run(game)
+    assert not game.events and game.closed
+
+
 def test_calibration_rejects_stationary_coordinates():
     game = Game(speed=0)
     with pytest.raises(ValueError, match='校准'):

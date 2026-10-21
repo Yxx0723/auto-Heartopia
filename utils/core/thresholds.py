@@ -50,6 +50,17 @@ COORD_SPECIAL_APPROACH_PRECISION = .05
 # frame plus that poll, so the settle window covers one refreshed sample and a
 # second one before the press is called ineffective.
 COORD_SPECIAL_STATE_SETTLE_SECONDS = 1.8
+COORD_SPECIAL_LOAD_WAIT_SECONDS = 15.  # Bound arrival-time streaming wait; never press F on a global hint alone.
+# The last stretch of a resource approach can be blocked by the resource's own
+# body: the character then slides against it for seconds while the coarse
+# COORD_STUCK_DISTANCE (.15) rule sees no stall. Watch the distance to the
+# resource centre instead, and re-pick a standpoint after a short freeze.
+COORD_SPECIAL_APPROACH_WATCH_RADIUS = 2.0
+COORD_SPECIAL_APPROACH_STALL_DISTANCE = .05
+COORD_SPECIAL_APPROACH_STALL_SECONDS = 1.2
+COORD_SPECIAL_APPROACH_STALL_LIMIT = 3
+# A standpoint that produced a stall is excluded from the next 0.3-unit ring.
+COORD_SPECIAL_STANDPOINT_REUSE = .3
 COORD_SPECIAL_STATE_POLL_SECONDS = .35
 # Presses that change nothing are guesses, not gathering: stop and ask the
 # player to check the bag instead of hammering the interaction key.
@@ -332,6 +343,14 @@ LOW_MATCH_REPORT_FLOOR = 0.99
 # loaded assemblies, <=6,098 cached classes/image, <=504-byte player objects.
 # These are corruption/termination bounds, not movement or detection tolerances.
 MONO_ASSEMBLY_LIMIT = 512
+# Ephemeral survey budgets, not a promised streaming radius. A 38-unit oak
+# record was observed on 2026-10-21; 40-unit cells suggest nearby search areas.
+COORD_PATROL_CELL = 40.0
+COORD_PATROL_MAX_CHECKPOINTS = 256
+COORD_PATROL_DWELL_SECONDS = 3.0
+COORD_PATROL_MIN_LEG_SECONDS = 30.0
+COORD_PATROL_MAX_LEG_SECONDS = 180.0
+COORD_PATROL_TARGET_SECONDS = 180.0
 MONO_CLASS_LIMIT = 100000
 MONO_PARENT_LIMIT = 16
 MONO_FIELD_LIMIT = 512
@@ -379,6 +398,30 @@ COORD_NAV_WIDE_GRID_STEP = 1.
 COORD_NAV_WIDE_SEARCH_RADIUS = 60.
 COORD_NAV_WIDE_HORIZON = 48.
 COORD_NAV_WIDE_MAX_NODES = 16000
+# Known-geometry guidance, not a guarantee of world coverage or walkable
+# terrain. Coarse/fine sampling and finite CPU/node budgets are engineering
+# limits; they have no claimed game-measured clearance or timing margin.
+COORD_NAV_GUIDE_GRID_STEP = 3.
+COORD_NAV_GUIDE_FINE_GRID_STEP = .75
+COORD_NAV_GUIDE_MAX_RADIUS = 640.
+COORD_NAV_GUIDE_MARGIN = 96.
+COORD_NAV_GUIDE_MAX_NODES = 12000
+COORD_NAV_GUIDE_SECONDS = 1.
+COORD_NAV_GUIDE_RETRY_SECONDS = 2.
+# Visit-order and failed-point limits are finite engineering budgets, not
+# measured game reachability or promises of a globally shortest route.
+COORD_ROUTE_OPT_MAX_POINTS = 128
+COORD_ROUTE_EXACT_POINTS = 7
+COORD_ROUTE_OPT_SECONDS = 6.
+COORD_ROUTE_ORDER_SECONDS = 1.
+COORD_ROUTE_OPT_PASSES = 8
+COORD_ROUTE_UNKNOWN_PENALTY = 4.
+COORD_VISIT_RETRY_PASSES = 2
+COORD_VISIT_MIN_SECONDS = 60.
+COORD_VISIT_MAX_SECONDS = 600.
+COORD_VISIT_SECONDS_PER_UNIT = 3.
+COORD_VISIT_STALL_SECONDS = 30.
+COORD_VISIT_CELL_SIZE = 1.
 COORD_SCENE_MAX_BYTES = 4194304
 COORD_SCENE_REFRESH_SECONDS = 2.
 # Display-only expansion requested on 2026-10-15. Navigation still consumes

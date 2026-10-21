@@ -8,7 +8,8 @@ from tests.unit.test_mono_scene import shrub_runtime
 from tests.unit.test_scene_display_cache import SceneDisplayCache, scene
 from tests.unit.test_native_coordinate_monitor import category_window, drawn_object_tags
 from utils.drivers.mono_scene import SceneMetadata
-from utils.ui.native_coordinate_monitor import CoordinateWindow, SCENE_CATEGORIES
+from utils.ui.native_coordinate_monitor import CoordinateWindow
+from utils.ui.monitor_style import SCENE_CATEGORIES
 
 
 def mineral_runtime(item_id=302):

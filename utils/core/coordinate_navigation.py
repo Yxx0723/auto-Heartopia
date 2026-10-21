@@ -8,6 +8,7 @@ import heapq
 import itertools
 import math
 import time
+from copy import deepcopy
 
 from utils.core import thresholds as policy
 from utils.core.coordinate_route import direction_keys, distance, key_vector, valid_position
@@ -70,7 +71,7 @@ def scene_geometry_signature(scene):
                 or any(not isinstance(p, (list, tuple)) or len(p) != 2
                        or not all(type(v) in (int, float) and math.isfinite(v) for v in p) for p in polygon):
             continue
-        result.add((tuple(heights), tuple(tuple(p) for p in polygon)))
+        result.add((tuple(heights), tuple(tuple(p) for p in polygon), box.get('category') == 'mountain'))
     return frozenset(result)
 
 
@@ -162,7 +163,8 @@ class ObstacleMap:
 
 
 def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None, search_radius=None,
-              max_nodes=None, horizon=None, approach_goal=None, before_search=lambda: None):
+              max_nodes=None, horizon=None, approach_goal=None, before_search=lambda: None,
+              diagnostics=None, allow_partial=True, any_angle=False):
     """A bounded A* plan to an exact local endpoint, or a useful far-goal frontier."""
     if not valid_position(position) or not valid_position(target):
         raise ValueError('寻路坐标无效')
@@ -173,6 +175,8 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
     max_nodes = policy.COORD_NAV_MAX_NODES if max_nodes is None else max_nodes
     horizon = policy.COORD_NAV_HORIZON if horizon is None else horizon
     remaining = math.dist(start, goal)
+    diagnostics = {} if diagnostics is None else diagnostics
+    diagnostics.update(status='complete', target_reached=remaining <= horizon, expanded=0)
     if remaining <= horizon and not obstacles.clear(goal, goal):
         raise NavigationWait('目标附近暂不可通行，正在重新寻路')
     local = goal if remaining <= horizon else tuple(
@@ -200,6 +204,7 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
 
         while frontier and len(closed) < max_nodes:
             if len(closed) % 32 == 0:
+                diagnostics['expanded'] = len(closed)
                 check()
             _, _, node, cost = heapq.heappop(frontier)
             if node in closed or cost > costs[node]:
@@ -225,14 +230,34 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
                 if not edge_cache[edge]:
                     continue
                 new_cost = cost + step * math.hypot(dx, dz)
+                parent = node
+                # Basic Theta* idea: retain a visible ancestor rather than
+                # forcing every guide edge to follow the grid headings.
+                # Exact polygon clearance applies to this chord as well.
+                ancestor = parents.get(node)
+                if any_angle and ancestor is not None:
+                    chord = (ancestor, neighbor)
+                    if chord not in edge_cache:
+                        edge_cache[chord] = obstacles.clear(world(ancestor), world(neighbor),
+                                                           escape=ancestor == (0, 0))
+                    alternative = costs[ancestor] + math.dist(world(ancestor), world(neighbor))
+                    if edge_cache[chord] and alternative < new_cost:
+                        parent, new_cost = ancestor, alternative
                 if new_cost >= costs.get(neighbor, math.inf):
                     continue
-                costs[neighbor], parents[neighbor] = new_cost, node
+                costs[neighbor], parents[neighbor] = new_cost, parent
                 heapq.heappush(frontier, (new_cost + math.dist(world(neighbor), local), next(counter), neighbor, new_cost))
         if reached is None:
-            if remaining <= horizon or remaining - math.dist(world(best), goal) < policy.COORD_NAV_MIN_PROGRESS:
-                raise NavigationWait('暂未找到可通行路径，正在重新寻路')
+            budget_exhausted = bool(frontier) and len(closed) >= max_nodes
+            if not allow_partial or remaining <= horizon \
+                    or remaining - math.dist(world(best), goal) < policy.COORD_NAV_MIN_PROGRESS:
+                diagnostics.update(status='budget' if budget_exhausted else 'no_path', expanded=len(closed))
+                raise NavigationWait('寻路计算预算已用完，稍后继续规划' if budget_exhausted
+                                     else '暂未找到可通行路径，正在重新寻路',
+                                     reason='budget' if budget_exhausted else 'no_path')
+            diagnostics.update(status='partial', target_reached=False)
             reached = best
+        diagnostics['expanded'] = len(closed)
         nodes = [reached]
         while nodes[-1] != (0, 0):
             nodes.append(parents[nodes[-1]])
@@ -258,12 +283,15 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
 
 
 class LocalNavigator:
-    def __init__(self, scene_provider, clock=time.monotonic, water_areas=WATER_AREAS, path_memory=None):
+    def __init__(self, scene_provider, clock=time.monotonic, water_areas=WATER_AREAS, path_memory=None,
+                 planning_clock=time.perf_counter):
         self.scene_provider, self.clock, self.water_areas = scene_provider, clock, water_areas
+        self.planning_clock = planning_clock
         self.scene, self.obstacles, self.goal = None, None, None
         self.scene_signature = None
         self.path, self.probes = [], []
         self.retry_at = 0.
+        self.retry_reason = 'no_path'
         self.path_memory = path_memory
         self.waypoint = None
         self.memory_leg = None
@@ -278,12 +306,19 @@ class LocalNavigator:
         self.stats = {'map_builds': 0, 'plans': 0}
         self.water_guard = None
         self.water_guard_context = None
+        self.scene_context = None
+        self.guide_path, self.guide_goal = [], None
+        self.guide_retry_at = 0.
+        self.guide_state = 'off'
+        self.guide_stats = {'plans': 0, 'expanded': 0}
 
     def set_waypoint(self, index):
         if self.waypoint != index:
             self.waypoint = index
             self.memory_leg = None
             self.search_radius = policy.COORD_NAV_SEARCH_RADIUS
+            self.guide_path, self.guide_goal = [], None
+            self.guide_retry_at = 0.
 
     def arrived(self, position):
         if not self.path_memory or self.waypoint is None or self.memory_failed:
@@ -456,6 +491,21 @@ class LocalNavigator:
         if not scene or scene.get('state') != 'ready':
             self.invalidate()
             raise NavigationWait('等待最新场景数据，稍后自动寻路', reason='scene')
+        # Optional resource/terrain scans can temporarily be unavailable while
+        # the native scene remains the same. Prefer its stable identity, not
+        # those availability transitions, when deciding whether we changed world.
+        context = (('scene', scene['cache_context']) if scene.get('cache_context') is not None else
+                   ('entities', scene['global_special_context']) if scene.get('global_special_context') is not None
+                   else ('unknown',))
+        if self.scene_context is not None and context != self.scene_context:
+            # Runtime probes and guidance belong to one game world only.
+            self.probes, self.guide_path = [], []
+            self.guide_goal, self.guide_retry_at, self.guide_state = None, 0., 'off'
+            self.water_guard = None
+            self.memory_path, self.memory_aim = [], None
+            self.memory_loaded = False
+            self.invalidate()
+        self.scene_context = deepcopy(context)
         now = self.clock()
         current = (position[0], position[2])
         probes = [probe for probe in self.probes if probe[0] > now
@@ -480,6 +530,100 @@ class LocalNavigator:
         self.obstacles.set_goal(target)
         return now
 
+    def _guide_target(self, position):
+        """Consume the checked corridor in order, without cutting a hidden bend."""
+        # One local segment may pass several guide points. Inspect the whole
+        # reached prefix, otherwise the next segment can aim back at its start.
+        for index in range(len(self.guide_path) - 1, -1, -1):
+            point = self.guide_path[index]
+            reached = distance(position, point) <= policy.COORD_NAV_LEG_REACH_RADIUS
+            if not reached and index + 1 < len(self.guide_path):
+                following = self.guide_path[index + 1]
+                a, b, current = (point[0], point[2]), (following[0], following[2]), (position[0], position[2])
+                passed = sum((p - x) * (y - x) for p, x, y in zip(current, a, b)) >= 0
+                reached = passed and point_segment_distance(current, a, b) <= policy.COORD_NAV_LEG_REACH_RADIUS \
+                    and self.obstacles.clear(current, b, escape=True)
+            if reached:
+                del self.guide_path[:index + 1]
+                break
+        if not self.guide_path:
+            return None
+        selected = previous = self.guide_path[0]
+        length = distance(position, selected)
+        for point in self.guide_path[1:]:
+            length += distance(previous, point)
+            if length > policy.COORD_NAV_HORIZON:
+                break
+            selected = previous = point
+        return selected
+
+    def _plan_guide(self, position, target, approach_goal, check, before_plan):
+        """A bounded known-geometry guide, not proof of an unloaded corridor."""
+        self.guide_retry_at = self.clock() + policy.COORD_NAV_GUIDE_RETRY_SECONDS
+        self.guide_state = 'planning'
+        span = max(abs(position[0] - target[0]), abs(position[2] - target[2]))
+        radius = min(policy.COORD_NAV_GUIDE_MAX_RADIUS, span + policy.COORD_NAV_GUIDE_MARGIN)
+        if span > radius:
+            self.guide_state = 'budget'
+            return False
+        deadline = self.planning_clock() + policy.COORD_NAV_GUIDE_SECONDS
+        def guarded():
+            check()
+            if self.planning_clock() > deadline:
+                raise NavigationWait('大范围路线计算预算已用完，稍后继续规划', reason='budget')
+        before_plan()  # Release movement before map building as well as search.
+        guarded()
+        obstacles = ObstacleMap(self.scene, position, [p for _, p in self.probes], self.water_areas,
+                                goal=approach_goal, search_radius=radius)
+        for step in (policy.COORD_NAV_GUIDE_GRID_STEP, policy.COORD_NAV_GUIDE_FINE_GRID_STEP):
+            guarded()
+            details = {}
+            self.guide_stats['plans'] += 1
+            try:
+                path = plan_path(position, target, obstacles, guarded, grid_step=step,
+                                 search_radius=radius, max_nodes=policy.COORD_NAV_GUIDE_MAX_NODES,
+                                 horizon=distance(position, target) + 1., approach_goal=approach_goal,
+                                 allow_partial=False, any_angle=True, diagnostics=details)
+            except NavigationWait as exc:
+                self.guide_state = exc.reason
+                self.guide_stats['expanded'] += details.get('expanded', 0)
+                if self.planning_clock() > deadline:
+                    break
+                continue
+            self.guide_path, self.guide_goal, self.guide_state = path, tuple(target), 'ready'
+            self.guide_stats['expanded'] += details['expanded']
+            return True
+        return False
+
+    def _plan_local(self, position, target, approach_goal, check, before_plan):
+        """Prefer a completed local segment; keep partial progress as fallback."""
+        profiles = [(policy.COORD_NAV_SEARCH_RADIUS, policy.COORD_NAV_GRID_STEP,
+                     policy.COORD_NAV_MAX_NODES, policy.COORD_NAV_HORIZON),
+                    (policy.COORD_NAV_FINE_SEARCH_RADIUS, policy.COORD_NAV_FINE_GRID_STEP,
+                     policy.COORD_NAV_MAX_NODES, policy.COORD_NAV_FINE_SEARCH_RADIUS),
+                    (policy.COORD_NAV_WIDE_SEARCH_RADIUS, policy.COORD_NAV_WIDE_GRID_STEP,
+                     policy.COORD_NAV_WIDE_MAX_NODES, policy.COORD_NAV_WIDE_HORIZON)]
+        partial, failure = None, 'no_path'
+        for radius, step, nodes, horizon in profiles:
+            check()
+            if not self.obstacles.covers_search(position, radius):
+                self.obstacles = self._build_map(self.scene, position, approach_goal, radius)
+            self.stats['plans'] += 1
+            details = {}
+            try:
+                path = plan_path(position, target, self.obstacles, check, grid_step=step,
+                                 search_radius=radius, max_nodes=nodes, horizon=horizon,
+                                 approach_goal=approach_goal, before_search=before_plan, diagnostics=details)
+            except NavigationWait as exc:
+                failure = exc.reason
+                continue
+            result = path, self.obstacles, radius
+            if details['status'] == 'complete':
+                return result, partial, failure
+            if partial is None or distance(path[-1], target) < distance(partial[0][-1], target):
+                partial = result
+        return None, partial, failure
+
     def _next_target(self, position, target, check=lambda: None, before_plan=lambda: None, approach_goal=None):
         approach_goal = target if approach_goal is None else approach_goal
         now = self._refresh_obstacles(position, approach_goal)
@@ -487,6 +631,9 @@ class LocalNavigator:
         if self.goal != tuple(target):
             self.path, self.goal, self.retry_at = [], tuple(target), 0.
             self.obstacles.set_goal(approach_goal)
+        if self.guide_goal != tuple(target):
+            self.guide_path, self.guide_goal = [], tuple(target)
+            self.guide_retry_at, self.guide_state = 0., 'off'
         # A jump or a manual correction may pass several temporary legs. These
         # are navigation helpers, never saved collection points.
         for index in range(len(self.path) - 1, -1, -1):
@@ -508,30 +655,33 @@ class LocalNavigator:
             self.path = []
         if not self.path:
             if now < self.retry_at:
-                raise NavigationWait('暂未找到可通行路径，正在重新寻路')
-            # Reuse a map only while it covers the entire next search window.
-            profiles = [(policy.COORD_NAV_SEARCH_RADIUS, policy.COORD_NAV_GRID_STEP,
-                         policy.COORD_NAV_MAX_NODES, policy.COORD_NAV_HORIZON),
-                        (policy.COORD_NAV_FINE_SEARCH_RADIUS, policy.COORD_NAV_FINE_GRID_STEP,
-                         policy.COORD_NAV_MAX_NODES, policy.COORD_NAV_FINE_SEARCH_RADIUS),
-                        (policy.COORD_NAV_WIDE_SEARCH_RADIUS, policy.COORD_NAV_WIDE_GRID_STEP,
-                         policy.COORD_NAV_WIDE_MAX_NODES, policy.COORD_NAV_WIDE_HORIZON)]
-            for radius, step, nodes, horizon in profiles:
-                check()
-                if not self.obstacles.covers_search(position, radius):
-                    self.obstacles = self._build_map(self.scene, position, approach_goal, radius)
-                self.stats['plans'] += 1
+                raise NavigationWait('寻路计算预算已用完，稍后继续规划' if self.retry_reason == 'budget'
+                                     else '暂未找到可通行路径，正在重新寻路', reason=self.retry_reason)
+            via = self._guide_target(position) or target
+            complete, partial, failure = self._plan_local(position, via, approach_goal, check, before_plan)
+            if complete is None and now >= self.guide_retry_at:
                 try:
-                    self.path = plan_path(position, target, self.obstacles, check, grid_step=step,
-                                          search_radius=radius, max_nodes=nodes, horizon=horizon,
-                                          approach_goal=approach_goal, before_search=before_plan)
-                except NavigationWait:
-                    continue
-                self.search_radius = radius
-                break
-            else:
-                self.retry_at = now + policy.COORD_NAV_RETRY_SECONDS
-                raise NavigationWait('暂未找到可通行路径，正在重新寻路')
+                    guided = self._plan_guide(position, target, approach_goal, check, before_plan)
+                except NavigationWait as exc:
+                    if exc.reason != 'budget':
+                        raise
+                    self.guide_state, guided = 'budget', False
+                if guided:
+                    via = self._guide_target(position) or target
+                    complete, guided_partial, failure = self._plan_local(
+                        position, via, approach_goal, check, before_plan)
+                    partial = guided_partial or partial
+                elif self.guide_state == 'budget':
+                    failure = 'budget'
+            chosen = complete or partial
+            if chosen is None:
+                if self.guide_state == 'budget':
+                    failure = 'budget'
+                self.retry_reason = failure
+                self.retry_at = self.clock() + policy.COORD_NAV_RETRY_SECONDS
+                raise NavigationWait('寻路计算预算已用完，稍后继续规划' if failure == 'budget'
+                                     else '暂未找到可通行路径，正在重新寻路', reason=failure)
+            self.path, self.obstacles, self.search_radius = chosen
             self.retry_at = 0.
         # Follow a checked chord through temporary legs; the saved collection
         # destination and its precise arrival radius are unchanged.

@@ -1,9 +1,7 @@
 """Playback controls; never activates or searches for another window."""
 import threading
 
-from pynput import keyboard
-
-from utils.drivers.timeline_capture import key_name
+from utils.core.input_keys import key_name
 
 
 class PlaybackControls:
@@ -61,6 +59,7 @@ class PlaybackControls:
             self.feedback.update('paused', message, window=self.window)
 
     def start(self):
+        from pynput import keyboard
         self.listener = keyboard.Listener(on_press=self.press, on_release=self.release)
         self.listener.start()
         self.listener.wait()

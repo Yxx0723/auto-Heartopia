@@ -9,7 +9,8 @@ from tests.unit.test_mono_position import Runtime
 from utils.core.tool_durability import axe_pick_status, tool_status
 from utils.drivers.tool_durability import ToolDurabilityReader
 from utils.ui.coordinate_monitor import CoordinateMonitor
-from utils.ui.native_coordinate_monitor import CoordinateWindow, COLORS
+from utils.ui.native_coordinate_monitor import CoordinateWindow
+from utils.ui.monitor_style import COLORS
 
 
 def runtime():

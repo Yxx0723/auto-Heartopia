@@ -7,7 +7,7 @@ MAP_STYLE = {'ground': '#17251f', 'grid': '#25392e', 'grid_major': '#31473a',
              'water': '#183e4b', 'shore': '#47929a', 'shore_outer': '#254f52',
              'collision': '#4b6050', 'road': '#8a8163', 'route': '#a1c8ee',
              'route_line': '#728fa6',
-             'navigation': '#74e3d1', 'trail': '#689b7c', 'player': '#d0ef9b',
+             'navigation': '#74e3d1', 'trail': '#689b7c', 'player': '#ff625f',
              'fence': '#e6b96e', 'handrail': '#91cbdc'}
 
 
@@ -48,7 +48,7 @@ def draw_chrome(canvas, viewport, step, route_view=False, reference_roads=True, 
     w, h = viewport.width, viewport.height
     panel, edge, muted = MAP_STYLE['panel'], MAP_STYLE['edge'], MAP_STYLE['muted']
     canvas.create_rectangle(10, 10, 132, 35, fill=panel, outline=edge, tags='map-chrome')
-    canvas.create_text(20, 22, text=('矿点全览' if resource_view else '路线全览' if route_view else '附近地图')+' · 角色居中',
+    canvas.create_text(20, 22, text=('资源全览' if resource_view else '路线全览' if route_view else '附近地图')+' · 角色居中',
                        fill='#d7e5cd', font=('Microsoft YaHei UI', -10), anchor='w', tags='map-chrome')
     # These are world axes, not an assumed geographic north or camera heading.
     x, z = w - 37, 37
@@ -139,8 +139,8 @@ def movement_direction(trail):
 
 
 def draw_player(canvas, x, z, trail, paused=False, direction=None):
-    color = '#8fa99a' if paused else MAP_STYLE['player']
-    canvas.create_oval(x-6, z-6, x+6, z+6, fill='', outline='#718c6a' if paused else '#91ad73',
+    color = '#bc7b79' if paused else MAP_STYLE['player']
+    canvas.create_oval(x-6, z-6, x+6, z+6, fill='', outline='#865957' if paused else '#c64c49',
                        width=1, tags='player-ring')
     direction = direction if direction is not None else movement_direction(trail)
     if direction is not None:

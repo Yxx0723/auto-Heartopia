@@ -63,24 +63,13 @@ VISION_LIBS = {"cv2"}
 # 现状：flows/ 与 vision/、ui/ 里还有直接调用，迁移顺序见 CLAUDE.md §2.3。
 # 注意：drivers/ 下的模块不算"债务" —— 那层存在的理由就是碰 OS，所以不登记。
 # 名单只登记**跨层**违规。
-OS_INPUT_ALLOWLIST = {
-    "fhoe.py",
-    f"{VISION}/get_angle.py",
-    f"{UI}/pause.py",
-    f"{UI}/record.py",
-}
+OS_INPUT_ALLOWLIST = set()
 
 # 理想态：只剩 core/log.py（日志初始化必须最早执行）。
-SIDE_EFFECT_ALLOWLIST = {
-    "fhoe.py",
-    f"{UI}/text_window.py",  # import 时启动默认调试窗口线程
-    f"{CORE}/log.py",  # 配置 loguru handler，合法的启动期副作用
-    f"{UI}/map_selector.py",  # 构造 cfg / Setting()
-    f"{TOOLS}/update_file.py",  # 构造 cfg
-}
+SIDE_EFFECT_ALLOWLIST = set()
 
 # 理想态：空。
-STAR_IMPORT_ALLOWLIST = {f"{TOOLS}/update_file.py"}
+STAR_IMPORT_ALLOWLIST = set()
 
 # 构造代价高、或在游戏未启动时会抛异常的构造函数。
 EXPENSIVE_CONSTRUCTORS = (
@@ -309,9 +298,11 @@ class TestStandaloneScripts:
         shutdown.py 曾经是反例（模块级跑 GUI，导入即阻塞），
         2026-09 修好后并入本规则。它的导入安全另有 tests/test_shutdown.py 专门覆盖。
         """
-        for name in ("convert.py", "install_requirements.py", "shutdown.py"):
+        for name in ("coordinate_monitor.py", "build_ore_route.py"):
             source = (REPO_ROOT / TOOLS / name).read_text(encoding="utf-8")
-            assert '__name__ == "__main__"' in source, (
+            assert any(isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
+                       and ast.unparse(node.test) == "__name__ == '__main__'"
+                       for node in ast.parse(source).body), (
                 f"tools/{name} 缺少 __main__ 守卫：它会被按路径调用，"
                 "但没有守卫时 import 就会执行脚本主体"
             )
@@ -329,6 +320,63 @@ class TestStandaloneScripts:
         """
         assert (REPO_ROOT / TOOLS).parent == REPO_ROOT
         assert (REPO_ROOT / "utils").parent == REPO_ROOT
+
+
+class TestArchiveBoundary:
+    """Archived files must never become an implicit production dependency."""
+
+    def test_active_modules_do_not_import_archive_or_missing_local_modules(self):
+        violations = []
+        for path, source in source_files():
+            for node in ast.walk(ast.parse(source)):
+                if isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                    modules = [node.module]
+                    package = REPO_ROOT.joinpath(*node.module.split('.'))
+                    if (package / '__init__.py').exists():
+                        modules.extend(node.module + '.' + alias.name for alias in node.names)
+                else:
+                    continue
+                for module in modules:
+                    if module.split('.')[0] in ('legacy', 'webui', 'fhoe', 'get_width'):
+                        violations.append(f'{path}: archived import {module}')
+                    elif module.startswith(('utils.', 'tools.')):
+                        local = REPO_ROOT.joinpath(*module.split('.'))
+                        if not local.with_suffix('.py').exists() and not local.is_dir():
+                            violations.append(f'{path}: missing local import {module}')
+        assert violations == [], '\n'.join(violations)
+
+    def test_source_and_build_use_current_resource_directory(self):
+        resources = REPO_ROOT / 'resources' / 'monitor'
+        assert (resources / 'profile.json').is_file()
+        assert len(list(resources.glob('*.png'))) == 15
+        for name in ('utils/ui/native_coordinate_monitor.py', 'packaging/HeartopiaMonitor.spec'):
+            source = (REPO_ROOT / name).read_text(encoding='utf-8')
+            assert 'webui' not in source
+        spec = (REPO_ROOT / 'packaging/HeartopiaMonitor.spec').read_text(encoding='utf-8')
+        assert 'legacy' not in spec
+
+
+def test_responsibility_modules_do_not_import_their_application_assembly():
+    """Roles depend on shared policy/helpers, not back on the window or runner."""
+    violations = []
+    for folder, pattern, entry in (
+        ('utils/ui', 'monitor_*.py', 'utils.ui.native_coordinate_monitor'),
+        ('utils/flows', 'playback_*.py', 'utils.flows.coordinate_player'),
+    ):
+        for path in (REPO_ROOT / folder).glob(pattern):
+            for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+                modules = []
+                if isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    modules = [node.module]
+                    if node.module == entry.rsplit('.', 1)[0]:
+                        modules += [node.module + '.' + alias.name for alias in node.names]
+                if entry in modules:
+                    violations.append(f'{path.name}:{node.lineno} imports {entry}')
+    assert violations == [], '\n'.join(violations)
 
 
 @pytest.mark.parametrize("layer", [CORE, DRIVERS, VISION, UI, FLOWS])

@@ -55,3 +55,15 @@ def test_unwritable_history_does_not_break_input_release(tmp_path):
     history.sample([0, 0, 0], 0.)
     history.close()
     assert history.error
+
+
+def test_playback_guarded_reads_are_also_recorded(tmp_path):
+    class Reader:
+        def read(self): raise AssertionError('Use the guarded playback method')
+        def read_for_playback(self): return [1., 2., 3.]
+    history = PlaybackHistory(tmp_path, {}, '巡查', {})
+    proxy = RecordingPosition(Reader(), history, lambda: 5.)
+    assert proxy.read_for_playback() == [1., 2., 3.]
+    history.close()
+    rows = (history.path/'trajectory.jsonl').read_text(encoding='utf-8').splitlines()
+    assert len(rows) == 1 and json.loads(rows[0])['position'] == [1., 2., 3.]

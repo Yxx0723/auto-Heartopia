@@ -28,8 +28,10 @@ class Runtime:
         self.domain = self.alloc(64)
         self.p64(self.base + 0x4d3878, self.domain)
         self.add_class('Vector3', 'UnityEngine', [], size=28)
+        self.add_class('Quaternion', 'UnityEngine', [], size=32)
         self.add_class('Hierarchy', 'XDTGame.Core', [
-            ('_hierarchyObject', 16, 18), ('_parent', 32, 18), ('_position', 56, 17)], size=96)
+            ('_hierarchyObject', 16, 18), ('_parent', 32, 18), ('_position', 56, 17),
+            ('_rotation', 68, 17), ('__scale', 88, 12)], size=96)
         self.add_class('Entity', 'XDTGame.GAS.Client', [
             ('<transformComponent>k__BackingField', 48, 18),
             ('<isSelfPlayer>k__BackingField', 148, 2), ('_alived', 156, 2)], size=160)
@@ -113,7 +115,7 @@ class Runtime:
                 typ = self.alloc(16)
                 self.write(typ + 8, struct.pack('<HB', flags[0] if flags else 1, code))
                 if code == 17:
-                    self.p64(typ, self.classes['Vector3'])
+                    self.p64(typ, self.classes['Quaternion' if fname == '_rotation' else 'Vector3'])
                 self.write(table + i * 32, struct.pack('<QQQi', typ, self.string(fname), klass, offset))
         vt = self.alloc(0x90)
         self.p64(vt, klass)
@@ -130,6 +132,21 @@ class Runtime:
 
     def set_position(self, position):
         self.write(self.hierarchy + 56, struct.pack('<3f', *position))
+
+    def attach(self, child=None, position=(100., 20., -50.), rotation=(0., 0., 0., 1.), scale=1.):
+        parent = self.make_object('Hierarchy', 96)
+        self.write(parent + 56, struct.pack('<3f', *position))
+        self.write(parent + 68, struct.pack('<4f', *rotation))
+        self.write(parent + 88, struct.pack('<f', scale))
+        self.p64((child or self.hierarchy) + 32, parent)
+        owner = self.make_object('LevelEntityComponent', 336)
+        entity = self.make_object('Entity', 160)
+        self.p64(parent + 16, owner)
+        self.p64(owner + 104, parent)
+        self.p64(owner + 16, entity)
+        self.p64(entity + 48, owner)
+        self.write(entity + 156, b'\x01')
+        return parent
 
 
 def test_rediscovers_relocated_heap_and_follows_the_live_role_each_sample():
@@ -179,6 +196,80 @@ def test_scene_reference_changes_during_read_are_rejected():
         result = r.read(address, size)
         if address == r.hierarchy + 56:
             r.p64(r.storage, 0)
+        return result
+    with pytest.raises(ValueError):
+        MonoPositionLocator(read, r.base).snapshot()
+
+
+def test_attached_position_uses_world_anchor_instead_of_composing_stale_socket_positions():
+    r = Runtime()
+    r.set_position((1., 2., 3.))
+    r.attach(rotation=(0., 2**-.5, 0., 2**-.5), scale=2.)
+    sample = MonoPositionLocator(r.read, r.base).snapshot()
+    assert sample['position'] == (100., 20., -50.)
+    assert sample['attached_to_parent'] is True
+    assert sample['position_computed'] is False
+    assert sample['position_source'] == 'attachment-root'
+    assert sample['address'] is None  # The local XYZ address is not world XYZ.
+    assert sample['local_address'] == r.hierarchy + 56
+
+
+def test_nested_attachment_and_detachment_resolve_each_sample():
+    r = Runtime()
+    r.set_position((1., 2., 3.))
+    parent = r.attach(rotation=(0., 2**-.5, 0., 2**-.5), scale=2.)
+    root = r.attach(parent, position=(-10., 0., 5.), rotation=(0., 1., 0., 0.), scale=.5)
+    locator = MonoPositionLocator(r.read, r.base)
+    assert locator.snapshot()['position'] == (-10., 0., 5.)
+    r.write(root + 56, struct.pack('<3f', -9., 0., 5.))
+    assert locator.snapshot()['position'] == (-9., 0., 5.)
+    r.p64(r.hierarchy + 32, 0)
+    r.set_position((-62., 12., 31.))
+    sample = locator.snapshot()
+    assert sample['position'] == (-62., 12., 31.)
+    assert sample['attached_to_parent'] is False
+    assert sample['address'] == r.hierarchy + 56
+
+
+@pytest.mark.parametrize('problem', ['cycle', 'depth', 'owner', 'dead', 'nan', 'wrong_parent'])
+def test_invalid_attachment_never_yields_local_coordinates(problem):
+    r = Runtime()
+    parent = r.attach()
+    if problem == 'cycle':
+        r.p64(parent + 32, r.hierarchy)
+    elif problem == 'depth':
+        for _ in range(16):
+            parent = r.attach(parent)
+    elif problem == 'owner':
+        r.p64(parent + 16, r.transform)
+    elif problem == 'dead':
+        owner = struct.unpack('<Q', r.read(parent + 16, 8))[0]
+        entity = struct.unpack('<Q', r.read(owner + 16, 8))[0]
+        r.write(entity + 156, b'\0')
+    elif problem == 'nan':
+        r.write(parent + 56, struct.pack('<3f', float('nan'), 0., 0.))
+    else:
+        r.p64(parent, r.slots['Entity'])
+    with pytest.raises(ValueError):
+        MonoPositionLocator(r.read, r.base).snapshot()
+
+
+@pytest.mark.parametrize('changed', ['parent', 'position', 'owner'])
+def test_attachment_changes_mid_sample_are_rejected(changed):
+    r = Runtime()
+    parent = r.attach()
+    changed_once = False
+    def read(address, size):
+        nonlocal changed_once
+        result = r.read(address, size)
+        if address == parent + 56 and not changed_once:
+            changed_once = True
+            if changed == 'parent':
+                r.p64(r.hierarchy + 32, 0)
+            elif changed == 'position':
+                r.write(parent + 56, struct.pack('<3f', 110., 20., -50.))
+            else:
+                r.p64(parent + 16, r.transform)
         return result
     with pytest.raises(ValueError):
         MonoPositionLocator(read, r.base).snapshot()
@@ -248,3 +339,18 @@ def test_memory_adapter_selects_semantic_runtime_and_checks_all_three_binary_ver
         'mono-2.0-sgen.dll', 'UnityPlayer.dll', 'GameAssembly.dll']
     reader.hwnd = None
     assert reader.snapshot()['position'] == (98., 21.5, -9.)
+
+
+def test_attached_monitor_read_does_not_enable_on_foot_playback_input():
+    from utils.drivers.coordinate_memory import ReadOnlyPosition
+    r = Runtime()
+    reader = ReadOnlyPosition.__new__(ReadOnlyPosition)
+    reader.hwnd = None
+    reader.locator = MonoPositionLocator(r.read, r.base)
+    r.set_position((1., 2., 3.))
+    r.attach()
+    assert reader.read() == (100., 20., -50.)
+    with pytest.raises(ValueError, match='下车'):
+        reader.read_for_playback()
+    r.p64(r.hierarchy + 32, 0)
+    assert reader.read_for_playback() == (1., 2., 3.)
