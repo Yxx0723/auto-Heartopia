@@ -155,7 +155,9 @@ def test_lake_reference_layer_draws_only_when_enabled():
     window.canvas.reset_mock()
     window.scene_water_var.get.return_value = False
     window.draw()
-    assert not window.canvas.create_polygon.called
+    # HUD chrome also draws polygons, so assert on the water layer specifically.
+    assert not any('reference-water' in str(call.kwargs.get('tags'))
+                   for call in window.canvas.create_polygon.call_args_list)
 
 
 def test_berry_species_and_ordinary_bushes_have_distinct_map_symbols(tmp_path):
@@ -381,7 +383,9 @@ def test_tree_filter_draws_canopy_and_trunk_and_reuses_cached_items(tmp_path):
     window.set_scene_categories(False)
     assert not drawn_object_tags(window)
     window.toggle_scene_category('tree')
-    assert entry.commands == commands and not window.canvas.create_polygon.called
+    assert entry.commands == commands and not any(
+        str(call.kwargs.get('tags') or '').startswith('scene-')
+        for call in window.canvas.create_polygon.call_args_list)
     assert drawn_object_tags(window) == {'scene-tree'}
 
 

@@ -351,6 +351,26 @@ COORD_PATROL_DWELL_SECONDS = 3.0
 COORD_PATROL_MIN_LEG_SECONDS = 30.0
 COORD_PATROL_MAX_LEG_SECONDS = 180.0
 COORD_PATROL_TARGET_SECONDS = 180.0
+# Search-area coverage only; not an interaction radius or a measured streaming
+# threshold. Definition Y may be a tree/model origin rather than foot height.
+COORD_PATROL_SURVEY_RADIUS = 8.
+COORD_PATROL_HOUSE_RADIUS = 3.
+# Suppress direction learning during jump/landing/recovery. These are
+# conservative observation policies, not a reliable grounded-state detector.
+COORD_DIRECTION_RECOVERY_QUIET_SECONDS = 1.5
+COORD_DIRECTION_MAX_VERTICAL_DELTA = .2
+# Conservative approach policies for explicitly tagged ore/rock model centres,
+# not a measured maximum interaction radius. Loaded-entity confirmation remains
+# mandatory. Actual F success still requires game-side collection feedback.
+COORD_MINERAL_APPROACH_RADIUS = .75
+COORD_MINERAL_APPROACH_INNER_RADIUS = .6
+COORD_MINERAL_APPROACH_MIDDLE_RADIUS = .7
+COORD_MINERAL_IDENTITY_TOLERANCE = .25
+COORD_MINERAL_LOAD_WATCH_RADIUS = 3.
+COORD_MINERAL_LOAD_WAIT_SECONDS = 3.
+# Bounded local collision evidence for replay diagnosis, not scan distance.
+COORD_NAV_EVIDENCE_RADIUS = 4.
+COORD_NAV_EVIDENCE_LIMIT = 12
 MONO_CLASS_LIMIT = 100000
 MONO_PARENT_LIMIT = 16
 MONO_FIELD_LIMIT = 512
@@ -377,7 +397,28 @@ COORD_NAV_HORIZON = 24.
 COORD_NAV_MAX_NODES = 7500
 COORD_NAV_LEG_LENGTH = 3.
 COORD_NAV_MIN_PROGRESS = 2.
-COORD_NAV_PROBE_SECONDS = 20.
+# 撞点学习（2026-10-21 实测）：17:08 的矿石回放在 (-84.4,-134.8) 连续两次零位移，
+# 而撞点 2.6 单位内没有任何已建模山壁，场景里也读不到那里的碰撞——游戏挡住了，
+# 数据里却是一块空地。原来的做法只在撞点放一个 .45 半径、20 秒过期的小圆点，
+# 规划器下一次从 .6 旁边就「合法」地绕过它，于是同一个点反复撞。
+# 现在把撞点记成一道横墙：隔 1.2 单位、宽 2.4，撞在同一处就再加宽 1.2，最多 3 级
+# （7.2 宽）；900 秒只覆盖一轮运行，不做跨轮永久记忆。
+# 这些是按当前间隙（.3）与采样位移（约 .5）推出来的工程值，不是实测的碰撞尺寸；
+# 真实尺寸靠「撞一次加宽一级」逐次逼出来。
+COORD_NAV_BLOCK_DISTANCE = 1.2
+COORD_NAV_BLOCK_HALF_WIDTH = 1.2
+COORD_NAV_BLOCK_WIDTH_STEP = 1.2
+COORD_NAV_BLOCK_MAX_LEVEL = 3
+COORD_NAV_BLOCK_THICKNESS = .5
+COORD_NAV_BLOCK_ESCALATE_RADIUS = 3.
+COORD_NAV_BLOCK_SECONDS = 900.
+COORD_NAV_BLOCK_LIMIT = 24
+# 方向迟滞（2026-10-21 实测）：在 (-37.9, -62.7) 附近有两个代价几乎相同的走廊，
+# 角色坐标偏 0.05 单位，规划出的第一条腿就从 +x 翻到 -x，于是来回摆 30 秒被跳过。
+# 给"继续当前运动方向"的边走一点折扣（只抬高其它方向的代价，不多减），
+# 让等价解保持原方向；.4 是量出稳定朝向所需的最小位移基线，不是碰撞尺寸。
+COORD_NAV_TURN_BIAS = .6
+COORD_NAV_HEADING_MIN_MOVE = .4
 COORD_NAV_RETRY_SECONDS = .5
 COORD_NAV_SCENE_MAX_AGE = 6.
 # Manual collection points can be recorded close to a trunk. Only their final
@@ -448,6 +489,20 @@ COORD_MEMORY_BLOCKED_PENALTY_CAP = 10
 
 # Thin projection of a verified vertical face; navigation retains its body clearance.
 COORD_TERRAIN_EDGE_HALF_WIDTH = .02
+# Conservative classification of near-vertical cooked faces, not a measured
+# character climbing limit. Current 66 extra faces range from 74.14 to 90 deg.
+COORD_TERRAIN_MIN_WALL_SLOPE = 70.
+# Rebuild height slices after 0.2 units of vertical movement; cache budget,
+# not an experimentally determined character dimension or slope tolerance.
+COORD_TERRAIN_HEIGHT_REFRESH = .2
+
+# Conservative operating corridor around a user-confirmed walking survey,
+# not a measured bridge width or a character climbing limit.
+COORD_BRIDGE_CORRIDOR_RADIUS = .45
+COORD_BRIDGE_HEIGHT_TOLERANCE = .75
+# Evidence validation limits: at most 128 points, no segment over 1.5 units.
+COORD_BRIDGE_MAX_POINTS = 128
+COORD_BRIDGE_MAX_SAMPLE_GAP = 1.5
 
 # Current backpack X scores 0.899-0.918 on real 1024x768 captures; the old .92
 # rejected it. Header-relative position and two stable frames remain mandatory.

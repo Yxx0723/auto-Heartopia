@@ -12,12 +12,19 @@ def live(**kw):
             'position': [1., 20., 2.], 'resource_available': 3, **kw}
 
 
-def test_plan_uses_distributed_fixed_definitions_without_mutating_them():
+def houses():
+    return {'house_entrance_state': 'ready', 'house_entrances': [
+        {'house_number': n, 'position': [float(n*20), 20., 30.],
+         'source': 'main-map-house-player-position'} for n in range(1, 13)]}
+
+
+def test_plan_uses_all_twelve_numbered_entrances_not_resource_centres():
     objs = [fixed(2, 2), fixed(3, 3), fixed(85, 2), fixed(2, 85),
             fixed(200, 200, category='bird'), fixed(300, 300, map_definition=False)]
-    scene = {'global_resources': objs}
+    scene = {'global_resources': objs, **houses()}
     points = patrol_checkpoints(scene)
-    assert len(points) == 3
+    assert len(points) == 12
+    assert points == [[float(n*20), 20., 30.] for n in range(1, 13)]
     assert all(len(p) == 3 for p in points)
     assert objs[0]['position'] == [2, 20., 2]
     assert patrol_checkpoints(scene) == points
@@ -52,7 +59,7 @@ def test_partial_and_ambiguous_live_identity_never_grants_collection():
 
 def test_patrol_can_start_without_a_loaded_target_and_validates_its_identity():
     from utils.core.coordinate_points import validate_points
-    scene = {'state': 'ready', 'objects': [], 'global_resources': [fixed(2, 2)]}
+    scene = {'state': 'ready', 'objects': [], **houses()}
     data = make_patrol_data(scene, [0., 20., 0.], 'roaming_oak', '溜溜橡木', 3,
                             '2026-10-21T12:00:00+08:00')
     validate_points(data)
@@ -67,3 +74,23 @@ def test_live_target_can_start_while_no_survey_definitions_are_loaded():
     data = make_patrol_data({'state': 'ready', 'objects': [live()]}, [0., 20., 0.],
                             'roaming_oak', '溜溜橡木', 3, '2026-10-21T12:00:00+08:00')
     assert data['points'][0]['position'] == [1., 20., 2.]
+
+
+def test_house_patrol_ignores_unconfirmed_global_oak_coordinates():
+    hint = live(resource_global_validated=True,resource_global_only=True)
+    scene = {'state':'ready','objects':[],'global_special_state':'ready',
+             'global_special_resources':[hint],**houses()}
+    assert patrol_target(scene,'roaming_oak',[],allow_hints=False) == ('search',None)
+    plan = make_patrol_data(scene,[100.,20.,100.],'roaming_oak','溜溜橡木',3,'2026-10-21T21:00:00+08:00')
+    assert plan['points'][0]['position'] == [100.,20.,100.]
+    assert len(plan['special_patrol']['checkpoints']) == 12
+
+
+@pytest.mark.parametrize('fault', ['missing', 'duplicate', 'unavailable', 'source'])
+def test_partial_or_unverified_houses_never_fall_back_to_trees(fault):
+    scene = {**houses(), 'global_resources': [fixed(1, 1)]}
+    if fault == 'missing': scene['house_entrances'].pop()
+    if fault == 'duplicate': scene['house_entrances'][-1]['house_number'] = 1
+    if fault == 'unavailable': scene['house_entrance_state'] = 'unavailable'
+    if fault == 'source': scene['house_entrances'][0]['source'] = 'house-center'
+    assert patrol_checkpoints(scene) == []

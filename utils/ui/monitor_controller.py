@@ -16,7 +16,7 @@ class MonitorController:
         self.scene_filters_expanded = not self.scene_filters_expanded
         if self.scene_filters_expanded:
             self.map_leave()
-            self.scene_filters_frame.place(x=6, y=6, relwidth=1., width=-12)
+            self.scene_filters_frame.place(x=10, y=10, relwidth=1., width=-20)
             self.scene_filters_frame.lift()
         else:
             self.scene_filters_frame.place_forget()
@@ -43,12 +43,12 @@ class MonitorController:
         none_selected = not visible or self.scene_categories == set()
         for button, selected in ((self.scene_all_button, all_selected), (self.scene_none_button, none_selected)):
             button.configure(bg=COLORS['green' if selected else 'button'],
-                             fg='#1b2815' if selected else COLORS['text'])
+                             fg=COLORS['primary_text'] if selected else COLORS['text'])
         for category, button in self.scene_filter_buttons.items():
             label, color = SCENE_CATEGORIES[category]
             selected = visible and self.scene_categories is not None and category in self.scene_categories
             button.configure(text=('✓ ' if selected else '  ') + label,
-                             bg='#2a382d' if selected else COLORS['button'],
+                             bg=COLORS['button_pressed'] if selected else COLORS['button'],
                              fg=color if selected or all_selected else COLORS['muted'],
                              highlightbackground=color if selected else COLORS['line'])
         hint = ('物体已关闭 · 点击分类显示' if not visible else
@@ -265,7 +265,7 @@ class MonitorController:
                 stable_navigation=True)
             count = len(data['special_patrol']['checkpoints'])
             self.playback_status = {'state': 'playback_wait', 'message':
-                f'{name}巡查采集已就绪 · {count} 个区域 · 到点确认后采集 · 切回游戏按 F6 · F9停止'}
+                f'{name}巡查采集已就绪 · {count} 个房门巡查点 · 到点确认后采集 · 切回游戏按 F6 · F9停止'}
             self.render()
         except (OSError, ValueError) as exc:
             messagebox.showerror('无法开始动态采集', str(exc), parent=self.root)

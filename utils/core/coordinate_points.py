@@ -32,6 +32,13 @@ def validate_points(data):
             raise ValueError(f'第 {number} 条点位数据无效，原文件未修改。')
         if 'collect_wait' in point:
             validate_collect_wait(point['collect_wait'])
+        if 'collect_count' in point and (type(point['collect_count']) is not int
+                                        or not 1 <= point['collect_count'] <= 100):
+            raise ValueError('点位采集次数应为1～100次。')
+        if isinstance(point.get('source'), dict) and point['source'].get('kind') == 'rare_wood':
+            from utils.core.mineral_approach import mineral_identity
+            if mineral_identity(point) is None or point.get('collect_count', 1) > 3:
+                raise ValueError('珍稀木材树的身份或采集次数无效。')
         if 'special_resource' in point:
             target = point['special_resource']
             if not isinstance(target, dict) or target.get('category') not in ('fluorite', 'roaming_oak') \
@@ -53,6 +60,12 @@ def validate_points(data):
                 or data['points'][0].get('special_resource') != {
                     k: patrol[k] for k in ('category', 'static_id', 'press_count')}:
             raise ValueError('动态巡查计划或资源身份无效。')
+        if patrol.get('checkpoint_kind') == 'house-entrances':
+            numbers = patrol.get('checkpoint_houses')
+            expected = list(range(1, 13)) if patrol['checkpoints'] else []
+            if numbers != expected or len(patrol['checkpoints']) != len(expected) \
+                    or any(type(number) is not int for number in numbers):
+                raise ValueError('房门巡查需要完整的1～12号入口。')
     return data
 
 
@@ -116,6 +129,8 @@ def ordered_waypoints(data):
     return [{'id': point['id'], 'name': point['name'],
              'position': list(point['position']), 'wait': 0.,
              **({'special_resource': dict(point['special_resource'])} if 'special_resource' in point else {}),
+             **({'source': deepcopy(point['source'])} if isinstance(point.get('source'), dict) else {}),
+             **({'collect_count': point['collect_count']} if 'collect_count' in point else {}),
              **({'collect_wait': point['collect_wait']} if 'collect_wait' in point else {})}
             for point in data['points']]
 

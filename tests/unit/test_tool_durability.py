@@ -261,15 +261,14 @@ def test_window_shows_percent_and_warning_and_hides_stale_numbers(condition, exp
     window.view = SimpleNamespace(position=(0, 0, 0), paused=False,
         status={'tools': axe_pick_status(current, 1100, True, True)})
     window.fields = {'tool_durability': Mock()}
-    window.tool_value, window.tool_hint, window.tool_progress, window.tool_fill = Mock(), Mock(), Mock(), 1
-    window.tool_progress.winfo_width.return_value = 200
+    window.tool_value, window.tool_hint, window.tool_progress = Mock(), Mock(), Mock()
     window.render_tool_durability()
     assert str(current) in window.fields['tool_durability'].set.call_args.args[0]
     assert window.tool_value.configure.call_args.kwargs['fg'] == COLORS[expected]
     window.view.status = {'tools': {'state': 'unavailable'}}
     window.render_tool_durability()
     assert window.fields['tool_durability'].set.call_args.args == ('未读取',)
-    assert window.tool_progress.coords.call_args.args == (1, 0, 0, 0., 4)
+    assert window.tool_progress.set.call_args.args == (0., 'muted')
 
 
 def test_window_updates_tool_name_and_removes_previous_numbers_on_empty_hand():
@@ -278,8 +277,7 @@ def test_window_updates_tool_name_and_removes_previous_numbers_on_empty_hand():
         status={'tools': tool_status('鱼竿', 360, 400, True, True)})
     window.fields = {'tool_durability': Mock()}
     window.tool_title, window.tool_value, window.tool_hint = Mock(), Mock(), Mock()
-    window.tool_progress, window.tool_fill = Mock(), 1
-    window.tool_progress.winfo_width.return_value = 200
+    window.tool_progress = Mock()
     window.render_tool_durability()
     assert window.tool_title.configure.call_args.kwargs['text'] == '鱼竿耐久'
     assert '360 / 400' in window.fields['tool_durability'].set.call_args.args[0]
@@ -287,4 +285,4 @@ def test_window_updates_tool_name_and_removes_previous_numbers_on_empty_hand():
     window.render_tool_durability()
     assert window.tool_title.configure.call_args.kwargs['text'] == '手持工具耐久'
     assert window.fields['tool_durability'].set.call_args.args == ('未持工具',)
-    assert window.tool_progress.coords.call_args.args == (1, 0, 0, 0., 4)
+    assert window.tool_progress.set.call_args.args == (0., 'muted')

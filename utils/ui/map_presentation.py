@@ -1,14 +1,83 @@
-"""Lightweight cartographic overlays in native Tk, with no game-side effects."""
+"""Lightweight cartographic overlays in native Tk, with no game-side effects.
+
+Palette is the v2 (green) cartography: dark forest ground, muted olive grid,
+warm amber for fences and terrain collisions. Only this module and
+`monitor_painter.py` may carry map hex literals; every window chrome colour
+comes from `ui_tokens`.
+"""
 import math
 
 
 MAP_STYLE = {'ground': '#17251f', 'grid': '#25392e', 'grid_major': '#31473a',
              'edge': '#354b3e', 'panel': '#132019', 'muted': '#8aab96',
              'water': '#183e4b', 'shore': '#47929a', 'shore_outer': '#254f52',
-             'collision': '#4b6050', 'road': '#8a8163', 'route': '#a1c8ee',
-             'route_line': '#728fa6',
+             'collision': '#4b6050', 'terrain': '#bb9874', 'road': '#8a8163',
+             'route': '#a1c8ee', 'route_line': '#728fa6',
              'navigation': '#74e3d1', 'trail': '#689b7c', 'player': '#ff625f',
              'fence': '#e6b96e', 'handrail': '#91cbdc'}
+
+
+# ---------- 水域与碰撞的分层样式 -------------------------------------------
+# 只描述"层怎么叠、多粗"，颜色一律从调色板按角色解析，换主题不改逻辑。
+
+def shade(color, factor):
+    """按亮度缩放 #rrggbb，仅用于从调色板派生角色色。"""
+    raw = color.lstrip('#')
+    return '#' + ''.join(f'{max(0, min(255, round(int(raw[i:i + 2], 16) * factor))):02x}'
+                         for i in (0, 2, 4))
+
+
+def water_colors(style=None):
+    """把地图调色板解析成水域四层角色色；两套键名都能落到位。"""
+    style = MAP_STYLE if style is None else style
+    surface = style['water']
+    shallow = style.get('water_shallow') or surface
+    edge = style.get('water_edge') or style['shore']
+    return {'bank': style.get('water_bank') or shade(surface, .6),
+            'shallow': shallow,
+            'deep': style.get('water_deep') or shade(shallow, .72),
+            'edge': edge,
+            'island': shade(style['ground'], 1.35),
+            'island_edge': shade(edge, .8)}
+
+
+# 从下往上：岸外阴影 → 浅水面 → 深水面 → 干地小岛。宽度按 1px 基准计。
+# 水面外轮廓与岸线不做平滑（不许越过实测边界）；只有深水色块允许圆一次角，
+# 因为它是显示用的内部色块，而且原始轮廓是像素级腐蚀出来的，不圆就全是台阶。
+WATER_LAYERS = (('bank', None, 'bank', 3., False),
+                ('shallow', 'shallow', 'edge', 1., False),
+                ('deep', 'deep', None, 0., True),
+                ('island', 'island', 'island_edge', .8, False))
+
+WATER_WIDTHS = {name: width for name, _, _, width, _ in WATER_LAYERS}
+WATER_EDGE_SCALE = (1., .82, .66)   # 远景档收细，缩小时细边不会糊成一团
+
+
+def smooth_ring(points, iterations=1):
+    """Chaikin 圆角；只给深水色块用，输出仍是折线，不引入超采样。"""
+    ring = list(points)
+    for _ in range(iterations):
+        if len(ring) < 4:
+            break
+        refined = []
+        for index, point in enumerate(ring):
+            following = ring[(index + 1) % len(ring)]
+            refined.append((point[0] * .75 + following[0] * .25, point[1] * .75 + following[1] * .25))
+            refined.append((point[0] * .25 + following[0] * .75, point[1] * .25 + following[1] * .75))
+        ring = refined
+    return ring
+
+
+def smooth_coords(coords, iterations=1):
+    """把扁平的 x,z 序列过一遍 Chaikin，返回同样扁平的序列。"""
+    return tuple(value for point in smooth_ring(list(zip(coords[::2], coords[1::2])), iterations)
+                 for value in point)
+
+
+# 碰撞只留描边，并且都排在水面之下：湖里的轮廓由水面盖住，不再和岸线抢注意力。
+# 山体墙保留 2px 让折线连得起来；世界碰撞盒 1px。
+TERRAIN_WIDTH = 2.
+COLLISION_WIDTH = 1.
 
 
 def draw_grid(canvas, viewport, step):

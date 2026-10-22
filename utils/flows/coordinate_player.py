@@ -16,6 +16,7 @@ from utils.flows.playback_collection import CollectionActions, SPECIAL_REACHED_T
 from utils.flows.playback_recovery import RecoveryActions
 from utils.flows.playback_sustain import SustainActions
 from utils.flows.playback_visits import VisitActions
+from utils.core.visit_progress import MotionProgress
 
 
 class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions):
@@ -38,8 +39,9 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
         if waypoints is not None:
             self.budget = policy.COORD_POINT_PLAYBACK_SECONDS
             if collect_wait_seconds is not None:
-                self.budget += sum(p.get('collect_wait', collect_wait_seconds)
-                                   + policy.COORD_COLLECTION_PRESS_SECONDS for p in waypoints)
+                self.budget += sum((p.get('collect_wait', collect_wait_seconds)
+                                    + policy.COORD_COLLECTION_PRESS_SECONDS)*p.get('collect_count', 1)
+                                   for p in waypoints)
         self.last_report = float('-inf')
         self.recovery_attempts, self.jump_on_recovery = recovery_attempts, jump_on_recovery
         self.recovery = RecoveryProgress()
@@ -50,6 +52,8 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
         self.navigator = navigator
         self.navigation_waiting = False
         self.calibration_speed = 3.
+        self.camera_direction = callable(getattr(reader, 'movement_basis', None))
+        self.direction_quiet_until = float('-inf')
         self.repair_box = repair_box
         self.tool_selector = tool_selector
         self.equip_pending, self.equip_menu_pending = False, False
@@ -63,6 +67,7 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
         self.meal_pending = self.meal_menu_pending = False
         self.meal_before = self.meal_deadline = 0.
         self.meal_settle_until = 0.
+        self.meal_refilling, self.food_failures, self.food_retry_at = False, 0, 0.
         self.food_menu_checked = False
         self.repair_menu_pending = False
         self.special_progress = None
@@ -73,6 +78,7 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
         self.retry_pass, self.deferred, self.failed_reasons = 0, [], {}
         self.unresolved_points = []
         self.visit_point = None
+        self.motion_progress = MotionProgress()
 
     def report(self, state, message, **extra):
         if self.waypoints is not None:
@@ -221,9 +227,17 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
         approach_progress = ApproachProgress()
         while index < len(points):
             try:
+                if not selected and self.waypoints is not None:
+                    reference = self.read(force=True)
+                    index = choose_start_index(points, reference, self.start_mode)
+                    self.start_index, selected = index, True
                 self.visit_point = points[index]
                 self.guard()
                 self.check_visit(points[index])
+                if not self.prepare_mineral_point(points[index], index, len(points)):
+                    anchor = None
+                    self.motion_progress.reset()
+                    continue
                 special_near = False
                 if 'special_resource' in points[index]:
                     scene = self.navigator.scene_provider() or {}
@@ -262,13 +276,14 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                         points[index]['position'] = list(current)
                         special_stalls = 0
                         approach_progress.reset()
-                    elif approach_progress.stalled(current, live_target['position'], self.clock.monotonic()):
+                    elif (('_approach_for' in points[index] and
+                           distance(current, points[index]['position']) <= policy.COORD_SPECIAL_APPROACH_PRECISION)
+                          or approach_progress.stalled(current, live_target['position'], self.clock.monotonic())):
                         # Blocked inside the last stretch: re-pick the ring point
                         # instead of sliding against the model for seconds.
                         self.release()
                         avoided = points[index].setdefault('_avoid_standpoints', [])
                         if valid_position(points[index].get('position')) \
-                                and not in_interaction_range(points[index]['position'], live_target['position']) \
                                 and all(distance(points[index]['position'], seen) > .01 for seen in avoided):
                             avoided.append(list(points[index]['position']))
                         points[index].pop('_approach_for', None)
@@ -305,13 +320,30 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                         points[index]['position'] = approach
                         points[index]['_approach_for'] = list(live_target['position'])
                 if self.maintain_stamina(index, len(points)) or self.maintain_tool(index, len(points)):
+                    self.motion_progress.reset()
+                    points[index].pop('_mineral_progress', None)
                     self.pause_visit_clock()
                     anchor, navigation_leg, navigation_wait_since = None, None, None
                     best, progress_at = math.inf, self.clock.monotonic()
                     if self.navigator:
                         self.navigator.invalidate()
                     continue
-                if basis is None and self.collection is None and not special_near:
+                if self.camera_direction:
+                    try:
+                        basis = self.reader.movement_basis()
+                    except (ValueError, OSError) as exc:
+                        self.release()
+                        self.motion_progress.reset()
+                        if self.clock.monotonic()-self.last_report >= .5:
+                            self.report('navigating', f'等待当前镜头方向：{exc} · F6暂停 · F9停止',
+                                        waypoint=index+1, waypoint_count=len(points), navigation_path=[])
+                            self.last_report = self.clock.monotonic()
+                        self.wait(.1)
+                        continue
+                    if segment_start is None:
+                        segment_start = self.position
+                if basis is None and self.collection is None and not special_near \
+                        and not points[index].get('_mineral_arrival'):
                     # A paused period is outside the coordinate jump/time budget.
                     self.position_at = None
                     if not selected:
@@ -352,12 +384,17 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                     if segment_start is None:
                         segment_start = self.position
                     anchor = None
+                    self.motion_progress.reset()
                     best, progress_at = math.inf, self.clock.monotonic()
                 position = self.read()
                 held_keys = set(self.keys)
                 target = points[index]['position']
                 remaining = distance(position, target)
-                if self.collection is not None and remaining > policy.COORD_REACH_RADIUS:
+                precise_resource_approach = (points[index].get('_mineral_aim', False)
+                                             and not points[index].get('_mineral_arrival', False))
+                arrival_radius = (policy.COORD_SPECIAL_APPROACH_PRECISION if precise_resource_approach
+                                  else policy.COORD_REACH_RADIUS)
+                if self.collection is not None and self.collection.get('sent') and remaining > policy.COORD_REACH_RADIUS:
                     raise ValueError('采集等待期间离开了当前点位，已停止，请重新开始回放')
                 if abs(position[1] - target[1]) > policy.COORD_MAX_HEIGHT_ERROR \
                         and (self.waypoints is None or remaining <= policy.COORD_REACH_RADIUS):
@@ -382,7 +419,7 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                                 ' · F6暂停 · F9停止', waypoint=index + 1, waypoint_count=len(points),
                                 recovery_result='cleared', recovery_failures=0,
                                 recovery_limit=self.recovery_attempts)
-                if remaining <= policy.COORD_REACH_RADIUS and (
+                if remaining <= arrival_radius and (
                         'special_resource' not in points[index] or special_near):
                     self.set_keys(set())
                     if self.navigator and self.collection is None:
@@ -390,7 +427,7 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                         arrival = position
                         self.wait(policy.COORD_SETTLE_SECONDS)
                         position = self.read(force=True)
-                        if distance(position, target) > policy.COORD_REACH_RADIUS \
+                        if distance(position, target) > arrival_radius \
                                 or abs(position[1] - target[1]) > policy.COORD_MAX_HEIGHT_ERROR \
                                 or distance(arrival, position) > policy.COORD_IDLE_RADIUS \
                                 or abs(position[1] - arrival[1]) > policy.COORD_IDLE_RADIUS:
@@ -424,6 +461,7 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                     special_stalls = 0
                     approach_progress.reset()
                     dwell, anchor = None, None
+                    self.motion_progress.reset()
                     self.recovery.reset()
                     if self.navigator:
                         self.navigator.invalidate()
@@ -455,6 +493,7 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                         self.navigator.set_waypoint(index)
                         target = self.navigator.next_target(position, target, check=self.guard, before_plan=self.release)
                     except NavigationWait as exc:
+                        self.motion_progress.reset()
                         self.release()
                         if exc.reason == 'no_path' and self.continuous_recovery and self.recovery_attempts:
                             navigation_wait_since = now if navigation_wait_since is None else navigation_wait_since
@@ -500,18 +539,25 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                     remaining = distance(position, target)
                 if remaining < best - policy.COORD_STUCK_DISTANCE:
                     best, progress_at = remaining, now
-                elif now - progress_at >= policy.COORD_STUCK_SECONDS:
+                physical_stall = self.navigator is not None and self.motion_progress.stalled(position, self.active_time)
+                if physical_stall or now - progress_at >= policy.COORD_STUCK_SECONDS:
+                    self.motion_progress.reset()
                     if self.waypoints is None:
                         raise ValueError('角色未向目标前进，可能遇到障碍，已停止')
                     if self.navigator:
-                        self.navigator.blocked(position, target)
+                        planned_path = [list(p) for p in self.navigator.path]
+                        evidence = self.navigator.blocked(position, target)
+                        self.report('navigating', '当前路段未取得位移，记录现场碰撞后重新规划 · F9停止',
+                                    waypoint=index+1, waypoint_count=len(points), position=list(position),
+                                    navigation_path=planned_path, navigation_event='blocked',
+                                    obstruction=evidence)
                     try:
                         improved = False
                         # A small advance followed by another stall (or an
                         # interrupted action) remains the same failed episode.
                         self.fail_recovery(index, len(points))
                         while self.recovery.failures < self.recovery_attempts:
-                            if self.recover(target, basis, segment_start, index, len(points)):
+                            if self.recover(points[index]['position'], basis, segment_start, index, len(points)):
                                 improved = True
                                 break
                             self.fail_recovery(index, len(points))
@@ -559,7 +605,7 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                     displacement = [b - a for a, b in zip(anchor, position)]
                     basis = rotate_basis(basis, self.keys, displacement)
                     anchor, anchor_at = position, now
-                elif self.navigator and anchor is not None and anchor_keys == held_keys \
+                elif self.navigator and not self.camera_direction and anchor is not None and anchor_keys == held_keys \
                         and held_keys and now - anchor_at >= policy.COORD_CALIBRATION_SECONDS:
                     displacement = [b - a for a, b in zip(anchor, position)]
                     length = math.hypot(displacement[0], displacement[2])
@@ -569,7 +615,9 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                                  anchor[2] + vector[1] / norm * length)
                     # Both corridors must be clear: wall-sliding is not evidence
                     # of camera rotation. Large verified changes recalibrate here.
-                    if length >= policy.COORD_MIN_CALIBRATION and self.navigator.motion_clear(anchor, position) \
+                    if now >= self.direction_quiet_until \
+                            and abs(position[1] - anchor[1]) <= policy.COORD_DIRECTION_MAX_VERTICAL_DELTA \
+                            and length >= policy.COORD_MIN_CALIBRATION and self.navigator.motion_clear(anchor, position) \
                             and self.navigator.motion_clear(anchor, projected):
                         try:
                             basis = rotate_basis(basis, held_keys, displacement)
@@ -582,7 +630,7 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                             continue
                     anchor, anchor_at = position, now
                 special_steering = ({'reach_radius': policy.COORD_SPECIAL_APPROACH_PRECISION}
-                                    if 'special_resource' in points[index] else {})
+                                    if 'special_resource' in points[index] or precise_resource_approach else {})
                 desired = direction_keys(position, target, basis, **special_steering)
                 if self.navigator:
                     steering_travel = max(.15, self.calibration_speed * policy.COORD_SAMPLE_SECONDS * 2)
@@ -612,6 +660,7 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                 else:
                     self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
             except _SkipPoint as exc:
+                self.motion_progress.reset()
                 self.release()
                 points, index = self.finish_visit(points, index, self.position, reason=str(exc))
                 self.collection = self.special_progress = None
@@ -622,6 +671,8 @@ class _Follower(CollectionActions, RecoveryActions, SustainActions, VisitActions
                 navigation_leg = navigation_wait_since = anchor = dwell = None
                 best, progress_at = math.inf, self.clock.monotonic()
             except _Paused:
+                self.motion_progress.reset()
+                points[index].pop('_mineral_progress', None)
                 special_load_since = None
                 self.release()
                 if self.position is not None:
@@ -680,6 +731,8 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
     reader = None
     try:
         points = ordered_waypoints(data)
+        if navigator is None and any(p.get('source', {}).get('kind') == 'rare_wood' for p in points):
+            raise ValueError('珍稀木材路线需要开启自动寻路，以确认实时树木实体。')
         validate_loop_count(loop_count)
         validate_recovery_options(recovery_attempts, jump_on_recovery)
         if type(stable_navigation) is not bool or type(skip_unreachable) is not bool:

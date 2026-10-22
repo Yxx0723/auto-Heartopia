@@ -7,6 +7,7 @@ from utils.flows.playback_signals import _Paused, _RecoveryLimit, _SkipPoint
 
 class RecoveryActions:
     def recovery_position(self, segment_start, target, force=False):
+        self.direction_quiet_until = self.clock.monotonic() + policy.COORD_DIRECTION_RECOVERY_QUIET_SECONDS
         position = self.read(force=force)
         # Continuous traversal may legitimately descend a slope or stairs by
         # more than the old one-unit drop from the obstacle anchor. read()
@@ -61,7 +62,7 @@ class RecoveryActions:
                     return True
                 keys = direction_keys(position, target, basis)
                 if self.navigator:
-                    keys = self.navigator.recovery_keys(position, target, basis,
+                    keys = self.navigator.detour_keys(position, target, basis,
                         max(.15, self.calibration_speed * policy.COORD_SAMPLE_SECONDS * 2))
                     if keys is None:
                         return False
@@ -76,6 +77,19 @@ class RecoveryActions:
         self.release()
         before = self.read(force=True)
         self.recovery.begin(before)
+        if distance(before, target) <= policy.COORD_REACH_RADIUS:
+            # A navigator leg or a resource ring can already be within the
+            # ordinary point radius while the real resource is still outside
+            # its interaction envelope. It supplies no useful detour bearing.
+            point = self.waypoints[index] if self.waypoints is not None else None
+            candidate = point['position'] if point is not None else target
+            if point is not None and 'special_resource' in point:
+                candidate = self.special_target(point, allow_global=True)['position']
+            if distance(before, candidate) <= policy.COORD_REACH_RADIUS:
+                if self.navigator:
+                    self.navigator.invalidate()
+                return False  # Recheck arrival/replan; never guess a direction.
+            target = candidate
         if self.waypoints is not None:
             # Manual points can be far apart. Quantized WASD steering may take
             # a valid approach outside the original start-to-point corridor.
@@ -86,7 +100,7 @@ class RecoveryActions:
                     waypoint=index + 1, waypoint_count=total, recovery_phase='start',
                     recovery_attempt=self.recovery.attempts, recovery_limit=self.recovery_attempts,
                     recovery_failures=self.recovery.failures)
-        if self.jump_on_recovery and not self.stable_navigation:
+        if self.jump_on_recovery:
             self.report('recovering', f'点位 {index + 1}/{total} · 连续失败 {self.recovery.failures}/{self.recovery_attempts}'
                         ' · 大跳：长按空格 '
                         f'{policy.COORD_RECOVERY_JUMP_SECONDS:g} 秒 · F6暂停 · F9停止',
@@ -95,12 +109,21 @@ class RecoveryActions:
                         recovery_limit=self.recovery_attempts, recovery_failures=self.recovery.failures)
             if self.recovery_jump(target, basis, segment_start):
                 return True
+            if self.navigator:
+                self.navigator.invalidate()
+                self.report('navigating', f'点位 {index+1}/{total} · 大跳未通过，重新寻路 · F9停止',
+                            waypoint=index+1, waypoint_count=total, navigation_path=[])
+                return False
         self.report('recovering', f'点位 {index + 1}/{total} · 左右试走校正 '
                     f'· 连续失败 {self.recovery.failures}/{self.recovery_attempts} · F6暂停 · F9停止',
                     position=list(self.position), waypoint=index + 1, waypoint_count=total,
                     recovery_phase='detour', recovery_attempt=self.recovery.attempts,
                     recovery_limit=self.recovery_attempts, recovery_failures=self.recovery.failures)
-        plan = recovery_plan(self.recovery.origin, target, self.recovery.attempts)
+        # Preserve alternating sides around the same obstruction. If an old
+        # episode origin coincides with a newly selected target, use current
+        # feet for this probe instead of attempting to normalise a zero vector.
+        plan_origin = self.recovery.origin if distance(self.recovery.origin, target) > policy.COORD_REACH_RADIUS else before
+        plan = recovery_plan(plan_origin, target, self.recovery.attempts)
         detoured = True
         for point in plan:
             if not self.recovery_leg(point, basis, segment_start, target):
@@ -111,10 +134,6 @@ class RecoveryActions:
             # lateral detour before spending a jump; computation budget is not
             # a physical obstacle and never enters recovery.
             improved = detoured and distance(self.read(force=True), target) < distance(before, target) - policy.COORD_STUCK_DISTANCE
-            if not improved and self.jump_on_recovery:
-                self.report('recovering', f'点位 {index+1}/{total} · 绕行未通过，尝试大跳 · F9停止',
-                            waypoint=index+1, waypoint_count=total, recovery_phase='jump')
-                return self.recovery_jump(target, basis, segment_start)
             return improved
         if not detoured:
             return False

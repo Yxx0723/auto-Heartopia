@@ -22,7 +22,7 @@ class PointWaitEditor:
                  bg=colors['bg'], fg=colors['muted'], justify='left',
                  font=('Microsoft YaHei UI', -13)).pack(anchor='w', padx=18, pady=(14, 10))
         self.points = tk.Listbox(self.root, bg=colors['card'], fg=colors['text'],
-            selectbackground=colors['green'], selectforeground='#1b2815',
+            selectbackground=colors['green'], selectforeground=colors['primary_text'],
             font=('Microsoft YaHei UI', -13), exportselection=False,
             highlightthickness=0, relief='flat')
         self.points.pack(fill='both', expand=True, padx=18)
@@ -39,7 +39,7 @@ class PointWaitEditor:
         actions = tk.Frame(self.root, bg=colors['bg'])
         actions.pack(fill='x', padx=18)
         self.save_button = tk.Button(actions, text='保存此点', command=lambda: self.save(False),
-                                     bg=colors['green'], fg='#1b2815', relief='flat', padx=12, pady=6)
+                                     bg=colors['green'], fg=colors['primary_text'], relief='flat', padx=12, pady=6)
         self.save_button.pack(side='left')
         self.all_button = tk.Button(actions, text='全部使用此秒数', command=lambda: self.save(True),
                                     bg=colors['button'], fg=colors['text'], relief='flat', padx=12, pady=6)

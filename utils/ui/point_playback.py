@@ -139,6 +139,8 @@ class PointPlayback:
             raise ValueError('场景导航尚未连接，请重新打开新版程序。')
         if 'special_patrol' in data and not auto_navigate:
             raise ValueError('动态资源巡查需要启用自动寻路。')
+        if not auto_navigate and any(p.get('source', {}).get('kind') == 'rare_wood' for p in data.get('points', [])):
+            raise ValueError('珍稀木材路线需要开启自动寻路，以确认实时树木实体。')
         self.total = len(ordered_waypoints(data))
         if type(pid) is not int or pid <= 0:
             raise ValueError('没有可用的游戏进程，请重新连接。')

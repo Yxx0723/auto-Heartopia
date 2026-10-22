@@ -64,10 +64,10 @@ def run(game, food=None, count=1, repair=False):
     return result, food, statuses
 
 
-def test_eats_one_at_a_time_until_thirty_then_continues_same_route_and_collection():
+def test_eats_one_at_a_time_until_full_then_continues_same_route_and_collection():
     game = HungryGame(16)
     result, food, statuses = run(game, count=2)
-    assert result and game.energy == 36 and len(food.uses) == 2 and food.closes == 1
+    assert result and game.energy == 100 and len(food.uses) == 9 and food.closes == 1
     assert food.uses[1] > food.uses[0]+.4
     assert any(s == 'eating' for s, _, _ in statuses)
     assert sum(e['type'] == 'key_down' and e['key'] == 'f' for _, e in game.events) == 2
@@ -84,7 +84,8 @@ def test_pause_during_food_use_rechecks_effect_instead_of_eating_twice():
     game = HungryGame(26)
     game.pause_at, game.resume_at = .05, 3.
     result, food, _ = run(game)
-    assert result and len(food.uses) == 1 and game.energy == 36
+    assert result and len(food.uses) == 8 and game.energy == 100
+    assert food.uses[1] >= 3.  # The interrupted first use is verified before another.
 
 
 def test_stop_during_food_use_releases_keys_and_does_not_move():
@@ -96,7 +97,7 @@ def test_stop_during_food_use_releases_keys_and_does_not_move():
 
 
 @pytest.mark.parametrize('fault', ['no_effect', 'unavailable', 'no_fruit', 'close_failed'])
-def test_food_failure_pauses_with_reason_without_repeated_consumption_or_movement(fault):
+def test_food_failure_retries_without_pausing_or_moving_and_stop_still_works(fault):
     game, food = HungryGame(26), None
     game.stop_at = 12.
     food = Fruit(game)
@@ -104,11 +105,18 @@ def test_food_failure_pauses_with_reason_without_repeated_consumption_or_movemen
     if fault == 'unavailable': game.energy_unavailable = True
     def fail(*args): raise ValueError('no suitable fruit')
     if fault == 'no_fruit': food.prepare = fail
-    if fault == 'close_failed': food.close_menu = fail
+    if fault == 'close_failed':
+        food.close_menu = fail
+        game.food_restore = 100
     result, food, statuses = run(game, food)
-    assert not result and len(food.uses) <= 1 and not game.keys
+    assert not result and not game.keys
+    if fault == 'no_effect':
+        assert len(food.uses) == 2 and food.uses[1]-food.uses[0] >= 8.
+    else:
+        assert len(food.uses) <= 1
     assert game.position == [0., 0., 0.]
-    assert any(s == 'food_paused' for s, _, _ in statuses)
+    assert not any(s == 'food_paused' for s, _, _ in statuses)
+    assert any(s == 'eating' and '自动重试' in text for s, text, _ in statuses)
 
 
 def test_low_durability_and_hunger_are_both_serviced_before_movement():
@@ -116,8 +124,8 @@ def test_low_durability_and_hunger_are_both_serviced_before_movement():
     game.current, game.before = 110, 110
     game.held = False
     result, food, _ = run(game, repair=True)
-    assert result and len(food.uses) == 1 and len(game.use_times) == 1
-    assert game.energy == 36 and game.held
+    assert result and len(food.uses) == 8 and len(game.use_times) == 1
+    assert game.energy == 100 and game.held
     assert food.uses[0] < game.use_times[0]
 
 
@@ -127,7 +135,7 @@ def test_manual_recovery_while_opening_backpack_is_rechecked_before_consumption(
     original = food.prepare
     def prepare(*args):
         target = original(*args)
-        game.energy = 40
+        game.energy = 100
         return target
     food.prepare = prepare
     result, food, _ = run(game, food)
@@ -150,7 +158,7 @@ def test_resume_during_confirmed_eating_retains_settle_time_without_extra_food()
     game = HungryGame(26)
     game.pause_at, game.resume_at = 1., 1.2
     result, food, _ = run(game)
-    assert result and len(food.uses) == 1
+    assert result and len(food.uses) == 8 and game.energy == 100
     assert min(at for at, event in game.events if event['type'] == 'key_down') >= 2.4
 
 
@@ -168,13 +176,13 @@ def test_collection_uses_fresh_stamina_instead_of_the_one_second_cache():
         execute(event)
     game.read, game.execute = position, send
     result, food, _ = run(game)
-    assert result and dropped[0] and len(food.uses) == 2
+    assert result and dropped[0] and len(food.uses) == 9 and game.energy == 100
 
 
-def test_actual_eight_unit_apple_gain_is_verified_and_not_eaten_again_at_thirty_seven():
+def test_eight_unit_apple_gain_continues_past_thirty_seven_until_full():
     game = HungryGame(29, restore=8)
     result, food, _ = run(game)
-    assert result and game.energy == 37 and len(food.uses) == 1
+    assert result and game.energy == 100 and len(food.uses) == 9
     assert food.closes == 1
 
 
@@ -211,7 +219,7 @@ def test_healthy_start_and_resume_close_leftover_backpack_before_movement(pause)
     assert food.closes == (2 if pause else 1)
 
 
-def test_leftover_backpack_that_cannot_close_pauses_before_moving_or_eating_again():
+def test_leftover_backpack_that_cannot_close_retries_before_moving_or_eating_again():
     game, food = HungryGame(37), None
     game.stop_at = 1.
     food = Fruit(game)
@@ -223,4 +231,53 @@ def test_leftover_backpack_that_cannot_close_pauses_before_moving_or_eating_agai
     result, food, statuses = run(game, food)
     assert not result and not food.uses and not game.keys
     assert game.position == [0., 0., 0.]
-    assert any(s == 'food_paused' and '关闭背包未完成' in text for s, text, _ in statuses)
+    assert any(s == 'eating' and '关闭背包未完成' in text for s, text, _ in statuses)
+    assert not any(s == 'food_paused' for s, _, _ in statuses)
+
+
+def test_two_transient_search_failures_recover_without_user_resume():
+    game = HungryGame(29, restore=8)
+    food = Fruit(game); prepare = food.prepare; calls = []
+    def flaky(*args):
+        calls.append(game.time)
+        if len(calls) <= 2:
+            raise ValueError('搜索结果未确认')
+        return prepare(*args)
+    food.prepare = flaky
+    result, food, statuses = run(game, food)
+    assert result and game.energy == 100 and len(food.uses) == 9
+    assert calls[1]-calls[0] >= 1. and calls[2]-calls[1] >= 2.
+    assert not any(s == 'food_paused' for s, _, _ in statuses)
+
+
+def test_refill_stops_at_one_hundred_even_when_boosted_maximum_is_higher():
+    game = HungryGame(29, restore=40)
+    def status():
+        if game.eat_at is not None and game.time >= game.eat_at+.4:
+            game.energy = min(120, game.before_energy+40)
+            game.eat_at = None
+        return stamina_status(game.energy, 100, 120)
+    game.stamina_snapshot = status
+    result, food, _ = run(game)
+    assert result and game.energy == 109 and len(food.uses) == 2
+
+
+def test_every_meal_reads_fresh_inventory_before_search_and_stops_at_100():
+    game = HungryGame(29, restore=40)
+    food = Fruit(game)
+    reads, searches = [], []
+    def inventory(check):
+        check()
+        reads.append(game.time)
+        return [{'name':'苹果', 'edible':True, 'count':10-len(reads)}]
+    game.food_inventory_snapshot = inventory
+    game.food_search_query = lambda:'苹果'
+    original = food.prepare
+    def prepare(*args, **kwargs):
+        searches.append(kwargs['inventory'][0]['count'])
+        assert reads[-1] <= game.time and kwargs['query_check']() == '苹果'
+        return original(*args)
+    food.prepare = prepare
+    result, food, statuses = run(game, food)
+    assert result and game.energy == 100 and searches == [9, 8]
+    assert len(food.uses) == 2 and not any(s == 'food_paused' for s, _, _ in statuses)

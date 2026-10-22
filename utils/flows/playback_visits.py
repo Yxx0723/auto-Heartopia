@@ -42,7 +42,7 @@ class VisitActions:
         return points, index
 
     def check_visit(self, point):
-        if not self.skip_unreachable or self.collection is not None:
+        if not self.skip_unreachable or self.collection is not None and self.collection.get('sent'):
             return
         from utils.core.visit_progress import VisitProgress
         position = self.read()

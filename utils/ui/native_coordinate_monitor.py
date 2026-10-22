@@ -53,7 +53,8 @@ class CoordinateWindow(MonitorLayout, MonitorPainter, MonitorController):
         self.scene_filters_expanded = False
         self.scene_worker = SceneMapWorker(self.resources / 'profile.json', factory=scene_factory,
             special_locations_path=data_dir/'地图缓存'/'动态资源位置线索.json',
-            fixed_resources_path=data_dir/'地图缓存'/'固定资源.json') if scene_factory else None
+            fixed_resources_path=data_dir/'地图缓存'/'固定资源.json',
+            diagnostics_path=diagnostics_dir/'日志'/'场景读取.jsonl') if scene_factory else None
         self.zoom = 1.
         self.scene_radius = policy.COORD_SCENE_RADIUS
         self.map_view = 'nearby'
@@ -66,11 +67,19 @@ class CoordinateWindow(MonitorLayout, MonitorPainter, MonitorController):
         self.map_size = None
         self.fields = {}
         self.wait_editor = None
+        self.player_screen = None
+        self.radar_job = None
         self.route_optimizer = RouteOptimizationJob()
         root.title('心动小镇 · 坐标观测台（窗口版）')
         root.configure(bg=COLORS['bg'])
-        root.geometry('980x700+50+50')
-        root.minsize(900, 620)
+        root.geometry('1060x818+40+30')
+        root.minsize(1020, 640)
+        # Keep the window opaque: whole-window alpha makes Windows composite the
+        # game behind every map repaint, including during dragging.
+        try:
+            root.attributes('-alpha', 1.)
+        except tk.TclError:
+            pass
         icon = self.resources / 'monitor.ico'
         if icon.exists():
             root.iconbitmap(str(icon))
@@ -82,6 +91,7 @@ class CoordinateWindow(MonitorLayout, MonitorPainter, MonitorController):
         if self.scene_worker:
             self.scene_worker.start()
         self.timer = root.after(0, self.tick)
+        self.start_radar()
 
     def tick(self):
         if self.closed:
@@ -126,6 +136,7 @@ class CoordinateWindow(MonitorLayout, MonitorPainter, MonitorController):
         if self.closed:
             return
         self.closed = True
+        self.stop_radar()
         self.route_optimizer.close()
         self.root.after_cancel(self.timer)
         if getattr(self, 'map_hover_job', None) is not None:
@@ -139,14 +150,33 @@ class CoordinateWindow(MonitorLayout, MonitorPainter, MonitorController):
         self.root.destroy()
 
 
+def _dark_title_bar(root):
+    """Kept for API compatibility; the v2 skin uses the system caption colour."""
+    return
+
+
 def main(playback_runner=None):
     parser = argparse.ArgumentParser(description='心动小镇原生坐标监视窗口')
     parser.add_argument('--check-output', type=Path)
     parser.add_argument('--check-scene-output', type=Path)
+    parser.add_argument('--check-food-output', type=Path)
     args = parser.parse_args()
     resources = Path(sys._MEIPASS) / 'monitor' if getattr(sys, 'frozen', False) \
         else Path(__file__).resolve().parents[2] / 'resources' / 'monitor'
     monitor = CoordinateMonitor(resources / 'profile.json')
+    if args.check_food_output:
+        try:
+            status = monitor.status()
+            if status['state'] != 'connected':
+                raise ValueError('请进入角色后读取背包')
+            foods = monitor.reader.food_inventory_snapshot()
+            result = {'read_only': True, 'state': 'ready', 'foods': foods,
+                      'unique_foods': len({f['name'] for f in foods}), 'real_game_input': False,
+                      'target_stamina': 100, 'query': monitor.reader.food_search_query()}
+            args.check_food_output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+        finally:
+            monitor.close()
+        return
     if args.check_scene_output:
         scene = None
         try:
@@ -175,6 +205,7 @@ def main(playback_runner=None):
                                         'trigger_below_percent': REPAIR_THRESHOLD_PERCENT}
             status['equip_support'] = {'state': 'ready', 'tool': '斧镐', 'icon_shape': list(axe.template.shape[:2])}
             status['food_support'] = {'state': 'ready', 'threshold_units': 30,
+                                      'target_units': 100, 'selection': 'owned-backpack-random',
                                       'fruits': list(FRUITS.values()), 'button_shape': list(fruit.eat.shape[:2]),
                                       'close_shape': list(fruit.close_icon.shape[:2])}
             args.check_output.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -183,4 +214,5 @@ def main(playback_runner=None):
         return
     root = tk.Tk()
     CoordinateWindow(root, monitor, resources, playback_runner=playback_runner, scene_factory=MemorySceneMap)
+    _dark_title_bar(root)
     root.mainloop()

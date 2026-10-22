@@ -4,6 +4,9 @@ from utils.core.special_approach import in_interaction_range, global_special_tar
 from utils.core import special_verdict
 from utils.core.special_verdict import snapshot as special_snapshot
 from utils.core.coordinate_route import distance, valid_position
+from utils.core.mineral_approach import mineral_identity, loaded_mineral, resource_near, mineral_standpoint
+from utils.core.special_approach import ApproachProgress
+from utils.core.coordinate_navigation import ObstacleMap
 
 
 SPECIAL_OUTCOME_TEXT = {
@@ -27,6 +30,81 @@ SPECIAL_REACHED_TEXT = {
 
 
 class CollectionActions:
+    def prepare_mineral_point(self, point, index, total):
+        identity = mineral_identity(point) if self.navigator else None
+        if identity is None or self.collection is not None and self.collection.get('sent'):
+            return True
+        point.setdefault('_mineral_center', identity['position'])
+        center = identity['position']
+        position = self.read(force=True)
+        if distance(position, center) > policy.COORD_MINERAL_LOAD_WATCH_RADIUS:
+            point['position'] = [center[0], center[1]+identity.get('height_offset', 0.), center[2]]
+            point.pop('_mineral_wait_since', None)
+            return True
+        scene = self.navigator.scene_provider() or {}
+        target = loaded_mineral(scene, identity)
+        if target is None:
+            self.release()
+            ready = scene.get('state') == 'ready' and scene.get('world_state') == 'ready'
+            if ready:
+                start = point.setdefault('_mineral_wait_since', self.active_time)
+                if self.active_time-start >= policy.COORD_MINERAL_LOAD_WAIT_SECONDS:
+                    if self.collection is not None and not self.collection.get('sent'):
+                        self.collection = None
+                    self.pause_blocked(index, total, '资源点附近未能唯一确认实时采集实体，未按 F')
+            else:
+                point.pop('_mineral_wait_since', None)
+            if self.clock.monotonic()-self.last_report >= .5:
+                self.report('navigating', '已到资源近邻，等待实时采集实体确认，不按 F · F9停止',
+                            waypoint=index+1, waypoint_count=total, position=list(position), navigation_path=[])
+                self.last_report = self.clock.monotonic()
+            if self.scene_refresh is not None:
+                self.scene_refresh()
+            self.navigation_waiting = not ready
+            try:
+                self.wait(.1)
+            finally:
+                self.navigation_waiting = False
+            return False
+        point.pop('_mineral_wait_since', None)
+        progress = point.setdefault('_mineral_progress', ApproachProgress())
+        if resource_near(position, target['position'], identity):
+            # Keep the user's model centre in metadata. Only this transient
+            # waypoint becomes the actual observed foot position.
+            if not point.get('_mineral_arrival'):
+                self.report('navigating', '已确认资源实体，在近邻站位采集，停止追逐模型中心',
+                            waypoint=index+1, waypoint_count=total, position=list(position),
+                            resource_center=list(center), resource_id=identity['resource_id'])
+            point['position'] = list(position)
+            point['_mineral_arrival'] = True
+            progress.reset()
+            return True
+        point.pop('_mineral_arrival', None)
+        if progress.stalled(position, center, self.active_time):
+            avoided = point.setdefault('_mineral_avoid', [])
+            if point.get('_mineral_aim'):
+                avoided.append(list(point['position']))
+            point.pop('_mineral_aim', None)
+            progress.reset()
+            if len(avoided) >= policy.COORD_SPECIAL_APPROACH_STALL_LIMIT:
+                self.pause_blocked(index, total, '资源附近多个交互落脚位受阻，转入补采')
+        if not point.get('_mineral_aim'):
+            obstacles = ObstacleMap(scene, position, water_areas=self.navigator.water_areas)
+            aim = mineral_standpoint(position, center, obstacles, point.get('_mineral_avoid', ()),
+                                    tree_height=(position[1]-center[1] if identity['category'] == 'tree'
+                                                 and abs(position[1]-center[1]) <= 2.
+                                                 else identity.get('height_offset')))
+            if aim is None:
+                self.pause_blocked(index, total, '资源近邻没有通过碰撞检查的落脚位')
+            point['position'], point['_mineral_aim'] = aim, True
+            self.navigator.invalidate()
+        elif identity['category'] == 'tree' and abs(position[1]-center[1]) <= 2.:
+            # The saved height offset was measured beside a different tree.
+            # The local floor may slope; only this transient live approach
+            # follows actual feet height, never a manual point/another floor.
+            point['position'][1] = position[1]
+        return True
+
     def collection_position(self, point):
         position = self.read(force=True)
         if distance(position, point['position']) > policy.COORD_REACH_RADIUS \
@@ -37,11 +115,9 @@ class CollectionActions:
     def collect_point(self, point, index, total):
         if 'special_resource' in point:
             return self.collect_special(point, index, total)
-        if self.collection is None:
-            self.collection = {'sent': False, 'remaining': point.get('collect_wait', self.collect_wait_seconds)}
         self.release()
         self.collection_position(point)
-        if not self.collection['sent']:
+        if self.collection is None or not self.collection['sent']:
             if self.food is not None:
                 self.read_stamina()
                 if self.maintain_stamina(index, total):
@@ -50,11 +126,28 @@ class CollectionActions:
                 self.read_tool()
                 if self.maintain_tool(index, total):
                     return False
-            self.report('collecting', f'点位 {index + 1}/{total} · 按 F 采集 · F6暂停 · F9停止',
+            identity = mineral_identity(point) if self.navigator else None
+            if identity is not None:
+                target = loaded_mineral(self.navigator.scene_provider() or {}, identity)
+                if target is None or not resource_near(self.read(force=True), target['position'], identity):
+                    return False  # Never let a menu wait turn a stale sighting into an F press.
+                if identity['category'] == 'tree' and target['resource_available'] <= 0:
+                    self.report('collecting', f'点位 {index+1}/{total} · 此树暂无可采次数，跳过按 F',
+                                waypoint=index+1, waypoint_count=total, resource_available=0)
+                    return True
+            # Menus, settling and the final approach can all precede the first
+            # press. They must not arm the "left collection position" guard.
+            if self.collection is None:
+                self.collection = {'sent': False, 'remaining': point.get('collect_wait', self.collect_wait_seconds),
+                                   'sent_count': 0}
+            count_text = (f'（{self.collection["sent_count"]+1}/{point["collect_count"]}次）'
+                          if point.get('collect_count', 1) > 1 else '')
+            self.report('collecting', f'点位 {index + 1}/{total} · 按 F 采集{count_text} · F6暂停 · F9停止',
                         waypoint=index + 1, waypoint_count=total)
             try:
                 self.set_keys({'f'})
                 self.collection['sent'] = True
+                self.collection['sent_count'] = self.collection.get('sent_count', 0)+1
                 self.wait(policy.COORD_COLLECTION_PRESS_SECONDS)
             finally:
                 self.release()
@@ -78,6 +171,10 @@ class CollectionActions:
                 elapsed = step if completed else min(step, max(0., self.clock.monotonic() - before))
                 self.collection['remaining'] = max(0., remaining - elapsed)
         self.collection_position(point)
+        if self.collection['remaining'] <= 0 and self.collection['sent_count'] < point.get('collect_count', 1):
+            self.collection['sent'] = False
+            self.collection['remaining'] = point.get('collect_wait', self.collect_wait_seconds)
+            return False
         return self.collection['remaining'] <= 0
 
     def special_objects(self, point, scene=None):

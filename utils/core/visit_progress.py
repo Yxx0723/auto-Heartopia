@@ -4,6 +4,26 @@ from utils.core import thresholds as policy
 from utils.core.coordinate_route import distance
 
 
+class MotionProgress:
+    """Actual XZ progress independent of changes to a temporary steering leg.
+
+    Supply active time; reset after calibration, recovery or controlled stops.
+    A new planning leg must not erase centimetre-scale oscillation evidence.
+    """
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.anchor, self.since = None, None
+
+    def stalled(self, position, active_time):
+        if self.anchor is None or self.since is None or active_time < self.since \
+                or distance(position, self.anchor) >= policy.COORD_STUCK_DISTANCE:
+            self.anchor, self.since = tuple(position), active_time
+            return False
+        return active_time-self.since >= policy.COORD_STUCK_SECONDS
+
+
 class VisitProgress:
     def __init__(self, position, target, now):
         self.started = self.last = now

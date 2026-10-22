@@ -98,7 +98,7 @@ def test_pause_time_does_not_charge_deferred_visit_budget(monkeypatch):
     assert not skipped and not game.keys
 
 
-def test_stable_recovery_attempts_detour_before_jump():
+def test_recovery_attempts_jump_before_any_detour():
     game = Game()
     follower = _Follower({'duration': 0, 'client_size': game.size()}, game, game, game, game,
                          lambda *a, **kw: None, game, waypoints=[], stable_navigation=True,
@@ -107,7 +107,7 @@ def test_stable_recovery_attempts_detour_before_jump():
     follower.recovery_leg = lambda *a: called.append('detour') or False
     follower.recovery_jump = lambda *a: called.append('jump') or True
     assert follower.recover((0, 0, 10), ((0, 1), (1, 0)), (0, 0, 0), 0, 1)
-    assert called == ['detour', 'jump'] and not game.keys
+    assert called == ['jump'] and not game.keys
 
 
 def test_worker_does_not_claim_all_points_complete_when_deferred_points_failed():

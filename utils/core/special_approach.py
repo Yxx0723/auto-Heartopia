@@ -89,7 +89,10 @@ def interaction_standpoint(position, resource, obstacles, avoid=()):
     fresh = [point for point in candidates
              if all(distance(point, seen) > policy.COORD_SPECIAL_STANDPOINT_REUSE for seen in avoid)]
     pool = fresh or candidates
-    return min(pool, key=lambda point: distance(position, point))
+    # Prefer an inner clear ring so arrival and movement quantisation have
+    # margin inside the interaction envelope. Outer rings remain a fallback
+    # when the actual solid body occupies the inner ones.
+    return min(pool, key=lambda point: (round(distance(point, resource), 3), distance(position, point)))
 
 
 class ApproachProgress:

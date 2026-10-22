@@ -13,6 +13,8 @@ from copy import deepcopy
 from utils.core import thresholds as policy
 from utils.core.coordinate_route import direction_keys, distance, key_vector, valid_position
 from utils.core.navigation_water import NAVIGATION_WATER_AREAS as WATER_AREAS
+from utils.core.terrain_map import terrain_slice
+from utils.core.bridge_navigation import BridgeSupport, bridge_signature
 
 
 class NavigationWait(Exception):
@@ -71,17 +73,24 @@ def scene_geometry_signature(scene):
                 or any(not isinstance(p, (list, tuple)) or len(p) != 2
                        or not all(type(v) in (int, float) and math.isfinite(v) for v in p) for p in polygon):
             continue
-        result.add((tuple(heights), tuple(tuple(p) for p in polygon), box.get('category') == 'mountain'))
-    return frozenset(result)
+        triangle = box.get('terrain_triangle', ()) if box.get('source') == 'verified-main-terrain-mesh' else ()
+        result.add((tuple(heights), tuple(tuple(p) for p in polygon), box.get('category') == 'mountain',
+                    tuple(tuple(p) for p in triangle)))
+    return frozenset(result), bridge_signature(scene)
 
 
 class ObstacleMap:
     def __init__(self, scene, position, probes=(), water_areas=WATER_AREAS, goal=None, search_radius=None):
         self.height = position[1]
+        self.height_refresh = (policy.COORD_TERRAIN_HEIGHT_REFRESH if any(
+            box.get('terrain_triangle') and box.get('source') == 'verified-main-terrain-mesh'
+            for box in scene.get('colliders', ())) else policy.COORD_NAV_HEIGHT_REFRESH)
         self.origin = tuple(position)
         self.search_radius = policy.COORD_NAV_SEARCH_RADIUS if search_radius is None else search_radius
         self.radius = self.search_radius + policy.COORD_NAV_LEG_LENGTH
         self.polygons, self.bins = [], {}
+        self.bridge_support = BridgeSupport(scene, position)
+        self.water_indexes = set()
         self.approachable, self.terminal_padding, self.goal = set(), {}, None
         candidates = []
         for box in scene.get('colliders', []):
@@ -93,10 +102,12 @@ class ObstacleMap:
             if heights[1] <= position[1] + policy.COORD_NAV_GROUND_CLEARANCE \
                     or heights[0] >= position[1] + policy.COORD_NAV_BODY_HEIGHT:
                 continue
-            candidates.append((box.get('polygon'), policy.COORD_NAV_CLEARANCE, box.get('category') != 'mountain'))
-        candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False) for polygon in water_areas)
-        candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False) for polygon in probes)
-        for polygon, clearance, approachable in candidates:
+            polygon = (terrain_slice(box, position[1]) if box.get('terrain_triangle')
+                       and box.get('source') == 'verified-main-terrain-mesh' else box.get('polygon'))
+            candidates.append((polygon, policy.COORD_NAV_CLEARANCE, box.get('category') != 'mountain', False))
+        candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False, True) for polygon in water_areas)
+        candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False, False) for polygon in probes)
+        for polygon, clearance, approachable, water in candidates:
             if not isinstance(polygon, (list, tuple)) or len(polygon) < 3 \
                     or any(not isinstance(p, (list, tuple)) or len(p) != 2
                            or not all(type(v) in (float, int) and math.isfinite(v) for v in p) for p in polygon):
@@ -110,6 +121,8 @@ class ObstacleMap:
                 continue
             index = len(self.polygons)
             self.polygons.append((polygon, clearance))
+            if water:
+                self.water_indexes.add(index)
             if approachable:
                 self.approachable.add(index)
             # Clip indexing to the local search area, even for a very large box.
@@ -149,6 +162,8 @@ class ObstacleMap:
             separation = polygon_distance(a, b, polygon)
             if separation > clearance:
                 continue
+            if index in self.water_indexes and self.bridge_support.permits(a, b, polygon, clearance):
+                continue
             # A player already inside the padding may step outward. Never
             # permit crossing the actual polygon or moving deeper into padding.
             start_gap = polygon_distance(a, a, polygon)
@@ -164,7 +179,7 @@ class ObstacleMap:
 
 def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None, search_radius=None,
               max_nodes=None, horizon=None, approach_goal=None, before_search=lambda: None,
-              diagnostics=None, allow_partial=True, any_angle=False):
+              diagnostics=None, allow_partial=True, any_angle=False, heading=None):
     """A bounded A* plan to an exact local endpoint, or a useful far-goal frontier."""
     if not valid_position(position) or not valid_position(target):
         raise ValueError('寻路坐标无效')
@@ -177,6 +192,17 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
     remaining = math.dist(start, goal)
     diagnostics = {} if diagnostics is None else diagnostics
     diagnostics.update(status='complete', target_reached=remaining <= horizon, expanded=0)
+    # Two equal-cost corridors can swap places when the start jitters by a few
+    # centimetres, which makes the character walk back and forth forever. Cost
+    # only penalises turns, so the heuristic stays admissible and a real detour
+    # still wins wherever geometry demands one.
+    bias = policy.COORD_NAV_TURN_BIAS if heading else 0.
+    def step_cost(a, b):
+        distance_ab = math.dist(a, b)
+        if not bias or distance_ab <= 1e-9:
+            return distance_ab
+        alignment = ((b[0] - a[0]) * heading[0] + (b[1] - a[1]) * heading[1]) / distance_ab
+        return distance_ab * (1. + bias * (1. - max(-1., min(1., alignment))) * .5)
     if remaining <= horizon and not obstacles.clear(goal, goal):
         raise NavigationWait('目标附近暂不可通行，正在重新寻路')
     local = goal if remaining <= horizon else tuple(
@@ -189,7 +215,21 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
         check()
         step = grid_step
         limit = int(search_radius / step)
-        world = lambda node: (start[0] + node[0] * step, start[1] + node[1] * step)
+        links, link_neighbors, link_cells = [], {}, {}
+        for bridge in obstacles.bridge_support.paths:
+            previous = None
+            for point in bridge:
+                index = len(links)
+                links.append((point[0], point[2]))
+                link_neighbors[index] = []
+                if previous is not None:
+                    link_neighbors[index].append(('bridge', previous))
+                    link_neighbors[previous].append(('bridge', index))
+                previous = index
+                cell = (round((point[0]-start[0])/step), round((point[2]-start[1])/step))
+                link_cells.setdefault(cell, []).append(('bridge', index))
+        def world(node):
+            return links[node[1]] if node[0] == 'bridge' else (start[0]+node[0]*step, start[1]+node[1]*step)
         counter = itertools.count()
         frontier = [(math.dist(start, local), next(counter), (0, 0), 0.)]
         costs, parents, closed = {(0, 0): 0.}, {}, set()
@@ -216,20 +256,30 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
             if math.dist(point, local) <= step and obstacles.clear(point, local):
                 reached = node
                 break
-            for dx, dz in offsets:
-                neighbor = (node[0] + dx, node[1] + dz)
-                if max(abs(neighbor[0]), abs(neighbor[1])) > limit or neighbor in closed:
+            linked = node[0] == 'bridge'
+            cell = (round((point[0]-start[0])/step), round((point[1]-start[1])/step)) if linked else node
+            neighbors = [(cell[0]+dx, cell[1]+dz) for dx, dz in offsets]
+            if linked:
+                neighbors += [cell, *link_neighbors[node[1]]]
+            if links:
+                for dx in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        neighbors.extend(link_cells.get((cell[0]+dx, cell[1]+dz), ()))
+            for neighbor in neighbors:
+                bridge_edge = linked or neighbor[0] == 'bridge'
+                if neighbor in closed or max(abs(x-y) for x, y in zip(world(neighbor), start)) > limit*step:
                     continue
                 if not free(neighbor):
                     continue
-                if dx and dz and (not free((node[0] + dx, node[1])) or not free((node[0], node[1] + dz))):
+                dx, dz = (0, 0) if bridge_edge else (neighbor[0]-node[0], neighbor[1]-node[1])
+                if dx and dz and (not free((node[0]+dx, node[1])) or not free((node[0], node[1]+dz))):
                     continue
                 edge = (node, neighbor)
                 if edge not in edge_cache:
                     edge_cache[edge] = obstacles.clear(point, world(neighbor), escape=node == (0, 0))
                 if not edge_cache[edge]:
                     continue
-                new_cost = cost + step * math.hypot(dx, dz)
+                new_cost = cost + step_cost(point, world(neighbor))
                 parent = node
                 # Basic Theta* idea: retain a visible ancestor rather than
                 # forcing every guide edge to follow the grid headings.
@@ -240,7 +290,7 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
                     if chord not in edge_cache:
                         edge_cache[chord] = obstacles.clear(world(ancestor), world(neighbor),
                                                            escape=ancestor == (0, 0))
-                    alternative = costs[ancestor] + math.dist(world(ancestor), world(neighbor))
+                    alternative = costs[ancestor] + step_cost(world(ancestor), world(neighbor))
                     if edge_cache[chord] and alternative < new_cost:
                         parent, new_cost = ancestor, alternative
                 if new_cost >= costs.get(neighbor, math.inf):
@@ -290,6 +340,8 @@ class LocalNavigator:
         self.scene, self.obstacles, self.goal = None, None, None
         self.scene_signature = None
         self.path, self.probes = [], []
+        self.blocked_points = []  # [x, z, level] per learned stall, current world only.
+        self.heading, self.heading_origin = None, None
         self.retry_at = 0.
         self.retry_reason = 'no_path'
         self.path_memory = path_memory
@@ -393,17 +445,49 @@ class LocalNavigator:
         scene = self.scene_provider()
         if not scene or scene.get('state') != 'ready':
             return None
-        context = (scene.get('cache_context'), scene.get('terrain_revision'))
+        context = (scene.get('cache_context'), scene.get('terrain_revision'), bridge_signature(scene),
+                   id(scene.get('colliders')))
         if self.water_guard is None or self.water_guard_context != context \
-                or abs(position[1] - self.water_guard.height) >= policy.COORD_NAV_HEIGHT_REFRESH \
+                or abs(position[1] - self.water_guard.height) >= self.water_guard.height_refresh \
                 or not self.water_guard.covers_search(position, travel):
+            # A low obstacle may be probed by a jump. A solid extending above
+            # the body has no proven jump clearance and remains a blocker.
             walls = [box for box in scene.get('colliders', ())
-                     if box.get('source') == 'verified-main-terrain-mesh']
-            self.water_guard = ObstacleMap({'colliders': walls}, position, water_areas=self.water_areas)
+                     if box.get('source') == 'verified-main-terrain-mesh' or (
+                         isinstance(box.get('height'), (list, tuple)) and len(box['height']) == 2
+                         and box['height'][1] > position[1] + policy.COORD_NAV_BODY_HEIGHT)]
+            self.water_guard = ObstacleMap({**scene, 'colliders': walls}, position, water_areas=self.water_areas)
             self.water_guard_context = context
         return self.steering_keys(position, target, basis, travel, obstacles=self.water_guard)
 
+    def detour_keys(self, position, target, basis, travel):
+        """Ground detours obey live solid objects as well as water/cliffs."""
+        try:
+            self._refresh_obstacles(position, target)
+        except NavigationWait:
+            return None
+        return self.steering_keys(position, target, basis, travel)
+
     def blocked(self, position, target):
+        evidence = {'position': list(position), 'target': list(target), 'kind': 'stalled-motion',
+                    'scene_state': None, 'nearby_colliders': []}
+        scene = self.scene_provider() or {}
+        evidence['scene_state'] = scene.get('state')
+        if scene.get('state') == 'ready':
+            # Nearby geometry is evidence for diagnosis, not a claim that the
+            # nearest object caused the stall. No process addresses are kept.
+            nearby = []
+            for box in scene.get('colliders', ()):
+                polygon, heights = box.get('polygon'), box.get('height')
+                if not polygon or not heights or heights[1] <= position[1]+policy.COORD_NAV_GROUND_CLEARANCE \
+                        or heights[0] >= position[1]+policy.COORD_NAV_BODY_HEIGHT:
+                    continue
+                gap = polygon_distance((position[0], position[2]), (position[0], position[2]), polygon)
+                if gap <= policy.COORD_NAV_EVIDENCE_RADIUS:
+                    nearby.append({'distance': gap, 'polygon': [list(p) for p in polygon],
+                                   'height': list(heights), 'category': box.get('category'),
+                                   'source': box.get('source')})
+            evidence['nearby_colliders'] = sorted(nearby, key=lambda box: box['distance'])[:policy.COORD_NAV_EVIDENCE_LIMIT]
         if self.path_memory:
             self.path_memory.reject_selected()
         self.memory_path = []
@@ -411,15 +495,57 @@ class LocalNavigator:
         self.memory_state = 'learning' if self.path_memory else 'off'
         length = distance(position, target)
         if length > policy.COORD_REACH_RADIUS:
-            center = (position[0] + (target[0] - position[0]) / length,
-                      position[2] + (target[2] - position[2]) / length)
-            polygon = tuple((center[0] + .45 * math.cos(i * math.pi / 4),
-                             center[1] + .45 * math.sin(i * math.pi / 4)) for i in range(8))
-            self.probes.append((self.clock() + policy.COORD_NAV_PROBE_SECONDS, polygon))
-            self.probes = self.probes[-32:]
+            evidence['learned_block'] = self._learn_block(position, target)
         self.invalidate()
+        # A cached wide guide may cross the just-learned obstruction too.
+        # Reusing it can send the local planner back to the same failed entry.
+        self.guide_path, self.guide_goal = [], None
+        self.guide_retry_at, self.guide_state = 0., 'off'
+        return evidence
+
+    def _learn_block(self, position, target):
+        """Turn a proven stall into a persistent wall across the attempted line.
+
+        The scene read can genuinely miss geometry: an in-game stall at
+        (-84.4, -134.8) had no modelled wall within 6 units and the live
+        snapshot had only thin slivers 2.6 units away, yet the character could
+        not advance. One short-lived disc let the planner re-use the same line
+        a moment later, so the same spot was hit again and again. Record a wall
+        instead, and widen it where stalls repeat so the detour grows each time.
+        """
+        start = (position[0], position[2])
+        dx, dz = target[0] - position[0], target[2] - position[2]
+        span = math.hypot(dx, dz)
+        if span <= 1e-6:
+            return None
+        dx, dz = dx / span, dz / span
+        hit = None
+        for entry in self.blocked_points:
+            if math.dist(start, (entry[0], entry[1])) <= policy.COORD_NAV_BLOCK_ESCALATE_RADIUS:
+                hit = entry
+                break
+        if hit is None:
+            hit = [start[0], start[1], 0]
+            self.blocked_points.append(hit)
+            self.blocked_points = self.blocked_points[-policy.COORD_NAV_BLOCK_LIMIT:]
+        hit[2] = min(hit[2] + 1, policy.COORD_NAV_BLOCK_MAX_LEVEL)
+        level = hit[2]
+        half = policy.COORD_NAV_BLOCK_HALF_WIDTH + (level - 1) * policy.COORD_NAV_BLOCK_WIDTH_STEP
+        thickness = policy.COORD_NAV_BLOCK_THICKNESS / 2
+        center = (start[0] + dx * policy.COORD_NAV_BLOCK_DISTANCE,
+                  start[1] + dz * policy.COORD_NAV_BLOCK_DISTANCE)
+        side = (-dz, dx)
+        polygon = ((center[0] + side[0] * half + dx * thickness, center[1] + side[1] * half + dz * thickness),
+                   (center[0] - side[0] * half + dx * thickness, center[1] - side[1] * half + dz * thickness),
+                   (center[0] - side[0] * half - dx * thickness, center[1] - side[1] * half - dz * thickness),
+                   (center[0] + side[0] * half - dx * thickness, center[1] + side[1] * half - dz * thickness))
+        self.probes.append((self.clock() + policy.COORD_NAV_BLOCK_SECONDS, polygon))
+        self.probes = self.probes[-policy.COORD_NAV_BLOCK_LIMIT:]
+        return {'level': level, 'half_width': half,
+                'center': [round(center[0], 3), round(center[1], 3)]}
 
     def next_target(self, position, target, check=lambda: None, before_plan=lambda: None):
+        self._observe_heading(position)
         if self.path_memory is None or self.waypoint is None:
             return self._next_target(position, target, check, before_plan)
         leg = (self.waypoint, tuple(target))
@@ -465,6 +591,18 @@ class LocalNavigator:
         self.memory_state = 'learning'
         return self._next_target(position, target, check, before_plan)
 
+    def _observe_heading(self, position):
+        """Keep the last real walking direction; a stalled character keeps it too."""
+        point = (position[0], position[2])
+        if self.heading_origin is None:
+            self.heading_origin = point
+            return
+        dx, dz = point[0] - self.heading_origin[0], point[1] - self.heading_origin[1]
+        span = math.hypot(dx, dz)
+        if span < policy.COORD_NAV_HEADING_MIN_MOVE:
+            return
+        self.heading, self.heading_origin = (dx / span, dz / span), point
+
     def _memory_target(self, position):
         """Look ahead only within the recorded corridor, including hidden bends."""
         start = (position[0], position[2])
@@ -498,8 +636,9 @@ class LocalNavigator:
                    ('entities', scene['global_special_context']) if scene.get('global_special_context') is not None
                    else ('unknown',))
         if self.scene_context is not None and context != self.scene_context:
-            # Runtime probes and guidance belong to one game world only.
-            self.probes, self.guide_path = [], []
+            # Runtime probes, learned stalls, heading and guidance belong to one game world only.
+            self.probes, self.blocked_points, self.guide_path = [], [], []
+            self.heading, self.heading_origin = None, None
             self.guide_goal, self.guide_retry_at, self.guide_state = None, 0., 'off'
             self.water_guard = None
             self.memory_path, self.memory_aim = [], None
@@ -517,7 +656,7 @@ class LocalNavigator:
         changed = signature != self.scene_signature
         self.scene, self.scene_signature = scene, signature
         if changed or self.obstacles is None \
-                or abs(position[1] - self.obstacles.height) >= policy.COORD_NAV_HEIGHT_REFRESH:
+                or abs(position[1] - self.obstacles.height) >= self.obstacles.height_refresh:
             self.obstacles = self._build_map(scene, position, target, max(policy.COORD_NAV_SEARCH_RADIUS, self.search_radius))
             previous = (position[0], position[2])
             for index, point in enumerate(self.path):
@@ -613,7 +752,8 @@ class LocalNavigator:
             try:
                 path = plan_path(position, target, self.obstacles, check, grid_step=step,
                                  search_radius=radius, max_nodes=nodes, horizon=horizon,
-                                 approach_goal=approach_goal, before_search=before_plan, diagnostics=details)
+                                 approach_goal=approach_goal, before_search=before_plan,
+                                 diagnostics=details, heading=self.heading)
             except NavigationWait as exc:
                 failure = exc.reason
                 continue

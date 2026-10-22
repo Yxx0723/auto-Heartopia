@@ -61,6 +61,13 @@ class SceneDisplayCache:
         current, live = {}, {'objects': [], 'colliders': []}
         for kind in live:
             for item in scene.get(kind, []):
+                if kind == 'colliders' and item.get('category') == 'mountain' \
+                        and item.get('source') == 'verified-main-terrain-mesh':
+                    # A version/world-gated reference is not an old local
+                    # sighting. Its own immutable model cache already retains
+                    # geometry, and missing confirmation must hide it at once.
+                    live[kind].append(item)
+                    continue
                 identity = freeze(item.get('map_id'))
                 # Only the reader can establish a stationary landmark's identity.
                 # Animals, unknown entities and home-built colliders stay live.

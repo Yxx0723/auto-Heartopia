@@ -76,16 +76,17 @@ def test_verified_global_target_can_start_navigation_only():
 
 def test_native_gather_button_starts_patrol_even_when_daily_target_is_missing(tmp_path, monkeypatch):
     from tests.unit.test_native_coordinate_monitor import capture_window
+    from tests.unit.test_special_patrol import houses
     window = capture_window(tmp_path)
     window.view.status['pid'] = 77
     window.navigation_scene = Mock(return_value={'state': 'ready', 'objects': [], 'global_special_state': 'ready',
-        'global_resources': [{'category': 'tree', 'map_definition': True, 'position': [10., 20., 30.]}]})
+        **houses()})
     window.special_press_var = Mock(); window.special_press_var.get.return_value = '3'
     error = Mock(); monkeypatch.setattr('utils.ui.monitor_controller.messagebox.showerror', error)
     window.start_special_gather('roaming_oak')
     error.assert_not_called()
     args, kwargs = window.playback.start.call_args
-    assert args[0]['special_patrol']['checkpoints'] == [[10., 20., 30.]]
+    assert args[0]['special_patrol']['checkpoints'] == [[float(n*20), 20., 30.] for n in range(1, 13)]
     assert kwargs['remember_paths'] is False and kwargs['auto_navigate'] is True
     assert '巡查' in window.playback_status['message']
 

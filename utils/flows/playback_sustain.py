@@ -5,6 +5,25 @@ from utils.flows.playback_signals import _Paused
 
 
 class SustainActions:
+    def food_retry(self, message, index, total):
+        self.release()
+        self.food_failures += 1
+        delay = min(5., 2. ** min(self.food_failures-1, 3))
+        self.food_retry_at = self.clock.monotonic()+delay
+        self.report('eating', f'{message} · {delay:g}秒后自动重试（第{self.food_failures}次） · F6暂停 · F9停止',
+                    waypoint=index+1, waypoint_count=total, food_retry=self.food_failures)
+        return True
+
+    def food_retry_wait(self):
+        self.release()
+        self.navigation_waiting = True
+        try:
+            self.wait(min(.2, max(.01, self.food_retry_at-self.clock.monotonic())))
+        finally:
+            self.navigation_waiting = False
+            self.last_tick = self.clock.monotonic()
+        return True
+
     def repair_pause(self, message, index, total, state='repair_paused'):
         self.release()
         pause_with_reason = getattr(self.controls, 'pause_with_reason', None)
@@ -40,6 +59,8 @@ class SustainActions:
         return self.stamina_status
 
     def close_stamina_menu(self, index, total):
+        if self.clock.monotonic() < self.food_retry_at:
+            return self.food_retry_wait()
         self.release()
         self.navigation_waiting = True
         try:
@@ -51,7 +72,7 @@ class SustainActions:
                             waypoint=index+1, waypoint_count=total)
             return bool(closed)
         except (ValueError, OSError) as exc:
-            self.repair_pause(f'关闭背包未完成：{exc}', index, total, state='food_paused')
+            return self.food_retry(f'关闭背包未完成：{exc}', index, total)
         finally:
             self.release()
             self.navigation_waiting = False
@@ -60,19 +81,28 @@ class SustainActions:
     def maintain_stamina(self, index, total):
         if self.food is None:
             return False
+        if self.clock.monotonic() < self.food_retry_at:
+            return self.food_retry_wait()
         if self.clock.monotonic()-self.last_stamina_check >= 1.:
             self.read_stamina()
         status = self.stamina_status
         if not usable_stamina(status):
             self.release()
-            for _ in range(3):
-                self.wait(.1)
-                status = self.read_stamina()
-                if usable_stamina(status):
-                    break
+            self.navigation_waiting = True
+            try:
+                for _ in range(3):
+                    self.wait(.1)
+                    status = self.read_stamina()
+                    if usable_stamina(status):
+                        break
+            finally:
+                self.navigation_waiting = False
+                self.last_tick = self.clock.monotonic()
         if not usable_stamina(status):
-            self.repair_pause('暂时无法读取本地角色体力，请等待读取恢复', index, total, state='food_paused')
-        if status['current'] >= 30 and not self.meal_pending and not self.meal_menu_pending:
+            return self.food_retry('暂时无法读取本地角色体力，等待读取恢复', index, total)
+        if status['current'] < 30:
+            self.meal_refilling = True
+        if status['current'] >= 30 and not self.meal_refilling and not self.meal_pending and not self.meal_menu_pending:
             # Starting or resuming may leave a backpack from manual eating or
             # an earlier run open. Check once before movement, never per tick.
             if not self.food_menu_checked:
@@ -81,7 +111,7 @@ class SustainActions:
         self.release()
         self.navigation_waiting = True
         try:
-            action = '正在搜索水果并补充' if status['current'] < 30 else '已恢复，正在收起背包'
+            action = '正在补充体力至100' if status['current'] < 100 else '体力已达100，正在收起背包'
             self.report('eating', f'体力 {status["current"]} / {status["maximum"]}，{action} · F6暂停 · F9停止',
                         waypoint=index+1, waypoint_count=total)
             if self.clock.monotonic() < self.meal_settle_until:
@@ -89,13 +119,24 @@ class SustainActions:
                 status = self.read_stamina()
                 if not usable_stamina(status):
                     raise ValueError('体力正在更新，请稍后继续')
-            if not self.meal_pending and status['current'] < 30:
+            if not self.meal_pending and status['current'] < 100:
                 self.meal_menu_pending = True
-                target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device)
+                inventory_reader = getattr(self.reader, 'food_inventory_snapshot', None)
+                if callable(inventory_reader):
+                    inventory = inventory_reader(check=self.guard)
+                    names = sorted({item['name'] for item in inventory})
+                    self.report('eating', f'背包可食用食物 {len(names)} 种，随机选择并搜索 · F6暂停 · F9停止',
+                                waypoint=index+1, waypoint_count=total)
+                    target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device,
+                                               inventory=inventory, query_check=getattr(self.reader, 'food_search_query', None))
+                    self.report('eating', f'正在食用{target["food"]}，体力达到100后继续路线 · F6暂停 · F9停止',
+                                waypoint=index+1, waypoint_count=total, food_name=target['food'])
+                else:  # Injected simulation devices keep their existing contract.
+                    target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device)
                 status = self.read_stamina()
                 if not usable_stamina(status):
                     raise ValueError('食用前无法确认体力')
-                if status['current'] < 30:
+                if status['current'] < 100:
                     # Retain the attempted use across F6, focus loss and a
                     # partial mouse press. Never eat twice before verifying.
                     self.meal_pending = True
@@ -121,16 +162,18 @@ class SustainActions:
                 status = self.read_stamina()
                 if not usable_stamina(status):
                     raise ValueError('体力正在更新，请稍后继续')
-            if status['current'] >= 30:
+            if status['current'] >= 100:
                 if self.meal_menu_pending:
                     self.food.close_menu(self.window, self.repair_tap, self.guard, self.wait, self.device)
                     self.meal_menu_pending = False
                     self.food_menu_checked = True
-                self.report('playing', f'体力已恢复至 {status["current"]}，继续当前点位 · F6暂停 · F9停止',
+                self.meal_refilling = False
+                self.food_failures, self.food_retry_at = 0, 0.
+                self.report('playing', f'体力已达 {status["current"]}（目标100），继续当前点位 · F6暂停 · F9停止',
                             waypoint=index+1, waypoint_count=total)
             return True
         except (ValueError, OSError) as exc:
-            self.repair_pause(f'自动吃水果未完成：{exc}', index, total, state='food_paused')
+            return self.food_retry(f'自动进食未完成：{exc}', index, total)
         finally:
             self.release()
             self.navigation_waiting = False

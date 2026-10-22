@@ -18,7 +18,7 @@ def test_terrain_requires_verified_main_map_and_current_game_build():
     assert not verified_terrain_walls('foreign-build', True)
     assert not verified_terrain_walls(TERRAIN_GAME_ASSEMBLY_SHA256, False)
     assert verified_terrain_walls(TERRAIN_GAME_ASSEMBLY_SHA256, True) is terrain_walls()
-    assert len(terrain_walls()) == 3398
+    assert len(terrain_walls()) == 3464
     assert all(all(math.isfinite(v) for v in edge) and edge[4] < edge[5] for edge in TERRAIN_EDGES)
 
 

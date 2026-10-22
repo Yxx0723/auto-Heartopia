@@ -18,6 +18,7 @@ class PlaybackHistory:
         self.closed = False
         self.origin = self.last_sample = self.last_flush = None
         self.previous = None
+        self.last_navigation = None
         self.summary_at = None
         self.context = {}
         now = self.wall_clock()
@@ -27,8 +28,10 @@ class PlaybackHistory:
                         'started_at': None, 'ended_at': None, 'state': 'waiting',
                         'options': options, 'sample_count': 0, 'distance_xz': 0.,
                         'reached_count': 0, 'cycle_finished_count': 0,
-                        'skipped_count': 0, 'unresolved_points': []}
+                        'skipped_count': 0, 'unresolved_points': [],
+                        'navigation_plan_count': 0, 'navigation_blocked_count': 0}
         self.events = self.trajectory = None
+        self.navigation = None
         try:
             self.path.mkdir(parents=True, exist_ok=False)
             self._json('route.json', route)
@@ -36,6 +39,8 @@ class PlaybackHistory:
             self.streams.append(self.events)
             self.trajectory = (self.path/'trajectory.jsonl').open('a', encoding='utf-8')
             self.streams.append(self.trajectory)
+            self.navigation = (self.path/'navigation.jsonl').open('a', encoding='utf-8')
+            self.streams.append(self.navigation)
             self._json('summary.json', self.summary)
         except (OSError, ValueError, TypeError) as exc:
             self.error = str(exc)
@@ -54,8 +59,22 @@ class PlaybackHistory:
                 now = self.wall_clock()
                 stamp = now.isoformat(timespec='milliseconds')
                 previous_state = self.summary['state']
-                # Planned navigation paths are already represented by real samples;
-                # avoid duplicating large planned polygons in every status message.
+                # Planned paths and actual movement are different evidence.
+                # Keep changed plans once in their own stream rather than
+                # duplicating the same path in every status message.
+                path = status.get('navigation_path')
+                if path is not None:
+                    path = [list(p) for p in path]
+                if path is not None and path != self.last_navigation:
+                    self.navigation.write(json.dumps({'at': stamp, 'path': path, **{
+                        k: status[k] for k in ('position', 'waypoint', 'cycle', 'patrol_checked') if k in status}},
+                        ensure_ascii=False, allow_nan=False)+'\n')
+                    self.navigation.flush()
+                    self.last_navigation = [list(p) for p in path]
+                    if path:
+                        self.summary['navigation_plan_count'] += 1
+                if status.get('navigation_event') == 'blocked':
+                    self.summary['navigation_blocked_count'] += 1
                 entry = {k: v for k, v in status.items() if k != 'navigation_path'}
                 self.events.write(json.dumps({'at': stamp, **entry}, ensure_ascii=False, allow_nan=False)+'\n')
                 self.events.flush()
@@ -64,7 +83,9 @@ class PlaybackHistory:
                 if state == 'playing' and self.summary['started_at'] is None:
                     self.summary['started_at'] = stamp
                 self.summary.update(state=state, last_message=status.get('message', ''), **{
-                    k: status[k] for k in ('cycle', 'waypoint', 'waypoint_count', 'loop_count') if k in status})
+                    k: status[k] for k in ('cycle', 'waypoint', 'waypoint_count', 'loop_count',
+                        'patrol_checked', 'patrol_total', 'patrol_phase', 'patrol_result',
+                        'patrol_reason', 'resource_outcome') if k in status})
                 if state == 'reached':
                     self.summary['reached_count'] += 1
                 if state == 'cycle_finished':

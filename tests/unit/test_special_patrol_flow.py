@@ -7,6 +7,14 @@ from utils.flows.coordinate_player import drive_points
 from utils.flows.special_patrol import drive_special_patrol
 
 
+@pytest.fixture(autouse=True)
+def miniature_search_regions(monkeypatch):
+    # These older synthetic worlds span only 3-8 units. Keep them testing
+    # traversal rather than starting inside the production 8-unit search area.
+    from utils.core import thresholds as policy
+    monkeypatch.setattr(policy, 'COORD_PATROL_SURVEY_RADIUS', .5)
+
+
 def data(checkpoints):
     identity = {'category': 'roaming_oak', 'static_id': 42001, 'press_count': 2}
     stamp = '2026-10-21T12:00:00+08:00'
@@ -163,4 +171,24 @@ def test_f9_interrupts_hint_arrival_confirmation_without_f():
     scene = lambda: {'state': 'ready', 'global_special_state': 'ready', 'objects': [],
                      'global_special_resources': [hint], 'colliders': []}
     assert not run(game, scene, [[0., 0., 6.]])
+    assert not game.events and not game.keys
+
+
+def test_house_patrol_starts_at_nearest_then_visits_numbered_doors_without_f(monkeypatch):
+    from utils.core import thresholds as policy
+    monkeypatch.setattr(policy, 'COORD_PATROL_DWELL_SECONDS', .01)
+    game, report = Game(), Mock()
+    game.position = [161., 0., 0.]
+    plan = data([[float(n*20), 0., 0.] for n in range(1, 13)])
+    plan['special_patrol'].update(checkpoint_kind='house-entrances', checkpoint_houses=list(range(1, 13)))
+    nav = LocalNavigator(lambda: {'state': 'ready', 'global_special_state': 'ready', 'objects': [], 'colliders': []},
+                         clock=game.monotonic, water_areas=())
+    def runner(leg, size, factory, *args, **kw):
+        game.position = list(leg['points'][0]['position'])
+        factory().read_for_playback()
+        return True
+    assert drive_special_patrol(plan, game.size(), lambda: game, game, game, game, report,
+                               clock=game, navigator=nav, point_runner=runner)
+    scanned = [c.kwargs['patrol_house'] for c in report.call_args_list if c.kwargs.get('patrol_phase') == 'scan']
+    assert scanned == [8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7]
     assert not game.events and not game.keys

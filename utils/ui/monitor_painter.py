@@ -4,14 +4,35 @@ import math
 from utils.core.coordinate_route import valid_position
 from utils.core import thresholds as policy
 from utils.ui.map_draw_cache import Viewport, object_key, muted_color
-from utils.ui.map_presentation import MAP_STYLE, draw_grid, draw_chrome, draw_player, chrome_bounds, draw_waypoint_labels, draw_target_indicator
+from utils.ui.map_presentation import (MAP_STYLE, COLLISION_WIDTH, TERRAIN_WIDTH,
+                                       WATER_EDGE_SCALE, WATER_WIDTHS,
+                                       draw_grid, draw_chrome, draw_player,
+                                       chrome_bounds, draw_waypoint_labels, draw_target_indicator,
+                                       smooth_coords, water_colors)
 from utils.ui.map_labels import layout_waypoints, HoverTarget, target_indicator
 from utils.ui.monitor_style import COLORS, FAUNA_STYLES, MAP_PIXELS_PER_UNIT, MINERAL_STYLES, PLANT_STYLES, SCENE_CATEGORIES, SCENE_RANKS
-from utils.ui.monitor_widgets import configure_changed
+from utils.ui.monitor_widgets import configure_changed, ui_font
 from utils.ui.monitor_feedback import user_feedback
+from utils.ui.ui_tokens import CONTROL, TYPE
 
 
 class MonitorPainter:
+    # 提示槽固定高度：出现/消失不改变侧栏行高，避免整列跳动。
+    NOTICE_STYLES = {'idle': ('card', 'card', 'faint'),
+                     'info': ('card_hi', 'line', 'muted'),
+                     'error': ('danger_bg', 'red', 'red')}
+
+    def render_notice(self, text, color):
+        style = 'error' if color == 'red' else ('info' if text else 'idle')
+        state = (text, style)
+        if state == getattr(self, 'notice_state', None):
+            return
+        self.notice_state = state
+        bar_bg, border, fg = (COLORS[name] for name in self.NOTICE_STYLES[style])
+        self.notice_bar.configure(bg=bar_bg, highlightbackground=border,
+                                  highlightthickness=CONTROL['border'])
+        self.message.configure(text=text, bg=bar_bg, fg=fg)
+
     def render_tool_durability(self):
         tool = self.view.status.get('tools', {})
         color, percent = 'muted', 0.
@@ -40,27 +61,27 @@ class MonitorPainter:
         self.fields['tool_durability'].set(value)
         configure_changed(self.tool_value, fg=COLORS[color])
         configure_changed(self.tool_hint, text=hint, fg=COLORS[color])
-        progress = (self.tool_progress.winfo_width(), percent, color)
-        if progress != getattr(self, 'tool_progress_state', None):
-            self.tool_progress_state = progress
-            self.tool_progress.coords(self.tool_fill, 0, 0, progress[0]*percent/100, 4)
-            self.tool_progress.itemconfigure(self.tool_fill, fill=COLORS[color])
+        self.tool_progress.set(percent, color)
 
     def render_stamina(self):
         if 'stamina' not in self.fields:
             return
         status = self.view.status.get('stamina', {})
-        value, color = '未读取', 'muted'
+        value, color, percent = '未读取', 'muted', 0.
         if self.view.position is not None and status.get('state') == 'ready':
             value = f'{status["current"]} / {status["maximum"]}'
             color = 'amber' if status['current'] < 30 else 'green'
+            maximum = status.get('maximum') or 100
+            percent = max(0., min(100., status['current'] / maximum * 100))
             if self.view.paused:
                 color, value = 'muted', value+' · 暂停'
         self.fields['stamina'].set(value)
         configure_changed(self.stamina_value, fg=COLORS[color])
+        if hasattr(self, 'stamina_progress'):
+            self.stamina_progress.set(percent, color)
 
     def render(self):
-        if self.interaction_pending():
+        if self.interaction_pending() or not self.canvas.winfo_viewable():
             return
         view, status = self.view, self.view.status
         live = view.position is not None and not view.paused
@@ -92,12 +113,16 @@ class MonitorPainter:
             configure_changed(self.delete_point_button, state='normal' if self.saved_points and not playing and not self.points_error else 'disabled')
         configure_changed(self.clear_points_button, state='normal' if self.saved_points and not playing and not self.points_error else 'disabled')
         configure_changed(self.save_point_button, state='normal' if live and not playing else 'disabled')
-        configure_changed(self.play_button, state='normal' if live and self.saved_points and not playing and not optimizing and not self.points_error else 'disabled')
+        configure_changed(self.play_button, state='normal' if live and self.saved_points and not playing and not self.points_error else 'disabled')
         configure_changed(self.stop_button, state='normal' if playing else 'disabled')
         self.fields['playback'].set(user_feedback(self.playback_status['message']))
-        playback_color = COLORS['red' if self.playback_status['state'] in ('error', 'blocked', 'repair_paused', 'equip_paused', 'food_paused') else 'green' if playing else 'muted']
+        failing = self.playback_status['state'] in ('error', 'blocked', 'repair_paused', 'equip_paused', 'food_paused')
+        playback_color = COLORS['red' if failing else 'green' if playing else 'muted']
         configure_changed(self.playback_label, fg=playback_color)
         configure_changed(self.expanded_status, fg=playback_color)
+        if hasattr(self, 'status_bar'):
+            configure_changed(self.status_bar,
+                              bg=COLORS['red' if failing else 'green' if playing else 'accent_dim'])
         self.fields['saved_count'].set(f'已保存 {len(self.saved_points)} 个点')
         if self.points_error:
             summary = self.points_error
@@ -106,7 +131,7 @@ class MonitorPainter:
             coords = '   '.join(f'{axis} {value:.3f}' for axis, value in zip('XYZ', point['position']))
             summary = f'最近：{point["name"]}   {coords}'
         else:
-            summary = '点击按钮，将当前 XYZ 添加到当前路线'
+            summary = '还没有点位 · 点「＋ 添加当前点位」开始'
         self.fields['saved_summary'].set(summary)
         configure_changed(self.saved_summary, fg=COLORS['red' if self.points_error else 'muted'])
         for i, axis in enumerate('XYZ'):
@@ -118,46 +143,23 @@ class MonitorPainter:
             self.fields['freshness'].set('已暂停 · 最后读数')
         elif live:
             color = 'green'
-            message = view.notice or '角色坐标读取正常。切回游戏走动即可观察变化。'
+            message = view.notice or ''
             self.fields['freshness'].set('实时读取中')
         else:
             color = 'muted' if status.get('state') in ('waiting', 'connecting') else 'red'
             message = status.get('message', '没有实时坐标，请重新连接。')
             self.fields['freshness'].set('没有实时数据')
-        configure_changed(self.message, text=user_feedback(message), fg=COLORS[color])
+        self.render_notice(user_feedback(message), color)
+        if hasattr(self, 'status_dot') and getattr(self, 'status_dot_color', None) != color:
+            self.status_dot_color = color
+            self.status_dot.itemconfigure(self.status_dot_id, fill=COLORS[color])
         if view.position is not None:
             stamp = status.get('sample_at')
             self.fields['updated'].set(datetime.fromisoformat(stamp).strftime('%H:%M:%S') if stamp else '—')
         else:
             self.fields['updated'].set('—')
+        # 场景统计文案已移除：侧栏不再显示「物体/碰撞/缓存 · 围栏/护栏 · 全图 · 动态」四行
         scene = self.scene_state
-        stats = scene.get('statistics', {})
-        barrier_text = (f'围栏 {stats.get("fences", 0)} · 护栏 {stats.get("handrails", 0)}'
-                        if scene.get('barrier_state') == 'ready' else '围栏分类暂不可用，保留碰撞避障')
-        world_text = '路边碰撞已接入' if scene.get('world_state') == 'ready' else '路边碰撞更新中'
-        radius = getattr(self, 'scene_radius', policy.COORD_SCENE_RADIUS)
-        cached = scene.get('display_cache', {}).get('cached_items', 0)
-        terrain_text = (f' · 山体边界 {stats.get("terrain_walls", 0)} 段'
-                        if scene.get('terrain_state') == 'ready' else '')
-        text = (f'物体 {len(scene["objects"])} · 碰撞 {len(scene["colliders"])}\n{barrier_text} · {world_text}{terrain_text}\n显示 {radius:g} 单位 · 缓存参考 {cached}'
-                if scene['state'] == 'ready' else '正在读取场景…' if scene['state'] == 'loading'
-                else scene.get('message', '进入角色后自动读取场景'))
-        if scene.get('global_resource_state') == 'ready':
-            counts = scene.get('global_resource_counts', {})
-            text += f'\n全图岩石 {counts.get("rock", 0)} · 矿石 {counts.get("ore", 0)}'
-            text += f'\n全图树木 {counts.get("tree", 0)} · 蓝莓 {counts.get("blueberry", 0)} · 树莓 {counts.get("raspberry", 0)}'
-        if scene.get('global_special_state') == 'ready':
-            markers = scene.get('global_special_resources', ())
-            labels = []
-            for kind, name in (('roaming_oak', '橡木'), ('fluorite', '萤石')):
-                count = sum(obj.get('category') == kind for obj in markers)
-                labels.append(f'{name} {count}' if count else f'{name}暂未同步')
-            text += '\n全图动态定位：' + ' · '.join(labels)
-        if scene.get('global_map_state') == 'ready':
-            resources = scene.get('global_map_resources', ())
-            text += '\n已同步：' + ' · '.join(f'{label} {sum(o.get("category") == kind for o in resources)}'
-                for kind, label in (('insect', '昆虫'), ('bird', '鸟'), ('fish', '鱼影')))
-        configure_changed(self.scene_status, text=text)
         if hasattr(self, 'global_minerals_button'):
             configure_changed(self.global_minerals_button,
                               state='normal' if scene.get('global_resource_state') == 'ready'
@@ -170,9 +172,9 @@ class MonitorPainter:
     @staticmethod
     def draw_scene_symbol(canvas, x, z, category):
         if category in ('resource', 'crop'):
-            color = '#a8e07c' if category == 'crop' else '#dfd19c'
+            color = '#7dffb2' if category == 'crop' else '#c8dff0'
             canvas.create_polygon(x, z-5, x+5, z, x, z+5, x-5, z,
-                                  fill='#384631', outline=color, tags='scene-'+category)
+                                  fill='#16232b', outline=color, tags='scene-'+category)
             if category == 'crop':
                 canvas.create_line(x, z+2, x, z-2, x+3, z-4, fill=color, tags='scene-'+category)
         elif category in MINERAL_STYLES:
@@ -189,19 +191,19 @@ class MonitorPainter:
                 canvas.create_line(x-4, z+3, x-2, z+1, x, z+2, fill='#f2d48a', width=1.5, tags=tag)
         elif category == 'roaming_oak':
             tag = 'scene-roaming_oak'
-            canvas.create_line(x, z-2, x, z+7, fill='#d0a278', width=5, tags=tag)
-            canvas.create_oval(x-8, z-12, x+8, z+1, fill='#245e47', outline='#e8b574', width=2, tags=tag)
-            canvas.create_line(x-5, z+6, x-8, z+8, fill='#e8b574', width=2, tags=tag)
-            canvas.create_line(x+3, z+6, x+7, z+8, fill='#e8b574', width=2, tags=tag)
+            canvas.create_line(x, z-2, x, z+7, fill='#c98f5e', width=5, tags=tag)
+            canvas.create_oval(x-8, z-12, x+8, z+1, fill='#0d4a3a', outline='#ffcf7a', width=2, tags=tag)
+            canvas.create_line(x-5, z+6, x-8, z+8, fill='#ffcf7a', width=2, tags=tag)
+            canvas.create_line(x+3, z+6, x+7, z+8, fill='#ffcf7a', width=2, tags=tag)
         elif category == 'tree':
             fill, outline = PLANT_STYLES['tree']
-            canvas.create_oval(x-6, z+3, x+7, z+7, fill='#101e17', outline='', tags='scene-tree')
+            canvas.create_oval(x-6, z+3, x+7, z+7, fill='#04101a', outline='', tags='scene-tree')
             canvas.create_line(x, z-2, x, z+6, fill='#c99b6c', width=2, tags='scene-tree')
             canvas.create_polygon(x, z-11, x+4, z-10, x+5, z-7, x+7, z-5,
                                   x+6, z-1, x+3, z+1, x, z, x-3, z+1,
                                   x-6, z-1, x-7, z-5, x-5, z-7, x-4, z-10,
                                   smooth=True, fill=fill, outline=outline, width=1, tags='scene-tree')
-            canvas.create_oval(x-3.5, z-8, x+1, z-4, fill='#5c8259', outline='', tags='scene-tree')
+            canvas.create_oval(x-3.5, z-8, x+1, z-4, fill='#2f7d63', outline='', tags='scene-tree')
         elif category in FAUNA_STYLES:
             fill, outline = FAUNA_STYLES[category]
             tag = 'scene-' + category
@@ -239,13 +241,13 @@ class MonitorPainter:
                                   width=1, tags='scene-' + category)
             if category == 'blueberry':
                 for dx, dz in ((-1.5, -1), (1, 1.5)):
-                    canvas.create_oval(x+dx-1.5, z+dz-1.5, x+dx+1.5, z+dz+1.5, fill='#bed4ff', outline='',
+                    canvas.create_oval(x+dx-1.5, z+dz-1.5, x+dx+1.5, z+dz+1.5, fill='#9fe0ff', outline='',
                                        tags='scene-blueberry-fruit')
             elif category == 'raspberry':
-                canvas.create_polygon(x, z-2, x+2, z, x, z+2, x-2, z, fill='#ffd0e0', outline='',
+                canvas.create_polygon(x, z-2, x+2, z, x, z+2, x-2, z, fill='#ff9fc4', outline='',
                                       tags='scene-raspberry-fruit')
         else:
-            canvas.create_oval(x-1, z-1, x+1, z+1, fill='#52685b', outline='', tags='scene-object')
+            canvas.create_oval(x-1, z-1, x+1, z+1, fill='#3a5866', outline='', tags='scene-object')
 
     def draw(self):
         if self.draw_job is not None:
@@ -295,6 +297,7 @@ class MonitorPainter:
         step = next(v * power for v in (1, 2, 5, 10) if v * power >= raw)
         self.fields['scale'].set(f'刻度 {step:g} 单位/格')
         viewport = Viewport(w, h, cx, cz, scale)
+        self.last_viewport = viewport
         self.map_cache.begin(viewport)
         draw_grid(self.map_cache.live, viewport, step)
         scene_objects, scene_boxes = self.map_cache.geometry.select(
@@ -308,36 +311,57 @@ class MonitorPainter:
         if self.scene_roads_var.get() and view.position is not None:
             for key, coords, _ in self.map_cache.geometry.visible_roads(viewport):
                 self.map_cache.polyline(key, coords, -3, [
-                    {'fill': '#263b2e', 'width': 9, 'capstyle': 'round', 'joinstyle': 'round',
+                    {'fill': '#08151d', 'width': 9, 'capstyle': 'round', 'joinstyle': 'round',
                      'tags': 'reference-road-edge'},
                     {'fill': MAP_STYLE['road'], 'width': 5, 'capstyle': 'round', 'joinstyle': 'round',
                      'tags': 'reference-road'},
-                    {'fill': '#b5ac88', 'width': 1, 'dash': (3, 9), 'tags': 'reference-road-center'}])
-        if self.scene_water_var.get() and view.position is not None:
-            for key, coords, _ in self.map_cache.geometry.visible_water(viewport):
-                self.map_cache.polygon(key, coords, -2,
-                                       underlay={'fill': '', 'outline': MAP_STYLE['shore_outer'],
-                                                 'width': 5, 'tags': 'reference-water-shore'},
-                                       fill=MAP_STYLE['water'], outline=MAP_STYLE['shore'], width=1.5,
-                                       tags='reference-water')
-            for key, coords, _ in self.map_cache.geometry.visible_water_islands(viewport):
-                self.map_cache.polygon(key, coords, -1, fill=MAP_STYLE['ground'],
-                                       outline=MAP_STYLE['shore'], width=1., tags='reference-water-island')
+                    {'fill': '#7fd8e8', 'width': 1, 'dash': (3, 9), 'tags': 'reference-road-center'}])
+        # 碰撞先画、水面后画：水面盖住落在湖里的轮廓，岸线只剩水面自己那条细边。
         for key, coords, _ in scene_boxes:
             kind = self.map_cache.geometry.barrier_kinds.get(key)
             cached = key in self.map_cache.geometry.cached_keys
             if kind == 'mountain':
                 if self.scene_colliders_var.get():
-                    self.map_cache.polygon(key, coords, -1, fill='', outline='#bb9874', width=2,
+                    color = muted_color(MAP_STYLE['terrain']) if cached else MAP_STYLE['terrain']
+                    self.map_cache.polygon(key, coords, -8, fill='', outline=color,
+                                           width=TERRAIN_WIDTH,
                                            tags=('scene-mountain', 'scene-terrain'))
+            elif kind == 'bridge':
+                if self.scene_roads_var.get():
+                    self.map_cache.polygon(key, coords, -1, fill='#2b4a55', outline='',
+                                           tags='reference-bridge')
             elif kind:
                 if self.scene_barriers_var.get():
                     color = muted_color(MAP_STYLE[kind]) if cached else MAP_STYLE[kind]
                     self.map_cache.barrier(key, coords, color, kind)
             elif self.scene_colliders_var.get():
                 color = muted_color(MAP_STYLE['collision']) if cached else MAP_STYLE['collision']
-                self.map_cache.polygon(key, coords, -1, fill='', outline=color, width=1,
-                                       tags='scene-collider')
+                self.map_cache.polygon(key, coords, -8, fill='', outline=color,
+                                       width=COLLISION_WIDTH, tags='scene-collider')
+        if self.scene_water_var.get() and view.position is not None:
+            colors = water_colors()
+            for key, coords, _ in self.map_cache.geometry.visible_water(viewport):
+                level = key[2] if len(key)>2 else 0
+                factor = WATER_EDGE_SCALE[level]
+                self.map_cache.polygon(key, coords, -6,
+                                       underlay={'fill': '', 'outline': colors['bank'],
+                                                 'width': round(WATER_WIDTHS['bank']*factor, 1),
+                                                 'tags': 'reference-water-shore'},
+                                       fill=colors['shallow'], outline=colors['edge'],
+                                       width=round(WATER_WIDTHS['shallow']*factor, 1),
+                                       tags='reference-water')
+            # 深水色块的原始轮廓是像素级腐蚀出来的，用次一级简并 + 圆一次角，
+            # 1x 下才不会看到台阶；水面外轮廓和岸线保持原边界不动。
+            for key,coords,_ in self.map_cache.geometry.visible_water_layer('water-deep',viewport,1):
+                self.map_cache.polygon(key,smooth_coords(coords),-5,fill=colors['deep'],outline='',
+                                       tags='reference-water-interior')
+            for key,coords,_ in self.map_cache.geometry.visible_water_layer('water-deep-island',viewport,1):
+                self.map_cache.polygon(key,smooth_coords(coords),-4,fill=colors['shallow'],outline='',
+                                       tags='reference-water-inner-island')
+            for key, coords, _ in self.map_cache.geometry.visible_water_islands(viewport):
+                self.map_cache.polygon(key, coords, -4, fill=colors['island'],
+                                       outline=colors['island_edge'], width=WATER_WIDTHS['island'],
+                                       tags='reference-water-island')
         for obj in scene_objects:
             category = obj.get('category')
             self.map_cache.symbol(object_key(obj), (obj['position'][0], obj['position'][2]),
@@ -355,15 +379,15 @@ class MonitorPainter:
             segment = point['segment']
         if len(coords) >= 4:
             canvas.create_line(*coords, fill=MAP_STYLE['trail'], width=2, tags='walk-trail')
-            canvas.create_line(*coords[-64:], fill='#acd7a2', width=2, tags='walk-trail-recent')
+            canvas.create_line(*coords[-64:], fill='#b6fbff', width=2, tags='walk-trail-recent')
         saved_line = [value for point in self.saved_points
                       for value in (px(point['position'][0]), pz(point['position'][2]))]
         if len(saved_line) >= 4:
-            canvas.create_line(*saved_line, fill='#172934', width=4, tags='saved-route-edge')
+            canvas.create_line(*saved_line, fill='#04222b', width=4, tags='saved-route-edge')
             canvas.create_line(*saved_line, fill=MAP_STYLE['route_line'], width=1.5, dash=(5, 5), tags='saved-route')
         if navigation_path and view.position is not None:
             planned = [v for p in [view.position, *navigation_path] for v in (px(p[0]), pz(p[2]))]
-            canvas.create_line(*planned, fill='#102a29', width=6, tags='navigation-path-edge')
+            canvas.create_line(*planned, fill='#06231a', width=6, tags='navigation-path-edge')
             canvas.create_line(*planned, fill=MAP_STYLE['navigation'], width=2.5, dash=(7, 4),
                                arrow='last', arrowshape=(8, 10, 4), tags='navigation-path')
         active = self.playback_status.get('waypoint') if self.playback_status.get('state') not in (
@@ -378,10 +402,14 @@ class MonitorPainter:
                 if indicator:
                     draw_target_indicator(canvas, viewport, indicator, self.saved_points[active-1]['id'])
             x, y = px(view.position[0]), pz(view.position[2])
+            self.player_screen = (x, y)
             draw_player(canvas, x, y, view.trail, view.paused, direction=view.heading)
         elif not view.trail and not self.saved_points:
+            self.player_screen = None
             canvas.create_text(w / 2, h / 2, text='等待读取角色位置\n进入游戏后自动连接', fill=COLORS['muted'],
-                               font=('Microsoft YaHei UI', -13), justify='center')
+                               font=ui_font(TYPE['body']), justify='center')
+        else:
+            self.player_screen = None
         if hasattr(self, 'map_hover'):
             targets = []
             for obj in scene_objects:
@@ -391,7 +419,11 @@ class MonitorPainter:
                 if obj.get('map_definition'):
                     detail = '全图资源位置 · '+self.map_distance(position)+'\n资源定义，不表示当前可采集状态'
                 elif obj.get('resource_global_validated'):
-                    detail = '当前同步位置 · '+self.map_distance(position)+'\n交互/成熟状态未确认'
+                    if obj.get('category') in ('roaming_oak','fluorite') and obj.get('resource_global_only'):
+                        name += '（未确认线索）'
+                        detail = '同步位置线索 · '+self.map_distance(position)+'\n尚未确认现场实体，不用于房门巡查接入'
+                    else:
+                        detail = '当前同步位置 · '+self.map_distance(position)+'\n交互/成熟状态未确认'
                     if obj.get('resource_item_type'):
                         detail += f' · 资源类型 {obj["resource_item_type"]}'
                 targets.append(HoverTarget(px(position[0]), pz(position[2]), name, detail))
@@ -433,6 +465,49 @@ class MonitorPainter:
     def set_zoom(self, zoom):
         self.zoom = max(.2, min(10., zoom))
         self.request_draw()
+
+    # ---------- 状态灯 ----------
+
+    def start_radar(self):
+        """v2 没有雷达环：这里只刷新连接状态点，不启动动画循环。"""
+        self.radar_angle, self.radar_job = 0., None
+        self.paint_status_pulse()
+
+    def stop_radar(self):
+        if getattr(self, 'radar_job', None) is not None:
+            try:
+                self.root.after_cancel(self.radar_job)
+            except Exception:
+                pass
+            self.radar_job = None
+
+    def _radar_tick(self):
+        self.radar_job = None
+
+    def paint_radar(self):
+        """Kept for callers that still ask for a repaint of the status LED."""
+        self.paint_status_pulse()
+
+    def paint_status_pulse(self):
+        """Connection LED: a static dot whose colour follows the link state."""
+        dot = getattr(self, 'status_dot', None)
+        if dot is None:
+            return
+        try:
+            live = self.view.position is not None and not self.view.paused
+            item = getattr(self, 'status_pulse_id', None)
+            if not live:
+                if item is not None:
+                    dot.itemconfigure(item, state='hidden')
+                return
+            radius = 3.4
+            color = COLORS[getattr(self, 'status_dot_color', 'green')]
+            if item is None:
+                item = self.status_pulse_id = dot.create_oval(0, 0, 0, 0, tags='status-pulse')
+            dot.coords(item, 7-radius, 7-radius, 7+radius, 7+radius)
+            dot.itemconfigure(item, outline=color, state='normal')
+        except Exception:
+            return
 
     def request_draw(self):
         if not self.closed and self.draw_job is None:
@@ -481,6 +556,8 @@ class MonitorPainter:
             self.draw_job = None
         if self.closed:
             return
+        if not self.canvas.winfo_viewable():
+            return
         if self.interaction_pending():
             delay = max(16, math.ceil((self.interacting_until-self.clock())*1000))
             self.draw_job = self.root.after(delay, self.draw_if_changed)
@@ -513,11 +590,15 @@ class MonitorPainter:
         self.set_zoom(1.)
 
     def toggle_map_size(self):
+        from utils.ui.monitor_layout import SIDEBAR_WIDTH
         self.map_expanded = not self.map_expanded
         for widget in self.map_expand_widgets:
             widget.grid_remove() if self.map_expanded else widget.grid()
-        self.workspace.grid_columnconfigure(1, minsize=0 if self.map_expanded else 300)
-        self.plotcard.grid_configure(padx=(0, 0 if self.map_expanded else 10))
+        self.workspace.grid_columnconfigure(1, minsize=0 if self.map_expanded else SIDEBAR_WIDTH)
+        self.plotcard.grid_configure(padx=(0, 0 if self.map_expanded else 12))
+        # 大地图模式下底部状态行已经显示播放信息，图例行不再重复占位。
+        if hasattr(self, 'plotfoot'):
+            self.plotfoot.grid_remove() if self.map_expanded else self.plotfoot.grid()
         self.map_expand_button.configure(text='还原布局' if self.map_expanded else '大地图')
         self.expanded_status.grid() if self.map_expanded else self.expanded_status.grid_remove()
         self.root.update_idletasks()

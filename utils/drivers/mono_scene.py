@@ -2,11 +2,14 @@
 import struct
 from utils.core import thresholds as policy
 from utils.core.scene_map import box_geometry, compose_transform
-from utils.core.terrain_map import verified_terrain_walls
+from utils.core.terrain_map import verified_terrain_walls, TERRAIN_REVISION
+from utils.core.bridge_map import verified_bridge_data, BRIDGE_REVISION
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.native_world_collisions import NativeWorldCollisions
 from utils.drivers.global_minerals import GlobalMineralReader
+from utils.drivers.house_entrances import HouseEntranceReader
 from utils.drivers.special_gather import SPECIAL_COMPONENTS, special_gather
+from utils.drivers.rare_tree_gather import rare_tree_gather
 
 # Verified on 2026-10-14 against the standing player's blueberry bush and the
 # user's identified raspberry and ordinary bushes (each within 0.2 world units).
@@ -274,6 +277,7 @@ class MemorySceneMap:
         self.meta = SceneMetadata(self.memory._read, self.memory.locator.domain)
         self.native = None
         self.global_minerals = None
+        self.house_entrances = None
 
     def close(self):
         self.memory.close()
@@ -515,6 +519,16 @@ class MemorySceneMap:
             return self.meta.ref(transform, '_hierarchy')
         return self.meta.ref(owner, '_hierarchy')
 
+    def terrain_geometry(self, world_state):
+        """Only the verified native world gates terrain; optional items do not."""
+        if world_state != 'ready' or self.native is None:
+            return ()
+        try:
+            return verified_terrain_walls(self.memory.profile.get('game_assembly_sha256'),
+                                          self.native.main_terrain_loaded())
+        except ValueError:
+            return ()  # Never reuse geometry across a changing streaming root.
+
     def snapshot(self):
         sample = self.memory.snapshot()
         local_hierarchy = self.local_hierarchy(sample)
@@ -568,6 +582,11 @@ class MemorySceneMap:
                         obj.update(matches[0])
                     if obj['category'] in ('blueberry', 'raspberry', 'bush', 'tree', 'shrub'):
                         obj.update(map_static=True, map_id=('plant', hierarchy, owner))
+                        if obj['category'] == 'tree':
+                            try:
+                                obj.update(rare_tree_gather(meta, owner))
+                            except ValueError:
+                                pass  # Optional state cannot hide a tree or authorize collection.
                     elif obj['category'] in ('rock', 'ore'):
                         obj.update(map_static=True, map_id=('mineral', hierarchy, owner))
                     objects.append(obj)
@@ -630,7 +649,7 @@ class MemorySceneMap:
                         colliders.append(geometry)
                     except ValueError:
                         skipped += 1
-        world_stats, world_state = {}, 'unavailable'
+        world_stats, world_state, world_diagnostic = {}, 'unavailable', None
         try:
             if self.native is None:
                 assembly_base, _, _ = self.memory._module('GameAssembly.dll')
@@ -638,10 +657,11 @@ class MemorySceneMap:
             world_colliders, world_stats = self.native.snapshot()
             colliders.extend(world_colliders)
             world_state = 'ready'
-        except ValueError:
+        except ValueError as exc:
             # Streaming replacement invalidates this read; never retain an old
             # world's obstacles. The worker retries with a fresh snapshot.
             self.native = None
+            world_diagnostic = str(exc)
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
             raise ValueError('场景已切换，正在重新读取地图')
@@ -673,20 +693,28 @@ class MemorySceneMap:
             special_state = 'ready'
         except ValueError:
             pass
-        terrain = ()
-        if world_state == 'ready' and global_state == 'ready':
-            try:
-                terrain = verified_terrain_walls(self.memory.profile.get('game_assembly_sha256'),
-                                                 self.native.main_terrain_loaded())
-            except ValueError:
-                pass  # A changing scene must not receive the previous world's terrain.
+        house_entrances, house_state = [], 'unavailable'
+        try:
+            if getattr(self, 'house_entrances', None) is None:
+                self.house_entrances = HouseEntranceReader(meta, self.memory.base, {})
+            house_entrances = self.house_entrances.snapshot()
+            house_state = 'ready'
+        except (ValueError, OSError):
+            pass  # Entrance loading must not hide live resources/collision data.
+        terrain = self.terrain_geometry(world_state)
         colliders.extend(terrain)
+        bridge_surfaces, bridge_crossings = verified_bridge_data(
+            self.memory.profile.get('game_assembly_sha256'), bool(terrain))
         return {'terrain_state': 'ready' if terrain else 'unavailable',
-                'terrain_revision': 'main-terrain-v1' if terrain else None,
+                'terrain_revision': TERRAIN_REVISION if terrain else None,
+                'bridge_surfaces': bridge_surfaces, 'bridge_crossings': bridge_crossings,
+                'bridge_revision': BRIDGE_REVISION if bridge_surfaces or bridge_crossings else None,
                 'schema': 'memory-scene-map-v1', 'state': 'ready', 'read_only': True,
                 'scope': 'loaded-scene-partial', 'objects': objects, 'colliders': colliders,
                 'position': current['position'], 'barrier_state': barrier_state, 'world_state': world_state,
+                'world_diagnostic': world_diagnostic,
                 'global_resources': global_resources, 'global_resource_state': global_state,
+                'house_entrances': house_entrances, 'house_entrance_state': house_state,
                 'fixed_resource_context': fixed_context,
                 'global_special_resources': global_special, 'global_special_state': special_state,
                 'global_special_context': special_context,

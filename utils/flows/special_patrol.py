@@ -18,6 +18,10 @@ class _Stopped(Exception):
     pass
 
 
+class _SurveyArrived(Exception):
+    """A search region was reached; this never authorizes collection."""
+
+
 class _LegExpired(PatrolLegBlocked):
     pass
 
@@ -70,6 +74,9 @@ def drive_special_patrol(data, size, reader_factory, device, window, controls, r
     config = data['special_patrol']
     category, name = config['category'], data['points'][0]['name']
     pending = [list(p) for p in config['checkpoints']]
+    house_patrol = config.get('checkpoint_kind') == 'house-entrances'
+    house_numbers = {tuple(p): n for p, n in zip(pending, config.get('checkpoint_houses', []))}
+    survey_radius = policy.COORD_PATROL_HOUSE_RADIUS if house_patrol else policy.COORD_PATROL_SURVEY_RADIUS
     total = len(pending)
     rejected, blocked_live, checked = [], [], 0
     position, world_context = None, None
@@ -89,7 +96,7 @@ def drive_special_patrol(data, size, reader_factory, device, window, controls, r
                patrol_checked=checked, patrol_total=total, navigation_path=[], **extra)
 
     def target_now(scene):
-        state, target = patrol_target(scene, category, rejected)
+        state, target = patrol_target(scene, category, rejected, allow_hints=not house_patrol)
         if state == 'live' and any(math.dist(target['position'], p) <= 2. for p in blocked_live):
             return 'search', None
         return state, target
@@ -117,7 +124,7 @@ def drive_special_patrol(data, size, reader_factory, device, window, controls, r
             clock.sleep(.01)
         return False
 
-    def run_leg(goal, collect=False):
+    def run_leg(goal, collect=False, survey_center=None):
         active = _Controls(controls, clock)
         limit = (policy.COORD_PATROL_TARGET_SECONDS if collect else
                  min(policy.COORD_PATROL_MAX_LEG_SECONDS,
@@ -136,6 +143,9 @@ def drive_special_patrol(data, size, reader_factory, device, window, controls, r
             state, _ = target_now(scene_now())
             if not collect and state in ('live', 'unavailable'):
                 raise _Found()
+            if survey_center is not None and state in ('search', 'hint') \
+                    and distance(current, survey_center) <= survey_radius:
+                raise _SurveyArrived()
         point = deepcopy(data['points'][0])
         point['position'] = list(goal)
         if not collect:
@@ -150,16 +160,22 @@ def drive_special_patrol(data, size, reader_factory, device, window, controls, r
             report(state, (f'{name} · 巡查 {checked}/{total} · ' if not collect else '') + message,
                    **{**extra, 'patrol_phase': 'collect' if collect else 'search',
                       'patrol_checked': checked, 'patrol_total': total})
-        return point_runner(leg, size, lambda: _Reader(reader_factory(), watch), device,
-                            window, active, leg_report, clock=clock, **kwargs)
+        try:
+            return point_runner(leg, size, lambda: _Reader(reader_factory(), watch), device,
+                                window, active, leg_report, clock=clock, **kwargs)
+        except _SurveyArrived:
+            return True  # The runner's finally released keys and closed its reader.
 
     def standpoint(seed, scene):
         # A fixed tree centre is a search area, not a standable destination.
-        obstacles = ObstacleMap(scene, seed, water_areas=navigator.water_areas)
+        # A definition's altitude is not a sampled ground height. Test body
+        # clearance using the current observed character height; later movement
+        # is rechecked as terrain height changes. Arrival is area coverage.
+        obstacles = ObstacleMap(scene, (seed[0], position[1], seed[2]), water_areas=navigator.water_areas)
         angle = math.atan2(position[2] - seed[2], position[0] - seed[0])
-        candidates = [[seed[0] + radius * math.cos(angle + turn * math.tau / 16), seed[1],
+        candidates = ([list(seed)] if house_patrol else []) + [[seed[0] + radius * math.cos(angle + turn * math.tau / 16), seed[1],
                        seed[2] + radius * math.sin(angle + turn * math.tau / 16)]
-                      for radius in (2.5, 4.) for turn in range(16)]
+                      for radius in ((1., 2.) if house_patrol else (2.5, 4.)) for turn in range(16)]
         clear = [p for p in candidates if obstacles.clear((p[0], p[2]), (p[0], p[2]))]
         return min(clear, key=lambda p: distance(position, p)) if clear else None
 
@@ -176,7 +192,11 @@ def drive_special_patrol(data, size, reader_factory, device, window, controls, r
             position = tuple(getattr(reader, 'read_for_playback', reader.read)())
         finally:
             reader.close()
-        emit('开始巡查，位置记录仅用于前往核查', patrol_phase='start')
+        if house_patrol and pending:
+            first = min(range(len(pending)), key=lambda i: distance(position, pending[i]))
+            pending = pending[first:] + pending[:first]
+        emit('开始巡查1～12号房门前，入口点仅用于前往核查' if house_patrol else
+             '开始巡查，位置记录仅用于前往核查', patrol_phase='start')
         while True:
             active = _Controls(controls, clock)
             if not check_controls(active):
@@ -216,31 +236,41 @@ def drive_special_patrol(data, size, reader_factory, device, window, controls, r
                     emit('到点未确认资源，停用这条线索并继续巡查', patrol_result='unconfirmed')
                 except _Found:
                     continue
-                except PatrolLegBlocked:
+                except PatrolLegBlocked as exc:
                     rejected.append(list(target['position']))
-                    emit('位置线索暂时不可达，继续巡查其他区域', patrol_result='unreachable')
+                    emit(f'位置线索暂时不可达：{exc}；继续巡查其他区域',
+                         patrol_result='unreachable', patrol_goal=list(target['position']), patrol_reason=str(exc))
                 continue
             if not pending:
                 report('patrol_finished', f'{name}本轮可用巡查区域已结束，尚未确认目标；不代表全图没有',
                        resource_outcome='not_found', patrol_checked=checked, patrol_total=total, navigation_path=[])
                 return True
-            index = min(range(len(pending)), key=lambda i: distance(position, pending[i]))
+            index = 0 if house_patrol else min(range(len(pending)), key=lambda i: distance(position, pending[i]))
             seed = pending.pop(index)
+            house_number = house_numbers.get(tuple(seed))
+            place = f'{house_number}号房门前' if house_number is not None else '巡查区域'
             checked += 1
+            if distance(position, seed) <= survey_radius:
+                emit(f'已进入{place}，刷新并核对附近实体，不按 F', patrol_phase='scan',
+                     patrol_seed=seed, patrol_house=house_number, position=list(position), survey_radius=survey_radius)
+                idle(policy.COORD_PATROL_DWELL_SECONDS)
+                continue
             goal = standpoint(seed, scene)
             if goal is None:
-                emit('区域暂时没有可站立位置，跳过后继续巡查', patrol_result='unreachable')
+                emit(f'{place}暂时没有可站立位置，跳过后继续巡查', patrol_result='unreachable', patrol_house=house_number)
                 continue
-            emit(f'前往第 {checked}/{total} 个巡查区域', patrol_phase='search')
+            emit(f'前往{place}（{checked}/{total}）', patrol_phase='search',
+                 patrol_seed=seed, patrol_goal=goal, patrol_house=house_number, survey_radius=survey_radius)
             try:
-                if not run_leg(goal):
+                if not run_leg(goal, survey_center=seed):
                     return False
-                emit('已到巡查区域，刷新并核对附近实体，不按 F', patrol_phase='scan')
+                emit(f'已到{place}，刷新并核对附近实体，不按 F', patrol_phase='scan', patrol_house=house_number)
                 idle(policy.COORD_PATROL_DWELL_SECONDS)
             except _Found:
                 continue
-            except PatrolLegBlocked:
-                emit('区域暂时不可达，跳过后继续巡查', patrol_result='unreachable')
+            except PatrolLegBlocked as exc:
+                emit(f'区域暂时不可达：{exc}；跳过后继续巡查', patrol_result='unreachable',
+                     patrol_seed=seed, patrol_goal=goal, patrol_house=house_number, patrol_reason=str(exc))
     except _Stopped:
         return False
     finally:
