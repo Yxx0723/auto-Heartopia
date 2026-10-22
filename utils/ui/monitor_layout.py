@@ -271,8 +271,7 @@ class MonitorLayout(MonitorWidgets):
     # ---------- 侧栏 ----------
 
     def build_sidebar(self, sidebar):
-        # Runtime scene statistics may grow to several lines. Keep the tool near
-        # the coordinates and allow overflow instead of clipping the bottom rows.
+        # Keep short content at the top; scrolling is only for actual overflow.
         self.sidebar_canvas = tk.Canvas(sidebar, width=1, height=1, bg=COLORS['card'],
                                         bd=0, highlightthickness=0)
         scrollbar = ttk.Scrollbar(sidebar, orient='vertical', command=self.sidebar_canvas.yview)
@@ -281,16 +280,23 @@ class MonitorLayout(MonitorWidgets):
                                  padx=(px(SPACE['sp3']), 0), pady=px(SPACE['sp2']))
         self.sidebar_canvas.configure(yscrollcommand=scrollbar.set)
         inner = tk.Frame(self.sidebar_canvas, bg=COLORS['card'])
+        self.sidebar_inner = inner
         sidebar_window = self.sidebar_canvas.create_window(0, 0, window=inner, anchor='nw')
 
         def resize_sidebar(event=None):
             width = self.sidebar_canvas.winfo_width()
             if float(self.sidebar_canvas.itemcget(sidebar_window, 'width')) != width:
                 self.sidebar_canvas.itemconfigure(sidebar_window, width=width)
-            region = self.sidebar_canvas.bbox('all')
+            height = self.sidebar_canvas.winfo_height()
+            content_height = inner.winfo_reqheight()
+            # A changing notice/viewport must not leave a negative canvas
+            # origin and a blank band above the first section.
+            region = (0, 0, width, max(height, content_height))
             if region != getattr(self, 'sidebar_region', None):
                 self.sidebar_region = region
                 self.sidebar_canvas.configure(scrollregion=region)
+            if content_height <= height:
+                self.sidebar_canvas.yview_moveto(0)
 
         inner.bind('<Configure>', resize_sidebar)
         self.sidebar_canvas.bind('<Configure>', resize_sidebar)
@@ -319,25 +325,26 @@ class MonitorLayout(MonitorWidgets):
         self.message = tk.Label(self.notice_bar, text='', bg=COLORS['card'], fg=COLORS['muted'],
                                 anchor='w', justify='left', font=ui_font(TYPE['hint']), padx=px(6))
         self.message.pack(fill='both', expand=True)
-        self.rule(inner).grid(row=4, column=0, columnspan=3, sticky='ew', pady=px(6))
+        self.notice_bar.grid_remove()
+        self.rule(inner).grid(row=4, column=0, columnspan=3, sticky='ew', pady=px(4))
         self.section_header(inner, '角色状态', tag='STATUS').grid(row=5, column=0, columnspan=3, sticky='w')
         self.build_tool_card(inner, row=6)
-        self.rule(inner).grid(row=7, column=0, columnspan=3, sticky='ew', pady=px(6))
-        self.section_header(inner, '采集', tag='GATHER').grid(row=8, column=0, columnspan=3, sticky='w')
+        self.rule(inner).grid(row=7, column=0, columnspan=3, sticky='ew', pady=px(4))
+        self.section_header(inner, '采集', tag='GATHER').grid(row=8, column=0, sticky='w')
         specialbar = tk.Frame(inner, bg=COLORS['card'])
-        specialbar.grid(row=9, column=0, columnspan=3, sticky='ew', pady=(px(SPACE['sp2']), 0))
+        specialbar.grid(row=9, column=0, columnspan=3, sticky='ew', pady=(px(SPACE['sp1']), 0))
         self.button(specialbar, '采集萤石', lambda: self.start_special_gather('fluorite'), small=True).pack(
             side='left', fill='x', expand=True, padx=(0, px(SPACE['sp1'])))
         self.button(specialbar, '采集橡木', lambda: self.start_special_gather('roaming_oak'), small=True).pack(
             side='left', fill='x', expand=True)
         pressbar = tk.Frame(inner, bg=COLORS['card'])
-        pressbar.grid(row=10, column=0, columnspan=3, sticky='ew', pady=(px(SPACE['sp2']), 0))
+        pressbar.grid(row=8, column=1, columnspan=2, sticky='e')
         self.label(pressbar, '连按 F', color='faint', font=ui_font(TYPE['label'])).pack(side='left')
         self.special_press_var = tk.StringVar(self.root, value='3')
         self.dropdown(pressbar, self.special_press_var, ['3', '5', '10', '20', '30'], width=4).pack(
             side='left', padx=px(SPACE['sp2']))
         self.label(pressbar, '次', color='faint', font=ui_font(TYPE['label'])).pack(side='left')
-        self.rule(inner).grid(row=11, column=0, columnspan=3, sticky='ew', pady=px(6))
+        self.rule(inner).grid(row=11, column=0, columnspan=3, sticky='ew', pady=px(4))
         maphead = tk.Frame(inner, bg=COLORS['card'])
         maphead.grid(row=12, column=0, columnspan=3, sticky='ew')
         maphead.grid_columnconfigure(1, weight=1)
@@ -348,7 +355,7 @@ class MonitorLayout(MonitorWidgets):
                                               command=self.set_scene_radius)
         self.scene_range_menu.grid(row=0, column=1, sticky='e')
         switches = tk.Frame(inner, bg=COLORS['card'])
-        switches.grid(row=13, column=0, columnspan=3, sticky='ew', pady=(px(SPACE['sp2']), 0))
+        switches.grid(row=13, column=0, columnspan=3, sticky='ew', pady=(px(SPACE['sp1']), 0))
         for index, (text, variable) in enumerate([
                 ('场景物体', self.scene_objects_var), ('山体与碰撞', self.scene_colliders_var),
                 ('河道与湖泊', self.scene_water_var), ('参考道路', self.scene_roads_var),
@@ -373,13 +380,13 @@ class MonitorLayout(MonitorWidgets):
     def build_xyz_block(self, inner, row):
         """Three HUD gauges instead of three look-alike input boxes."""
         self.xyz_row = tk.Frame(inner, bg=COLORS['card'])
-        self.xyz_row.grid(row=row, column=0, columnspan=3, sticky='ew', pady=(px(SPACE['sp2']), 0))
+        self.xyz_row.grid(row=row, column=0, columnspan=3, sticky='ew', pady=(px(SPACE['sp1']), 0))
         self.xyz_row.grid_columnconfigure((0, 1, 2), weight=1, uniform='coordinates')
         self.xyz_readouts = {}
         for column, (axis, color) in enumerate(zip('XYZ', ['red', 'green', 'blue'])):
             variable = DisplayValue(self.root, value='—')
             self.fields[axis] = variable
-            readout = HudReadout(self.xyz_row, axis, accent=color, variable=variable, height=58)
+            readout = HudReadout(self.xyz_row, axis, accent=color, variable=variable, height=46)
             readout.grid(row=0, column=column, sticky='nsew',
                          padx=(0, px(SPACE['sp1']) if column < 2 else 0))
             self.xyz_readouts[axis] = readout
@@ -387,7 +394,7 @@ class MonitorLayout(MonitorWidgets):
 
     def build_tool_card(self, inner, row):
         toolcard = tk.Frame(inner, bg=COLORS['card'])
-        toolcard.grid(row=row, column=0, columnspan=3, sticky='ew', pady=(px(SPACE['sp2']), 0))
+        toolcard.grid(row=row, column=0, columnspan=3, sticky='ew', pady=(px(SPACE['sp1']), 0))
         toolcard.grid_columnconfigure(1, weight=1)
         self.tool_title = self.label(toolcard, '手持工具耐久', font=ui_font(TYPE['label'], True))
         self.tool_title.grid(row=0, column=0, sticky='w', padx=(0, px(SPACE['sp2'])))
@@ -398,12 +405,12 @@ class MonitorLayout(MonitorWidgets):
         self.tool_progress.grid(row=1, column=0, columnspan=2, sticky='ew',
                                 pady=(px(SPACE['sp1']), px(2)))
         self.tool_hint = self.label(toolcard, '进入角色后自动检测当前手持工具', color='faint',
-                                    font=ui_font(TYPE['hint']), anchor='w', wraplength=px(260), justify='left')
-        self.tool_hint.grid(row=2, column=0, columnspan=2, sticky='ew')
+                                    font=ui_font(TYPE['hint']), anchor='w', wraplength=px(120), justify='left')
+        self.tool_hint.grid(row=2, column=0, sticky='ew')
         self.repair_auto_var = tk.BooleanVar(self.root, True)
         self.repair_auto_check = self.check(toolcard, '低于20%自动维修', self.repair_auto_var,
-                                            font=ui_font(TYPE['hint']), wraplength=px(260), justify='left')
-        self.repair_auto_check.grid(row=3, column=0, columnspan=2, sticky='w', pady=(px(SPACE['sp1']), 0))
+                                            font=ui_font(TYPE['hint']), wraplength=px(150), justify='left')
+        self.repair_auto_check.grid(row=2, column=1, sticky='e')
         self.label(toolcard, '角色体力', font=ui_font(TYPE['label'], True)).grid(
             row=4, column=0, sticky='w', pady=(px(SPACE['sp2']), 0))
         self.stamina_value = self.field(toolcard, 'stamina', '未读取', color='faint',

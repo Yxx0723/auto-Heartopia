@@ -26,12 +26,13 @@ def inventory():
     reader.names = dict(KNOWN_NAMES)
     reader.discover_names = Mock()
     fields = {'staticId': 16, 'netId': 20, 'count': 24, '_starRate': 28,
-              'isLock': 32, 'IsDisable': 33, 'functions': 40}
+              'isLock': 32, 'IsDisable': 33, 'entityType': 36, 'functions': 40}
     reader.offset = lambda ci, name, *args: fields[name]
     def row(item_id, count, locked=0, disabled=0, actions=1):
         data = bytearray(32)
         struct.pack_into('<iiii', data, 0, item_id, item_id+100000, count, 0)
         data[16], data[17] = locked, disabled
+        struct.pack_into('<i', data, 20, 45 if item_id == 45420 else 25)
         struct.pack_into('<Q', data, 24, actions)
         return ({}, bytes(data))
     rows = [row(40101, 12), row(40501, 0), row(40502, 30, locked=1),
@@ -49,6 +50,7 @@ def test_only_current_backpack_owned_unlocked_usable_eat_actions_are_candidates(
     reader.dictionary_rows.assert_called_once_with(25)  # Not warehouse storage.
     reader.memory.locator.snapshot.assert_called_once()
     assert all(f['edible'] is True for f in foods)
+    assert [f['prepared'] for f in foods] == [False, True]
 
 
 @pytest.mark.parametrize('reference', [(1, OWNER), (2, OWNER), (21, 'gameLevel')])

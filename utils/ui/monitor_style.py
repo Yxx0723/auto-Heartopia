@@ -1,7 +1,7 @@
 """Shared palette, category labels and view defaults; no widget construction."""
 from utils.ui.ui_tokens import COLORS as UI_COLORS
 
-# 场景符号色只属于地图，UI 色全部来自 ui_tokens。深空底 + 霓虹描边。
+# 场景符号色只属于地图，UI 色全部来自 ui_tokens。林地底 + 苔绿描边。
 COLORS = {**UI_COLORS,
           'shrub': '#0f3a34', 'shrub_outline': '#39ff9e',
           'blueberry': '#122c4d', 'blueberry_outline': '#4fc3ff',

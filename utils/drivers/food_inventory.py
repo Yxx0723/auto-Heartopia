@@ -20,6 +20,9 @@ KNOWN_NAMES = {40101: '苹果', 40201: '橘子', 40501: '蓝莓', 40502: '树莓
 # The pinned client's BackpackItemFunction.Eat, independently observed on
 # apples, berries, mushrooms and cooked foods. Learn/Use/Place are excluded.
 EAT_ACTION = 112
+# BackpackItem.entityType on this pinned client: cooked dishes (including
+# spring eggs and chef salad) are 45; fruit is 25, raw mushrooms are 97.
+PREPARED_FOOD_TYPE = 45
 
 
 class MemoryInfo(ctypes.Structure):
@@ -212,7 +215,8 @@ class FoodInventoryReader:
             functions = value('functions', 21, 'Q', 8)
             if functions and EAT_ACTION in self.actions(functions):
                 foods.append({'item_id': value('staticId'), 'net_id': value('netId', 9, 'I'),
-                              'count': count, 'star': value('_starRate'), 'edible': True})
+                              'count': count, 'star': value('_starRate'), 'edible': True,
+                              'prepared': value('entityType', 17) == PREPARED_FOOD_TYPE})
         foods = [food for food in foods if food['item_id'] not in blocked_ids]
         self.discover_names({f['item_id'] for f in foods}, check)
         if (not stable() or m.ref(bag, 'items') != items or m.ref(system, '_storages') != stores

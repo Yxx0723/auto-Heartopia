@@ -547,9 +547,9 @@ class HudReadout(tk.Canvas):
                               fill=COLORS['card_hi'], outline=COLORS['line'], width=1)
         self.create_text(7, 8, text=self._axis, fill=self._accent, anchor='nw',
                          font=mono_font(TYPE['micro'], True))
-        self.create_text(width - 7, height - 7, text='m', fill=COLORS['faint'], anchor='se',
+        self.create_text(width - 7, 8, text='m', fill=COLORS['faint'], anchor='ne',
                          font=mono_font(TYPE['micro']))
-        self._value_item = self.create_text(width / 2, height * .56, text=self.value(),
+        self._value_item = self.create_text(width / 2, height * .65, text=self.value(),
                                             fill=self._color, anchor='center',
                                             font=mono_font(TYPE['coord']))
 

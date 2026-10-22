@@ -11,7 +11,7 @@ a = Analysis([str(root / 'tools/coordinate_monitor.py')], pathex=[str(root)],
                          (str(root/'resources/monitor/axe_pick_icon.png'), 'monitor'),
                          (str(root/'resources/monitor/tool_tablet_marker.png'), 'monitor'),
                          *[(str(root/'resources/monitor'/name), 'monitor') for name in (
-                             'food_search_header.png', 'food_search_results.png', 'food_search_end.png', 'food_bag_marker.png', 'food_bag_close.png', 'food_eat_button.png', 'food_category.png', 'fruit_apple.png',
+                             'food_search_header.png', 'food_search_results.png', 'food_search_end.png', 'food_bag_marker.png', 'food_bag_close.png', 'food_eat_button.png', 'food_star.png', 'food_category.png', 'fruit_apple.png',
                              'fruit_blueberry.png', 'fruit_raspberry.png', 'fruit_orange.png')]], hiddenimports=[], hookspath=[],
     hooksconfig={}, runtime_hooks=[], excludes=[], noarchive=False, optimize=0)
 pyz = PYZ(a.pure)

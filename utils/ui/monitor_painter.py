@@ -17,7 +17,7 @@ from utils.ui.ui_tokens import CONTROL, TYPE
 
 
 class MonitorPainter:
-    # 提示槽固定高度：出现/消失不改变侧栏行高，避免整列跳动。
+    # Only actual notices occupy space; unchanged reads leave layout alone.
     NOTICE_STYLES = {'idle': ('card', 'card', 'faint'),
                      'info': ('card_hi', 'line', 'muted'),
                      'error': ('danger_bg', 'red', 'red')}
@@ -28,6 +28,7 @@ class MonitorPainter:
         if state == getattr(self, 'notice_state', None):
             return
         self.notice_state = state
+        self.notice_bar.grid() if text else self.notice_bar.grid_remove()
         bar_bg, border, fg = (COLORS[name] for name in self.NOTICE_STYLES[style])
         self.notice_bar.configure(bg=bar_bg, highlightbackground=border,
                                   highlightthickness=CONTROL['border'])

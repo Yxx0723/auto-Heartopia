@@ -1,7 +1,10 @@
 """Design tokens for the native monitor UI: colour, spacing, type and control size.
 
-The palette is a sci-fi HUD: near-black deep-space surfaces, neon cyan lines,
-monospaced numerals. Contrast targets live next to the palette so
+The palette is a forest HUD: near-black forest surfaces, moss-lime rules, warm
+amber for warnings, monospaced numerals. It keeps the same temperature as
+`map_presentation.MAP_STYLE` (v2 green cartography), so the window chrome and
+the map no longer meet as cyan-on-forest. Contrast targets live next to the
+palette so
 `tests/unit/test_ui_tokens.py` can fail loudly when a "cooler" colour makes
 text unreadable.
 """
@@ -12,38 +15,38 @@ from utils.ui.map_presentation import MAP_STYLE
 BASE_DPI = 96.0
 
 COLORS = {
-    'bg': '#04070c',           # window gutter, deeper than any panel
-    'card': '#070d16',         # HUD panel surface
-    'card_hi': '#0c1724',      # inputs, value chips, hovered surface
+    'bg': '#050a07',           # window gutter, deeper than any panel
+    'card': '#0a1410',         # HUD panel surface
+    'card_hi': '#112019',      # inputs, value chips, hovered surface
     'plot': MAP_STYLE['ground'],
-    'line': '#1b4353',         # 1px cyan-dim border on panels and fields
-    'line_strong': '#2a6579',  # section rules, map frame
-    'text': '#e6f8ff',
-    'muted': '#93b7c7',
-    'faint': '#7396a8',
-    'green': '#00e5ff',        # primary accent: neon cyan
-    'accent_dim': '#12697d',
-    'red': '#ff3366',          # alarm magenta-red
-    'blue': '#57c8ff',
-    'amber': '#ffb020',
-    'button': '#0a1420',
-    'button_hover': '#10283a',
-    'button_pressed': '#16384f',
-    'disabled_text': '#55707f',
-    'danger_bg': '#26060f',
-    'primary_text': '#04121b',
-    'primary_hover': '#5cf0ff',
-    'primary_pressed': '#00bfd6',
+    'line': '#22452f',         # 1px moss-dim border on panels and fields
+    'line_strong': '#356b4c',  # section rules, map frame
+    'text': '#e9f6ea',
+    'muted': '#9dbaa7',
+    'faint': '#7fa38c',
+    'green': '#8fe36a',        # primary accent: moss lime
+    'accent_dim': '#2b6b46',
+    'red': '#ff6b6b',          # alarm coral-red
+    'blue': '#6fd7b0',         # secondary info: mint, keeps the forest cast
+    'amber': '#f0c05a',
+    'button': '#0d1a13',
+    'button_hover': '#16301f',
+    'button_pressed': '#1e4029',
+    'disabled_text': '#5e7d6a',
+    'danger_bg': '#1f0b0b',
+    'primary_text': '#07120a',
+    'primary_hover': '#a8f07d',
+    'primary_pressed': '#6fc94f',
     # HUD-only shades; derived by hand so no widget needs a second palette.
-    'glow': '#00e5ff',         # lit edge of a focused control
-    'glow_soft': '#0c5a69',    # one step out from the lit edge
-    'glow_faint': '#0a2c38',   # outermost halo
-    'bevel_hi': '#1c5867',     # top-left bevel face
-    'bevel_lo': '#08151e',     # bottom-right bevel face
-    'bracket': '#16505f',      # viewfinder corner marks
-    'track': '#0a1622',        # empty segment of a bar
-    'scan': '#0b1d28',         # scanline / radar fill
-    'ok': '#39ff14',           # fluorescent green for "live" pulses
+    'glow': '#8fe36a',         # lit edge of a focused control
+    'glow_soft': '#2a6b45',    # one step out from the lit edge
+    'glow_faint': '#14351f',   # outermost halo
+    'bevel_hi': '#25503a',     # top-left bevel face
+    'bevel_lo': '#081209',     # bottom-right bevel face
+    'bracket': '#1f4a34',      # viewfinder corner marks
+    'track': '#0c1a13',        # empty segment of a bar
+    'scan': '#0b1a12',         # scanline / radar fill
+    'ok': '#7dff9b',           # fluorescent green for "live" pulses
 }
 
 # 前景令牌 -> 相对 surface 的最低对比度（WCAG 比例）

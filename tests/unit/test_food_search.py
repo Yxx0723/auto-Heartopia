@@ -70,6 +70,7 @@ def search_game(available=('苹果',)):
     menu.locate = lambda picture: menu.bag_in(picture)
     menu.available = lambda picture, bag: ([{'x': 4, 'y': 4, 'food': state['query']}] if state['query'] in available else [])
     menu.ready = lambda picture: {'x': 5, 'y': 5, 'food': state['query']} if state['selected'] else None
+    menu.detail_stars = lambda picture, button: state.get('star', 0)
     def click(target, device, check, wait):
         check()
         if target['x'] == 2:
@@ -144,6 +145,130 @@ def test_random_selection_uses_only_actual_owned_food_and_no_fixed_fruit_order(m
     monkeypatch.setattr('utils.vision.food_menu.random.sample', lambda names, count: list(reversed(names)))
     target = menu.prepare(window, Mock(), Mock(), Mock(), device, inventory=stock('苹果', '蓝莓'))
     assert target['food'] == '蓝莓' and state['queries'] == ['蓝莓'] and not state['eaten']
+
+
+def test_prepared_meals_are_the_only_search_candidates_while_in_stock(monkeypatch):
+    menu, window, device, state = search_game(available=('苹果', '蓝莓'))
+    # This mock exercises priority independent of icon recognition; the
+    # inventory reader separately proves the actual cooked-food type.
+    items = stock('苹果', '蓝莓')
+    items[1]['prepared'] = True
+    items[1]['star'] = 0
+    seen = []
+    def choose(names, count):
+        seen.append(list(names))
+        return list(names)
+    monkeypatch.setattr('utils.vision.food_menu.random.sample', choose)
+    target = menu.prepare(window, Mock(), Mock(), Mock(), device, inventory=items)
+    assert target['food'] == '蓝莓' and seen == [['蓝莓']] and state['queries'] == ['蓝莓']
+
+
+def test_depleted_or_locked_prepared_meals_fall_back_to_other_food():
+    menu, window, device, state = search_game()
+    items = [*stock('苹果'), {'name':'温泉蛋', 'edible':True, 'prepared':True, 'count':0},
+             {'name':'大厨特制沙拉', 'edible':True, 'prepared':True, 'count':2, 'locked':True}]
+    target = menu.prepare(window, Mock(), Mock(), Mock(), device, inventory=items)
+    assert target['food'] == '苹果' and state['queries'] == ['苹果']
+
+
+def test_unconfirmed_prepared_meal_does_not_fall_through_to_raw_food():
+    menu, window, device, state = search_game(available=('苹果',))
+    items = stock('苹果', '蓝莓')
+    items[1]['prepared'] = True
+    items[1]['star'] = 0
+    with pytest.raises(ValueError, match='食用按钮未确认'):
+        menu.prepare(window, Mock(), Mock(), Mock(), device, inventory=items)
+    assert state['queries'] == ['蓝莓'] and not state['eaten']
+
+
+def test_lowest_star_prepared_food_wins_over_other_dishes_and_raw_food(monkeypatch):
+    menu, window, device, state = search_game(available=('苹果', '蓝莓', '树莓'))
+    items = stock('苹果', '蓝莓', '树莓')
+    items[0].update(prepared=True, star=3)
+    items[1].update(prepared=True, star=1)
+    state['star'] = 1
+    seen = []
+    monkeypatch.setattr('utils.vision.food_menu.random.sample', lambda names, count: seen.append(names) or names)
+    target = menu.prepare(window, Mock(), Mock(), Mock(), device, inventory=items)
+    assert target['food'] == '蓝莓' and target['star'] == 1
+    assert seen == [['蓝莓']] and state['queries'] == ['蓝莓'] and not state['eaten']
+
+
+def test_equal_low_star_dishes_remain_random_and_depleted_low_star_is_excluded(monkeypatch):
+    menu, window, device, state = search_game(available=('苹果', '蓝莓'))
+    items = stock('苹果', '蓝莓')
+    for item in items:
+        item.update(prepared=True, star=2)
+    items.append(dict(name='温泉蛋', prepared=True, star=1, count=0, edible=True))
+    state['star'] = 2
+    seen = []
+    monkeypatch.setattr('utils.vision.food_menu.random.sample', lambda names, count: seen.append(names) or list(reversed(names)))
+    target = menu.prepare(window, Mock(), Mock(), Mock(), device, inventory=items)
+    assert target['food'] == '蓝莓' and seen == [['苹果', '蓝莓']] and not state['eaten']
+
+
+@pytest.mark.parametrize('star', [None, -1, 6, True, '1'])
+def test_unknown_or_invalid_prepared_quality_retries_without_search_or_fallback(star):
+    menu, window, device, state = search_game()
+    items = [*stock('苹果'), dict(name='温泉蛋', prepared=True, star=star, count=2, edible=True)]
+    with pytest.raises(ValueError, match='星级未确认'):
+        menu.prepare(window, Mock(), Mock(), Mock(), device, inventory=items)
+    assert state['queries'] == [] and not state['eaten']
+
+
+@pytest.mark.parametrize('width', [778, 1024, 1366, 1920])
+@pytest.mark.parametrize('stars', [1, 2, 3, 5])
+def test_actual_detail_header_counts_quality_at_multiple_resolutions(width, stars):
+    menu = FruitMenu(ROOT/'food_bag_marker.png')
+    picture = Image.open(FIXTURES/'backpack_one_star_egg.png').convert('RGB')
+    # The first star is the real user-confirmed one-star egg capture. Extra
+    # real glyphs exercise adjacent stars without depending on grid sorting.
+    glyph = picture.crop((830, 99, 845, 114))
+    for index in range(1, stars):
+        picture.paste(glyph, (830+17*index, 99))
+    picture = picture.resize((width, round(picture.height*width/picture.width)))
+    frame = menu.frame(picture)
+    buttons = menu.matches(frame, menu.eat[:, 38:74], menu.scales(frame), minimum=.88)
+    assert buttons and menu.detail_stars(picture, buttons[0]) == stars
+
+
+def test_zero_stars_requires_real_header_and_ambiguous_gold_is_not_zero():
+    menu = FruitMenu(ROOT/'food_bag_marker.png')
+    picture = Image.open(FIXTURES/'backpack_search_detail.png').convert('RGB')
+    frame = menu.frame(picture)
+    button = menu.matches(frame, menu.eat[:, 38:74], menu.scales(frame), minimum=.88)[0]
+    assert menu.detail_stars(picture, button) == 0
+    picture.paste('#f6d73f', (418, 49, 428, 59))
+    assert menu.detail_stars(picture, button) is None
+    picture.paste('#333333', (322, 12, 524, 80))
+    assert menu.detail_stars(picture, button) is None
+
+
+@pytest.mark.parametrize('observed', [(3, 2, 1), (3, 2, None), (3, 2, 2), (3, 3, 2, 2, 2, 1)])
+def test_same_name_high_star_cells_are_skipped_and_only_confirmed_low_star_returns(observed):
+    menu, window, device, state = search_game(available=('温泉蛋',))
+    class Frame(dict):
+        shape = (437, 778, 3)
+    menu.frame = lambda p: Frame(p)
+    menu.bag_in = lambda p: dict(x=730, y=50, scale=1., search_results=True) if p['page']=='results' else None
+    click = menu.use
+    def use(target, *args):
+        if target.get('food') == '温泉蛋':
+            state['selected'] = True
+            state['slot'] = round((target['x']-519)/54)+5*round((target['y']-96)/54)
+        else:
+            click(target, *args)
+    menu.use = use
+    menu.ready_food = lambda p, food, cell: dict(x=5, y=5, food=food, scale=1.) if state['selected'] else None
+    menu.detail_stars = lambda p, b: observed[state['slot']] if state['slot'] < len(observed) else None
+    items = [dict(name='温泉蛋', prepared=True, star=star, count=2, edible=True) for star in (3, 2, 1)]
+    if observed[-1] == 1:
+        target = menu.prepare(window, Mock(), Mock(), Mock(), device, inventory=items)
+        assert target['star'] == 1 and state['slot'] == len(observed)-1
+    else:
+        with pytest.raises(ValueError, match='未确认'):
+            menu.prepare(window, Mock(), Mock(), Mock(), device, inventory=items)
+    assert state['queries'] == ['温泉蛋'] and not state['eaten']
 
 
 def test_generic_owned_food_is_searched_then_prepared_without_requiring_a_fruit_icon():

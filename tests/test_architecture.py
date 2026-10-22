@@ -350,7 +350,7 @@ class TestArchiveBoundary:
     def test_source_and_build_use_current_resource_directory(self):
         resources = REPO_ROOT / 'resources' / 'monitor'
         assert (resources / 'profile.json').is_file()
-        assert len(list(resources.glob('*.png'))) == 15
+        assert len(list(resources.glob('*.png'))) == 16
         for name in ('utils/ui/native_coordinate_monitor.py', 'packaging/HeartopiaMonitor.spec'):
             source = (REPO_ROOT / name).read_text(encoding='utf-8')
             assert 'webui' not in source

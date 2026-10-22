@@ -30,6 +30,7 @@ class FruitMenu(RepairBoxMenu):
         self.search_header = read('food_search_header.png')
         self.search_results = read('food_search_results.png')
         self.search_end = read('food_search_end.png')
+        self.star_icon = read('food_star.png')
         self.fruits = {key: read(f'fruit_{key}.png') for key in FRUITS}
         if self.bag.shape[:2] != (28, 55) or self.close_icon.shape[:2] != (21, 21) or self.eat.shape[:2] != (18, 112) \
                 or self.category.shape[:2] != (23, 23) or any(t.shape[:2] != (31, 31) for t in self.fruits.values()):
@@ -301,13 +302,77 @@ class FruitMenu(RepairBoxMenu):
             raise ValueError('食用按钮位置存在歧义，未食用')
         return dict(best, food=food)
 
+    def detail_stars(self, picture, button):
+        """Count stars in the confirmed item's cream header, not grid order.
+
+        Same-name search results can contain several quality variants. Require
+        the actual detail header and reject ambiguous/unmatched gold marks.
+        """
+        frame = self.frame(picture)
+        x, y, scale = button['x'], button['y'], button['scale']
+        left, right = max(0, round(x-100*scale)), min(frame.shape[1], round(x+140*scale))
+        top, bottom = max(0, round(y-185*scale)), max(0, round(y-30*scale))
+        roi = frame[top:bottom, left:right]
+        if not roi.size:
+            return None
+        blue, green, red = cv2.split(roi.astype(np.int16))
+        cream = ((red >= 225) & (green >= 205) & (green <= 245) & (blue >= 175)
+                 & (blue <= 220) & (red-green > 5) & (green-blue > 10)).astype(np.uint8)
+        _, _, stats, _ = cv2.connectedComponentsWithStats(cream)
+        headers = [r for r in stats[1:] if 110*scale <= r[2] <= 190*scale
+                   and 15*scale <= r[3] <= 65*scale and r[4] >= 1800*scale**2]
+        if len(headers) != 1:
+            return None
+        hx, hy, width, height, _ = headers[0]
+        band = roi[max(0, round(hy+height-10*scale)):min(roi.shape[0], round(hy+height+10*scale)),
+                   round(hx+5*scale):round(hx+width-5*scale)]
+        if not band.size:
+            return None
+        hsv = cv2.cvtColor(band, cv2.COLOR_BGR2HSV)
+        gold = (hsv[:, :, 0] >= 15) & (hsv[:, :, 0] <= 40) & (hsv[:, :, 1] >= 90) & (hsv[:, :, 2] >= 170)
+        centers = []
+        # The verified star capture is 15px at 1366px client width.
+        for factor in (1., .96, 1.04):
+            size = max(5, round(15*scale/(1366/778)*factor))
+            if size > min(band.shape[:2]):
+                continue
+            icon = cv2.resize(self.star_icon, (size, size), interpolation=cv2.INTER_AREA)
+            scores = cv2.matchTemplate(band, icon, cv2.TM_CCOEFF_NORMED)
+            for _ in range(6):
+                _, score, _, (sx, sy) = cv2.minMaxLoc(scores)
+                if score < .82:
+                    break
+                center = (sx+size/2, sy+size/2)
+                if not any(abs(center[0]-cx) < size*.65 and abs(center[1]-cy) < size*.65 for cx, cy in centers):
+                    centers.append(center)
+                scores[max(0, sy-size//2):sy+size//2+1, max(0, sx-size//2):sx+size//2+1] = -1
+        if len(centers) > 5 or (centers and max(cy for _, cy in centers)-min(cy for _, cy in centers) > 3*scale):
+            return None
+        covered = np.zeros(gold.shape, dtype=bool)
+        for cx, cy in centers:
+            radius = round(5*scale)
+            covered[max(0, round(cy)-radius):round(cy)+radius+1,
+                    max(0, round(cx)-radius):round(cx)+radius+1] = True
+        if np.count_nonzero(gold & ~covered) > max(3, 3*scale**2):
+            return None
+        return len(centers)
+
     def prepare(self, window, tap, wait, check, device, inventory=None, query_check=None):
         # Inventory is read before any search. Never invent ownership from a
         # query, recipe card, warehouse item or a previously cached quantity.
-        foods = sorted({item['name'] for item in (inventory or []) if item.get('edible') is True
+        candidates = [item for item in (inventory or []) if item.get('edible') is True
                         and item.get('count', 0) > 0 and not item.get('locked')
                         and isinstance(item.get('name'), str) and 1 <= len(item['name']) <= 32
-                        and not any(ord(c) < 32 for c in item['name'])})
+                        and not any(ord(c) < 32 for c in item['name'])]
+        prepared = [item for item in candidates if item.get('prepared') is True]
+        if prepared:
+            if any(type(item.get('star')) is not int or not 0 <= item['star'] <= 5 for item in prepared):
+                raise ValueError('成品料理星级未确认，稍后自动重试')
+            lowest_star = min(item['star'] for item in prepared)
+            prepared = [item for item in prepared if item['star'] == lowest_star]
+        # Randomize only within the lowest stocked quality tier. Search/UI
+        # uncertainty must retry rather than consuming higher-star dishes.
+        foods = sorted({item['name'] for item in (prepared or candidates)})
         if not foods:
             raise ValueError('随身背包内没有确认可食用的食物')
         for food in random.sample(foods, len(foods)):
@@ -346,11 +411,13 @@ class FruitMenu(RepairBoxMenu):
                 cells = [f for f in self.available(frame, bag) if f['food'] == food][:1]
             else:
                 scale = bag['scale']
-                # First row of filtered results, anchored to the detected
-                # header, never to desktop resolution. Recipes are rejected
+                # Visible filtered rows, anchored to the detected header,
+                # never to desktop resolution. Quality variants can span more
+                # than one row. Recipes are rejected
                 # by the selected outline + actual 食用 action below.
-                cells = [dict(x=bag['x']+(54*i-211)*scale, y=bag['y']+46*scale,
-                              scale=scale, food=food) for i in range(5)]
+                rows = max(0, min(12, int((frame.shape[0]-55*scale-bag['y']-46*scale)/(54*scale))+1))
+                cells = [dict(x=bag['x']+(54*i-211)*scale, y=bag['y']+(46+54*j)*scale,
+                              scale=scale, food=food) for j in range(rows) for i in range(5)]
                 cells = [c for c in cells if 0 < c['x'] < frame.shape[1] and 0 < c['y'] < frame.shape[0]]
             for cell in cells:
                 self.click_control(cell, device, check, wait)
@@ -362,6 +429,14 @@ class FruitMenu(RepairBoxMenu):
                 second = self.ready_food(window.snapshot(), food, cell)
                 if first is not None and second is not None and abs(first['x']-second['x']) <= 3 \
                         and abs(first['y']-second['y']) <= 3:
+                    if prepared:
+                        first_star = self.detail_stars(window.snapshot(), second)
+                        wait(.12)
+                        check()
+                        second_star = self.detail_stars(window.snapshot(), second)
+                        if first_star != lowest_star or second_star != lowest_star:
+                            continue
+                        return dict(second, star=lowest_star)
                     return second
         raise ValueError('背包已有食物的搜索结果或食用按钮未确认，未食用')
 

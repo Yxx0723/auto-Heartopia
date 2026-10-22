@@ -124,12 +124,15 @@ class SustainActions:
                 inventory_reader = getattr(self.reader, 'food_inventory_snapshot', None)
                 if callable(inventory_reader):
                     inventory = inventory_reader(check=self.guard)
-                    names = sorted({item['name'] for item in inventory})
-                    self.report('eating', f'背包可食用食物 {len(names)} 种，随机选择并搜索 · F6暂停 · F9停止',
+                    prepared = [item for item in inventory if item.get('prepared') is True]
+                    names = sorted({item['name'] for item in (prepared or inventory)})
+                    choice = '成品料理（优先低星）' if prepared else '其他可食用食物'
+                    self.report('eating', f'背包可用{choice} {len(names)} 种，随机选择并搜索 · F6暂停 · F9停止',
                                 waypoint=index+1, waypoint_count=total)
                     target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device,
                                                inventory=inventory, query_check=getattr(self.reader, 'food_search_query', None))
-                    self.report('eating', f'正在食用{target["food"]}，体力达到100后继续路线 · F6暂停 · F9停止',
+                    quality = f'（{target["star"]}星）' if 'star' in target else ''
+                    self.report('eating', f'正在食用{target["food"]}{quality}，体力达到100后继续路线 · F6暂停 · F9停止',
                                 waypoint=index+1, waypoint_count=total, food_name=target['food'])
                 else:  # Injected simulation devices keep their existing contract.
                     target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device)
