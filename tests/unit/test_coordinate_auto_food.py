@@ -96,7 +96,7 @@ def test_stop_during_food_use_releases_keys_and_does_not_move():
 
 
 @pytest.mark.parametrize('fault', ['no_effect', 'unavailable', 'no_fruit', 'close_failed'])
-def test_food_failure_pauses_with_reason_without_repeated_consumption_or_movement(fault):
+def test_food_failure_retries_with_reason_without_repeated_consumption_or_movement(fault):
     game, food = HungryGame(26), None
     game.stop_at = 12.
     food = Fruit(game)
@@ -110,7 +110,8 @@ def test_food_failure_pauses_with_reason_without_repeated_consumption_or_movemen
     result, food, statuses = run(game, food)
     assert not result and len(food.uses) <= 1 and not game.keys
     assert game.position == [0., 0., 0.]
-    assert any(s == 'food_paused' for s, _, _ in statuses)
+    assert any('重试' in message for _,message,_ in statuses)
+    assert not any(s == 'food_paused' for s,_,_ in statuses)
 
 
 def test_low_durability_and_hunger_are_both_serviced_before_movement():
@@ -213,7 +214,7 @@ def test_healthy_start_and_resume_close_leftover_backpack_before_movement(pause)
     assert food.closes == (2 if pause else 1)
 
 
-def test_leftover_backpack_that_cannot_close_pauses_before_moving_or_eating_again():
+def test_leftover_backpack_that_cannot_close_retries_before_moving_or_eating_again():
     game, food = HungryGame(37), None
     game.stop_at = 1.
     food = Fruit(game)
@@ -225,7 +226,8 @@ def test_leftover_backpack_that_cannot_close_pauses_before_moving_or_eating_agai
     result, food, statuses = run(game, food)
     assert not result and not food.uses and not game.keys
     assert game.position == [0., 0., 0.]
-    assert any(s == 'food_paused' and '关闭背包未完成' in text for s, text, _ in statuses)
+    assert any(s == 'eating' and '关闭背包未完成' in text for s, text, _ in statuses)
+    assert not any(s == 'food_paused' for s,_,_ in statuses)
 
 
 def test_inventory_is_refreshed_each_meal_and_depleted_dishes_fall_back_to_fruit():
@@ -239,7 +241,7 @@ def test_inventory_is_refreshed_each_meal_and_depleted_dishes_fall_back_to_fruit
             items.append({'name': '温泉蛋', 'edible': True, 'prepared': True, 'star': 1, 'count': 2-len(food.uses)})
         inventories.append(items)
         return items
-    def prepare(window, tap, wait, check, device, inventory, query_check):
+    def prepare(window, tap, wait, check, device, inventory, query_check, fallback_mode='fruit'):
         check()
         meals = [item for item in inventory if item.get('prepared')]
         target = (meals or inventory)[0]

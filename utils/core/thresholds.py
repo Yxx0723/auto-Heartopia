@@ -448,3 +448,11 @@ COORD_MEMORY_CORRIDOR_DISTANCE = .6
 COORD_MEMORY_CORRIDOR_HEIGHT = .15
 
 COORD_MEMORY_ENTRY_HEIGHT = .35
+
+# Food UI/read retries: engineering backoff, not measured server response times.
+COORD_FOOD_RETRY_SECONDS = 1.
+COORD_FOOD_RETRY_MAX_SECONDS = 8.
+COORD_FOOD_RETRY_POLL_SECONDS = .2
+
+# Bounded filtered inventory paging; engineering UI guard, not game capacity.
+COORD_FOOD_SEARCH_MAX_PAGES = 4

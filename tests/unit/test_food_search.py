@@ -71,6 +71,8 @@ def search_game(available=('苹果',)):
     menu.available = lambda picture, bag: ([{'x': 4, 'y': 4, 'food': state['query']}] if state['query'] in available else [])
     menu.ready = lambda picture: {'x': 5, 'y': 5, 'food': state['query']} if state['selected'] else None
     menu.detail_stars = lambda picture, button: state.get('star', 0)
+    menu.selected = lambda picture, cell: picture['selected']
+    menu.page_key = lambda frame, bag: (state.get('page_no',0),state['query'])
     def click(target, device, check, wait):
         check()
         if target['x'] == 2:

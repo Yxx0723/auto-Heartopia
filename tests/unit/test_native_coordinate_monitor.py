@@ -648,7 +648,7 @@ def test_nearest_mode_is_passed_to_worker_without_selecting_from_ui_cached_posit
     assert window.playback.start.call_args.kwargs == {'start_mode': 'nearest',
                                                      'recovery_attempts': 3, 'jump_on_recovery': False,
                                                      'collect_wait_seconds': 3., 'loop_count': 1, 'auto_navigate': True,
-                                                     'auto_repair': True, 'auto_eat': True,
+                                                     'auto_repair': True, 'auto_eat': True, 'food_fallback': 'fruit',
                                                      'route_path': window.point_store.path, 'remember_paths': True}
 
 
@@ -980,3 +980,12 @@ def test_export_walk_trail_without_data_does_not_open_save_dialog(monkeypatch):
 
     info.assert_called_once()
     picker.assert_not_called()
+
+
+@pytest.mark.parametrize('label,mode',[('仅水果','fruit'),('水果和菌类','fruit_mushroom'),('全部可食用','all')])
+def test_configured_fallback_food_scope_reaches_playback_worker(tmp_path,label,mode):
+    window=capture_window(tmp_path)
+    window.save_point();window.view.status['pid']=77
+    window.food_fallback_var=Mock();window.food_fallback_var.get.return_value=label
+    window.start_playback()
+    assert window.playback.start.call_args.kwargs['food_fallback']==mode

@@ -3,6 +3,7 @@ import math
 from pathlib import Path
 
 from utils.core import thresholds as policy
+from utils.core.food_policy import FALLBACK_MODES, confirm_inventory
 from utils.core.coordinate_points import (choose_start_index, ordered_waypoints, validate_collect_wait,
                                           validate_loop_count)
 from utils.core.coordinate_navigation import NavigationWait, ObstacleMap
@@ -112,6 +113,9 @@ class _Follower:
         self.meal_before = self.meal_deadline = 0.
         self.meal_settle_until = 0.
         self.food_menu_checked = False
+        self.food_retry_at = 0.
+        self.food_retry_count = 0
+        self.food_fallback = 'fruit'
         self.repair_menu_pending = False
         self.special_progress = None
         self.scene_refresh = scene_refresh
@@ -660,27 +664,55 @@ class _Follower:
                             waypoint=index+1, waypoint_count=total)
             return bool(closed)
         except (ValueError, OSError) as exc:
-            self.repair_pause(f'关闭背包未完成：{exc}', index, total, state='food_paused')
+            return self.food_retry(f'关闭背包未完成：{exc}', index, total)
         finally:
             self.release()
             self.navigation_waiting = False
             self.last_tick = self.clock.monotonic()
 
+    def food_retry(self, reason, index, total):
+        self.release()
+        self.food_retry_count += 1
+        delay = min(policy.COORD_FOOD_RETRY_MAX_SECONDS,
+                    policy.COORD_FOOD_RETRY_SECONDS * 2**min(self.food_retry_count-1, 3))
+        self.food_retry_at = self.clock.monotonic()+delay
+        self.report('eating', f'自动进食等待重试：{reason} · {delay:g}秒后再核对 · F6暂停 · F9停止',
+                    waypoint=index+1, waypoint_count=total, food_retry_count=self.food_retry_count)
+        return True
+
+    def food_retry_wait(self):
+        self.release()
+        self.navigation_waiting = True
+        try:
+            self.wait(min(policy.COORD_FOOD_RETRY_POLL_SECONDS,
+                          max(0.,self.food_retry_at-self.clock.monotonic())))
+        finally:
+            self.navigation_waiting = False
+            self.last_tick = self.clock.monotonic()
+        return True
+
     def maintain_stamina(self, index, total):
         if self.food is None:
             return False
+        if self.clock.monotonic()<self.food_retry_at:
+            return self.food_retry_wait()
         if self.clock.monotonic()-self.last_stamina_check >= 1.:
             self.read_stamina()
         status = self.stamina_status
         if not usable_stamina(status):
             self.release()
-            for _ in range(3):
-                self.wait(.1)
-                status = self.read_stamina()
-                if usable_stamina(status):
-                    break
+            self.navigation_waiting = True
+            try:
+                for _ in range(3):
+                    self.wait(.1)
+                    status = self.read_stamina()
+                    if usable_stamina(status):
+                        break
+            finally:
+                self.navigation_waiting = False
+                self.last_tick = self.clock.monotonic()
         if not usable_stamina(status):
-            self.repair_pause('暂时无法读取本地角色体力，请等待读取恢复', index, total, state='food_paused')
+            return self.food_retry('暂时无法读取本地角色体力，等待读取恢复', index, total)
         if status['current'] < 30:
             self.meal_refilling = True
         if status['current'] >= 30 and not self.meal_refilling and not self.meal_pending and not self.meal_menu_pending:
@@ -707,11 +739,18 @@ class _Follower:
                     inventory = inventory_reader(check=self.guard)
                     target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device,
                                                inventory=inventory,
-                                               query_check=getattr(self.reader, 'food_search_query', None))
+                                               query_check=getattr(self.reader, 'food_search_query', None),
+                                               fallback_mode=self.food_fallback)
                     self.report('eating', f'正在食用{target["food"]}，目标体力100 · F6暂停 · F9停止',
                                 waypoint=index+1, waypoint_count=total, food_name=target['food'])
                 else:  # Simulation adapters retain their previous contract.
                     target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device)
+                confirm = getattr(self.food, 'confirm', None)
+                if callable(confirm) and callable(inventory_reader):
+                    fresh = inventory_reader(check=self.guard)
+                    confirm_inventory(target, fresh, self.food_fallback)
+                    target = confirm(target, self.window, self.wait, self.guard,
+                                     query_check=getattr(self.reader, 'food_search_query', None))
                 status = self.read_stamina()
                 if not usable_stamina(status):
                     raise ValueError('食用前无法确认体力')
@@ -732,9 +771,9 @@ class _Follower:
             if not usable_stamina(status):
                 raise ValueError('食用后暂时无法确认体力，请等待恢复后继续')
             if self.meal_pending and status['current'] <= self.meal_before:
-                self.meal_pending = False
-                raise ValueError('食用后体力未增加，请检查食物数量或食用动作')
+                raise ValueError('上次食用结果未确认，等待读数恢复；不会重复点击食用')
             if self.meal_pending:
+                self.food_retry_count, self.food_retry_at = 0, 0.
                 self.meal_pending = False
                 self.meal_settle_until = self.clock.monotonic()+2.
                 self.wait(2.)  # Keep the confirmed eating animation out of movement/calibration.
@@ -742,6 +781,7 @@ class _Follower:
                 if not usable_stamina(status):
                     raise ValueError('体力正在更新，请稍后继续')
             if status['current'] >= 100:
+                self.food_retry_count, self.food_retry_at = 0, 0.
                 self.meal_refilling = False
                 if self.meal_menu_pending:
                     self.food.close_menu(self.window, self.repair_tap, self.guard, self.wait, self.device)
@@ -751,7 +791,7 @@ class _Follower:
                             waypoint=index+1, waypoint_count=total)
             return True
         except (ValueError, OSError) as exc:
-            self.repair_pause(f'自动进食未完成：{exc}', index, total, state='food_paused')
+            return self.food_retry(f'自动进食未完成：{exc}', index, total)
         finally:
             self.release()
             self.navigation_waiting = False
@@ -1335,9 +1375,11 @@ def drive_route(data, reader_factory, device, window, controls, report, clock=Pr
 def drive_points(data, size, reader_factory, device, window, controls, report, clock=PreciseClock, start_mode='first',
                  recovery_attempts=0, jump_on_recovery=False, collect_wait_seconds=None,
                  loop_count=policy.COORD_PLAYBACK_DEFAULT_LOOPS, continuous_recovery=False, navigator=None,
-                 repair_box=None, tool_selector=None, food=None, scene_refresh=None):
+                 repair_box=None, tool_selector=None, food=None, scene_refresh=None, food_fallback='fruit'):
     reader = None
     try:
+        if food_fallback not in FALLBACK_MODES:
+            raise ValueError('无料理时的食物范围无效')
         points = ordered_waypoints(data)
         validate_loop_count(loop_count)
         validate_recovery_options(recovery_attempts, jump_on_recovery)
@@ -1359,12 +1401,14 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
             clock.sleep(.01)
         reader = reader_factory()
         config = {'duration': 0., 'client_size': list(size)}
-        return _Follower(config, reader, device, window, controls, report, clock,
+        follower = _Follower(config, reader, device, window, controls, report, clock,
                          waypoints=points, start_mode=start_mode, recovery_attempts=recovery_attempts,
                          jump_on_recovery=jump_on_recovery, collect_wait_seconds=collect_wait_seconds,
                          loop_count=loop_count, continuous_recovery=continuous_recovery, navigator=navigator,
                          repair_box=repair_box, tool_selector=tool_selector, food=food,
-                         scene_refresh=scene_refresh).follow()
+                         scene_refresh=scene_refresh)
+        follower.food_fallback = food_fallback
+        return follower.follow()
     except _Stopped:
         return False
     finally:

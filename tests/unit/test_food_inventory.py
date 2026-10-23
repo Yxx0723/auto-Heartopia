@@ -68,14 +68,17 @@ def test_inventory_changes_during_read_are_retried_instead_of_publishing_stale_f
         reader.snapshot()
 
 
-def test_locked_variant_excludes_other_stacks_of_the_same_searchable_item():
+def test_locked_variant_marks_only_its_own_quality_as_ambiguous():
     reader, _ = inventory()
     rows, stable = reader.dictionary_rows.return_value
     item_type, apple = rows[0]
     locked = bytearray(apple)
     locked[16] = 1
     reader.dictionary_rows.return_value = ([*rows, (item_type, bytes(locked))], stable)
-    assert [f['name'] for f in reader.snapshot()] == ['温泉蛋']
+    foods = reader.snapshot()
+    assert [f['name'] for f in foods] == ['苹果','温泉蛋']
+    assert foods[0]['ambiguous_locked_variant'] is True
+    assert foods[1]['ambiguous_locked_variant'] is False
 
 
 def test_known_name_catalog_does_not_scan_memory_or_establish_ownership():
@@ -90,3 +93,16 @@ def test_duplicate_backpack_or_missing_backpack_is_not_a_usable_inventory():
         reader.meta.dictionary = lambda *args, **kw: stores
         with pytest.raises(ValueError, match='背包尚未就绪'):
             reader.snapshot()
+
+
+def test_locked_other_star_does_not_remove_owned_unlocked_dish():
+    reader,_=inventory()
+    rows,stable=reader.dictionary_rows.return_value
+    ci,egg=rows[-1]
+    protected=bytearray(egg);protected[16]=1
+    struct.pack_into('<i',protected,12,1)
+    struct.pack_into('<I',protected,4,999999)
+    reader.dictionary_rows.return_value=([*rows,(ci,bytes(protected))],stable)
+    egg=next(i for i in reader.snapshot() if i['item_id']==45420)
+    assert egg['star']==0 and egg['verify_star'] is True
+    assert egg['ambiguous_locked_variant'] is False

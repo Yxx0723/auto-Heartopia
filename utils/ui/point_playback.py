@@ -13,6 +13,7 @@ from utils.core import thresholds as policy
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.drivers.playback_history import PlaybackHistory, RecordingPosition
+from utils.core.food_policy import FALLBACK_MODES
 from utils.drivers.point_game_window import PointGameWindow
 from utils.drivers.timeline_hotkeys import PlaybackControls
 from utils.drivers.town_window import TimelineInput
@@ -45,6 +46,7 @@ class PointPlayback:
         self.repair_factory = repair_factory
         self.tool_factory = tool_factory
         self.food_factory = food_factory
+        self.food_fallback = 'fruit'
         self.wall_clock = wall_clock or (lambda: datetime.now().astimezone())
         self.navigation_path = []
         self.path_memory = None
@@ -105,7 +107,7 @@ class PointPlayback:
     def start(self, data, pid, start_mode='first', recovery_attempts=policy.COORD_RECOVERY_DEFAULT_ATTEMPTS,
               jump_on_recovery=True, collect_wait_seconds=policy.COORD_COLLECTION_DEFAULT_WAIT,
               loop_count=policy.COORD_PLAYBACK_DEFAULT_LOOPS, auto_navigate=False, auto_repair=False, auto_eat=False,
-              route_path=None, remember_paths=True):
+              route_path=None, remember_paths=True, food_fallback='fruit'):
         if self.closed or self.active:
             raise ValueError('已有点位回放正在运行，请先停止。')
         if self.runner is None:
@@ -121,6 +123,9 @@ class PointPlayback:
             raise ValueError('自动寻路选项无效。')
         if type(auto_repair) is not bool:
             raise ValueError('自动维修选项无效。')
+        if food_fallback not in FALLBACK_MODES:
+            raise ValueError('无料理时的食物范围无效')
+        self.food_fallback = food_fallback
         if type(auto_eat) is not bool:
             raise ValueError('自动吃水果选项无效。')
         if type(remember_paths) is not bool:
@@ -141,7 +146,7 @@ class PointPlayback:
                         Path(route_path).stem if route_path is not None else '未命名路线',
                         {'start_mode': start_mode, 'loop_count': loop_count,
                          'auto_navigate': auto_navigate, 'remember_paths': remember_paths,
-                         'auto_repair': auto_repair, 'auto_eat': auto_eat,
+                         'auto_repair': auto_repair, 'auto_eat': auto_eat, 'food_fallback': food_fallback,
                          'collect_wait_seconds': collect_wait_seconds,
                          'recovery_attempts': recovery_attempts, 'jump_on_recovery': jump_on_recovery})
                         if self.history_root is not None else None)
@@ -170,6 +175,7 @@ class PointPlayback:
             navigation['tool_selector'] = LazyToolSelector(self.profile.parent/'axe_pick_icon.png', self.tool_factory)
             if auto_eat:
                 from utils.vision.food_menu import FruitMenu
+                navigation['food_fallback'] = self.food_fallback
                 navigation['food'] = LazyToolSelector(self.profile.parent/'food_bag_marker.png', self.food_factory or FruitMenu)
             if auto_repair:
                 from utils.vision.repair_box import RepairBoxMenu

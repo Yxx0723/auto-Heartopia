@@ -588,6 +588,12 @@ class CoordinateWindow:
             selectcolor=COLORS['button'], activebackground=COLORS['card'], activeforeground=COLORS['text'],
             bd=0, highlightthickness=0, font=('Microsoft YaHei UI', -10))
         self.food_auto_check.grid(row=5, column=0, columnspan=2, sticky='w', pady=(3, 0))
+        self.label(toolcard,'无料理时',color='muted',font=('Microsoft YaHei UI',-10)).grid(
+            row=6,column=0,sticky='w',pady=(3,0))
+        self.food_fallback_var=tk.StringVar(self.root,value='仅水果')
+        self.food_fallback_menu=self.dropdown(toolcard,self.food_fallback_var,
+            ['仅水果','水果和菌类','全部可食用'],width=11)
+        self.food_fallback_menu.grid(row=6,column=1,sticky='e',pady=(3,0))
 
         def scroll_sidebar(event):
             if inner.winfo_height() > self.sidebar_canvas.winfo_height():
@@ -807,6 +813,8 @@ class CoordinateWindow:
         configure_changed(self.repair_auto_check, state='disabled' if playing else 'normal')
         if hasattr(self, 'food_auto_check'):
             configure_changed(self.food_auto_check, state='disabled' if playing else 'normal')
+        if hasattr(self,'food_fallback_menu'):
+            configure_changed(self.food_fallback_menu,state='disabled' if playing else 'readonly')
         configure_changed(self.collect_wait_spin, state='disabled' if playing else 'normal')
         configure_changed(self.loop_count_spin, state='disabled' if playing else 'normal')
         configure_changed(self.point_wait_button, state='normal' if self.saved_points and not playing and not self.points_error else 'disabled')
@@ -1292,6 +1300,10 @@ class CoordinateWindow:
             self.route_var.set(self.route_name)
             messagebox.showerror(titles[action] + '失败', str(exc), parent=self.root)
 
+    def food_fallback_mode(self):
+        value=self.food_fallback_var.get() if hasattr(self,'food_fallback_var') else '仅水果'
+        return {'仅水果':'fruit','水果和菌类':'fruit_mushroom','全部可食用':'all'}.get(value,'fruit')
+
     def start_special_gather(self, category):
         try:
             self.view.point_snapshot(self.clock())
@@ -1315,6 +1327,7 @@ class CoordinateWindow:
                 recovery_attempts=int(self.recovery_count_var.get()), jump_on_recovery=self.recovery_jump_var.get(),
                 collect_wait_seconds=0., loop_count=1, auto_navigate=True,
                 auto_repair=self.repair_auto_var.get(), auto_eat=self.food_auto_var.get(),
+                food_fallback=self.food_fallback_mode(),
                 route_path=self.point_store.path.parent/f'动态采集-{name}.json', remember_paths=False)
             self.playback_status = {'state': 'playback_wait', 'message': f'{name}动态采集已就绪 · 切回游戏按 F6 · F9停止'}
             self.render()
@@ -1335,6 +1348,7 @@ class CoordinateWindow:
                                 loop_count=loop_count, auto_navigate=self.navigation_var.get(),
                                 auto_repair=self.repair_auto_var.get(),
                                 auto_eat=self.food_auto_var.get() if hasattr(self, 'food_auto_var') else False,
+                                food_fallback=self.food_fallback_mode(),
                                 route_path=self.point_store.path,
                                 remember_paths=self.path_memory_var.get() if hasattr(self, 'path_memory_var') else True)
         except (OSError, ValueError) as exc:

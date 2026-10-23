@@ -1,12 +1,14 @@
-"""Select ordinary fruit and the observed 食用 button in the backpack."""
+"""Select inventory-confirmed food with stable cell, quality and Eat checks."""
 from pathlib import Path
 import random
+import hashlib
 
 import cv2
 import numpy as np
 
 from utils.vision.repair_box import RepairBoxMenu
 from utils.core import thresholds as policy
+from utils.core.food_policy import choose_foods
 
 
 FRUITS = {'apple': '苹果', 'blueberry': '蓝莓', 'raspberry': '树莓', 'orange': '橘子'}
@@ -14,7 +16,7 @@ BACKPACK_KEY = 'b'
 
 
 class FruitMenu(RepairBoxMenu):
-    label = '水果'
+    label = '食物'
 
     def __init__(self, template):
         root = Path(template).parent
@@ -284,6 +286,9 @@ class FruitMenu(RepairBoxMenu):
         return self.stable_dialog(window, wait, check)
 
     def ready_food(self, picture, food, cell):
+        frame = self.frame(picture)
+        if not self.selected(frame, cell):
+            return None
         if food in FRUITS.values():
             target = self.ready(picture)
             return target if target is not None and target['food'] == food else None
@@ -357,26 +362,84 @@ class FruitMenu(RepairBoxMenu):
             return None
         return len(centers)
 
-    def prepare(self, window, tap, wait, check, device, inventory=None, query_check=None):
-        # Inventory is read before any search. Never invent ownership from a
-        # query, recipe card, warehouse item or a previously cached quantity.
-        candidates = [item for item in (inventory or []) if item.get('edible') is True
-                        and item.get('count', 0) > 0 and not item.get('locked')
-                        and isinstance(item.get('name'), str) and 1 <= len(item['name']) <= 32
-                        and not any(ord(c) < 32 for c in item['name'])]
-        prepared = [item for item in candidates if item.get('prepared') is True]
-        if prepared:
-            if any(type(item.get('star')) is not int or not 0 <= item['star'] <= 5 for item in prepared):
-                raise ValueError('成品料理星级未确认，稍后自动重试')
-            lowest_star = min(item['star'] for item in prepared)
-            prepared = [item for item in prepared if item['star'] == lowest_star]
-        # Randomize only within the lowest stocked quality tier. Search/UI
-        # uncertainty must retry rather than consuming higher-star dishes.
-        fruits = [item for item in candidates if item['name'] in FRUITS.values()]
-        foods = sorted({item['name'] for item in (prepared or fruits)})
-        if not foods:
-            raise ValueError('随身背包内没有确认可食用的食物')
-        for food in random.sample(foods, len(foods)):
+    @staticmethod
+    def page_key(frame, bag):
+        scale=bag['scale']
+        left=max(0,round(bag['x']-238*scale));right=min(frame.shape[1],round(bag['x']+35*scale))
+        top=max(0,round(bag['y']+20*scale));bottom=max(top,frame.shape[0]-round(30*scale))
+        area=frame[top:bottom,left:right]
+        if not area.size:raise ValueError('搜索结果格子区域未确认')
+        return hashlib.sha256(area.tobytes()).digest()
+
+    def result_pages(self, window, device, wait, check, food, query_check):
+        seen=set()
+        for page in range(policy.COORD_FOOD_SEARCH_MAX_PAGES):
+            check()
+            frame=self.frame(window.snapshot());bag=self.bag_in(frame)
+            if bag is None or not bag.get('search_results') or self.end_search_target(frame) is None:
+                raise ValueError('搜索结果页面未确认，未滚动或食用')
+            if query_check is not None and query_check()!=food:
+                raise ValueError('背包实际搜索文字不符，未选择食物')
+            key=self.page_key(frame,bag)
+            if key in seen:return
+            seen.add(key)
+            yield frame,bag
+            if page+1>=policy.COORD_FOOD_SEARCH_MAX_PAGES:return
+            check()
+            # Scroll only inside the freshly confirmed filtered backpack grid.
+            device.execute({'type':'cursor_move','x':bag['x']-20*bag['scale'],
+                            'y':bag['y']+80*bag['scale']})
+            wait(.15);check()
+            current=self.frame(window.snapshot())
+            if self.bag_in(current) is None or self.end_search_target(current) is None:
+                raise ValueError('滚动前搜索结果已关闭，未滚动')
+            if query_check is not None and query_check()!=food:
+                raise ValueError('滚动前搜索文字已变化，未滚动')
+            device.execute({'type':'scroll','dx':0,'dy':-3})
+            wait(.35)
+
+    def confirmed_cell(self, window, food, cell, wait, check, query_check=None, star=None):
+        observations=[]
+        for observation_index in range(2):
+            check()
+            if query_check is not None and query_check()!=food:
+                raise ValueError('背包实际搜索文字不符，未选择食物')
+            picture=window.snapshot()
+            target=self.ready_food(picture,food,cell)
+            if target is None:return None
+            # The star belongs to this exact frame and selected cell, rather
+            # than an additional screenshot captured after the detail changed.
+            if star is not None and self.detail_stars(picture,target)!=star:return None
+            observations.append(target)
+            if observation_index == 0:
+                wait(.12)
+        first,second=observations
+        if abs(first['x']-second['x'])>3 or abs(first['y']-second['y'])>3:return None
+        return second
+
+    def confirm(self, target, window, wait, check, query_check=None):
+        cell=target.get('cell')
+        if not isinstance(cell,dict):raise ValueError('选中食物格子未确认')
+        result=self.confirmed_cell(window,target['food'],cell,wait,check,query_check,
+                                   target.get('star') if target.get('requires_star') else None)
+        if result is None:raise ValueError('食用前详情、按钮或星级已变化，未食用')
+        return dict(target,**result)
+
+    def prepare(self, window, tap, wait, check, device, inventory=None, query_check=None, fallback_mode='fruit'):
+        pool=choose_foods(inventory,fallback_mode)
+        if pool['state'] not in ('prepared','fallback'):
+            raise ValueError(pool['reason'])
+        prepared=pool['state']=='prepared'
+        foods=sorted({item['name'] for item in pool['items']})
+        for food in random.sample(foods,len(foods)):
+            members=[item for item in pool['items'] if item['name']==food]
+            requires_star=prepared or any(item.get('verify_star') for item in members)
+            target_star=pool['star']
+            if requires_star and target_star is None:
+                stars=[item.get('star') for item in members]
+                if any(type(v) is not int or not 0<=v<=5 for v in stars):
+                    raise ValueError('同名锁定物品的目标星级未确认')
+                target_star=min(stars)
             dialog = self.open_search(window, tap, wait, check, device)
             self.click_control(dialog, device, check, wait)
             if self.search_dialog(window.snapshot()) is None:
@@ -408,37 +471,30 @@ class FruitMenu(RepairBoxMenu):
             check()
             if query_check is not None and query_check() != food:
                 raise ValueError('背包实际搜索文字不符，未选择食物')
-            if food in FRUITS.values():
-                cells = [f for f in self.available(frame, bag) if f['food'] == food][:1]
-            else:
-                scale = bag['scale']
-                # Visible filtered rows, anchored to the detected header,
-                # never to desktop resolution. Quality variants can span more
-                # than one row. Recipes are rejected
-                # by the selected outline + actual 食用 action below.
-                rows = max(0, min(12, int((frame.shape[0]-55*scale-bag['y']-46*scale)/(54*scale))+1))
-                cells = [dict(x=bag['x']+(54*i-211)*scale, y=bag['y']+(46+54*j)*scale,
-                              scale=scale, food=food) for j in range(rows) for i in range(5)]
-                cells = [c for c in cells if 0 < c['x'] < frame.shape[1] and 0 < c['y'] < frame.shape[0]]
-            for cell in cells:
-                self.click_control(cell, device, check, wait)
-                wait(.35)
-                check()
-                first = self.ready_food(window.snapshot(), food, cell)
-                wait(.12)
-                check()
-                second = self.ready_food(window.snapshot(), food, cell)
-                if first is not None and second is not None and abs(first['x']-second['x']) <= 3 \
-                        and abs(first['y']-second['y']) <= 3:
-                    if prepared:
-                        first_star = self.detail_stars(window.snapshot(), second)
-                        wait(.12)
-                        check()
-                        second_star = self.detail_stars(window.snapshot(), second)
-                        if first_star != lowest_star or second_star != lowest_star:
-                            continue
-                        return dict(second, star=lowest_star)
-                    return second
+            for frame,bag in self.result_pages(window,device,wait,check,food,query_check):
+                if food in FRUITS.values():
+                    cells = [f for f in self.available(frame, bag) if f['food'] == food]
+                else:
+                    scale = bag['scale']
+                    # Visible filtered rows, anchored to the detected header,
+                    # never to desktop resolution. Quality variants can span more
+                    # than one row. Recipes are rejected
+                    # by the selected outline + actual 食用 action below.
+                    rows = max(0, min(12, int((frame.shape[0]-55*scale-bag['y']-46*scale)/(54*scale))+1))
+                    cells = [dict(x=bag['x']+(54*i-211)*scale, y=bag['y']+(46+54*j)*scale,
+                                  scale=scale, food=food) for j in range(rows) for i in range(5)]
+                    cells = [c for c in cells if 0 < c['x'] < frame.shape[1] and 0 < c['y'] < frame.shape[0]]
+                for cell in cells:
+                    self.click_control(cell, device, check, wait)
+                    wait(.35)
+                    check()
+                    confirmed=self.confirmed_cell(window,food,cell,wait,check,query_check,
+                                                  target_star if requires_star else None)
+                    if confirmed is not None:
+                        proof={'cell':{k:v for k,v in cell.items() if k in ('x','y','scale')},
+                               'prepared':prepared,'requires_star':requires_star}
+                        if requires_star:proof['star']=target_star
+                        return dict(confirmed,**proof)
         raise ValueError('背包已有食物的搜索结果或食用按钮未确认，未食用')
 
     def close_target(self, picture):

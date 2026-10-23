@@ -14,6 +14,10 @@ from utils.core import thresholds
 
 #: 常量名 -> 搬运时的原值。新增阈值时在这里补一行。
 GOLDEN_VALUES = {
+    'COORD_FOOD_SEARCH_MAX_PAGES': 4,
+    'COORD_FOOD_RETRY_SECONDS': 1.,
+    'COORD_FOOD_RETRY_MAX_SECONDS': 8.,
+    'COORD_FOOD_RETRY_POLL_SECONDS': .2,
     'COORD_MEMORY_ENTRY_HEIGHT': .35,
     'COORD_MEMORY_RECENT_WINDOW': 7,
     'COORD_MEMORY_FAILURE_WEIGHT': 3.,

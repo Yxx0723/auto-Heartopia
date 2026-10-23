@@ -197,7 +197,7 @@ class FoodInventoryReader:
         bag = bags[0]
         items = m.ref(bag, 'items')
         rows, stable = self.dictionary_rows(items)
-        foods, blocked_ids = [], set()
+        foods, locked_variants, locked_ids, uncertain_locked = [], set(), set(), set()
         for ci, raw in rows:
             check()
             def value(name, code=8, fmt='i', width=4):
@@ -205,10 +205,15 @@ class FoodInventoryReader:
             count = value('count')
             if not 0 <= count <= 100000000:
                 raise ValueError('背包食物数量无效')
-            if count and (value('isLock', 2, 'B', 1) or value('IsDisable', 2, 'B', 1)):
-                # Search groups star/stack variants by name. If one variant is
-                # locked, do not let the UI select it before an unlocked stack.
-                blocked_ids.add(value('staticId'))
+            locked, disabled = value('isLock', 2, 'B', 1), value('IsDisable', 2, 'B', 1)
+            if count and (locked not in (0,1) or disabled not in (0,1)):
+                raise ValueError('背包锁定或禁用状态未确认')
+            if count and (locked or disabled):
+                identity, star = value('staticId'), value('_starRate')
+                locked_ids.add(identity)
+                locked_variants.add((identity, star))
+                if not 0 <= star <= 5:
+                    uncertain_locked.add(identity)
                 continue
             if not count:
                 continue
@@ -216,8 +221,12 @@ class FoodInventoryReader:
             if functions and EAT_ACTION in self.actions(functions):
                 foods.append({'item_id': value('staticId'), 'net_id': value('netId', 9, 'I'),
                               'count': count, 'star': value('_starRate'), 'edible': True,
+                              'entity_type': value('entityType', 17),
                               'prepared': value('entityType', 17) == PREPARED_FOOD_TYPE})
-        foods = [food for food in foods if food['item_id'] not in blocked_ids]
+        for food in foods:
+            food['ambiguous_locked_variant'] = ((food['item_id'],food['star']) in locked_variants
+                                                 or food['item_id'] in uncertain_locked)
+            food['verify_star'] = food['item_id'] in locked_ids
         self.discover_names({f['item_id'] for f in foods}, check)
         if (not stable() or m.ref(bag, 'items') != items or m.ref(system, '_storages') != stores
                 or m.dictionary(stores, max_items=32) != stores_list or m.ref(module, 'BackPackSystem') != system
