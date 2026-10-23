@@ -121,7 +121,7 @@ def test_interrupted_walk_is_not_saved_and_io_failure_does_not_interrupt_collect
     stopped.stop_at = 3.
     assert not run_walk(stopped, data, memory, scene())[0]
     assert not memory.path.exists() and not stopped.keys
-    def failure(*a):
+    def failure(*a, **kwargs):
         raise OSError('disk unavailable')
     monkeypatch.setattr(memory, 'remember', failure)
     game = NavigationGame()

@@ -203,6 +203,13 @@ class PointPlayback:
                         cleanup()
                     except Exception as exc:
                         self.update('error', f'回放清理失败：{exc}')
+            if self.path_memory is not None:
+                try:
+                    self.path_memory.flush_rejections()
+                except (OSError, ValueError) as exc:
+                    if self.diagnostics:
+                        self.diagnostics.write({'state': 'memory_write_warning',
+                                                'message': f'走法遇阻记录暂未保存：{exc}'})
             if self.history:
                 self.history.close()
 

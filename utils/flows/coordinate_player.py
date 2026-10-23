@@ -183,6 +183,9 @@ class _Follower:
 
     def set_keys(self, keys):
         if 'space' in keys:
+            discard = getattr(self.navigator, 'discard_learning', None)
+            if callable(discard):
+                discard()
             self.direction_unsafe_until = self.clock.monotonic()+policy.COORD_RECOVERY_JUMP_SECONDS \
                 + policy.COORD_RECOVERY_JUMP_SETTLE_SECONDS
         for key in sorted(self.keys - keys):
@@ -1034,6 +1037,8 @@ class _Follower:
                             continue
                     index += 1
                     if self.navigator:
+                        self.navigator.collection_outcome = ('action_completed_unconfirmed_loot'
+                            if self.collect_wait_seconds is not None else 'not_requested')
                         self.navigator.arrived(position)
                     if self.waypoints is not None:
                         text = '已完成采集与等待' if self.collect_wait_seconds is not None else '已到达点位'
@@ -1071,6 +1076,7 @@ class _Follower:
                     planning_at = self.clock.monotonic()
                     self.navigation_waiting = True
                     try:
+                        self.navigator.learning_finished = None
                         self.navigator.learning_time = self.active_time
                         self.navigator.set_waypoint(index)
                         target = self.navigator.next_target(position, target, check=self.guard, before_plan=self.release)

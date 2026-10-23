@@ -438,3 +438,13 @@ COORD_TERRAIN_EDGE_HALF_WIDTH = .02
 # Current backpack X scores 0.899-0.918 on real 1024x768 captures; the old .92
 # rejected it. Header-relative position and two stable frames remain mandatory.
 COORD_FOOD_CLOSE_MATCH = .82
+
+# Route-memory ranking and shape matching: engineering defaults, NOT measured
+# game traversal limits, collision clearance, or support-surface identities.
+COORD_MEMORY_RECENT_WINDOW = 7
+COORD_MEMORY_FAILURE_WEIGHT = 3.
+COORD_MEMORY_COMPARE_SAMPLES = 32
+COORD_MEMORY_CORRIDOR_DISTANCE = .6
+COORD_MEMORY_CORRIDOR_HEIGHT = .15
+
+COORD_MEMORY_ENTRY_HEIGHT = .35

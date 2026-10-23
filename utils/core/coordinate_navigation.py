@@ -285,6 +285,8 @@ class LocalNavigator:
         self.learning_started = None
         self.learning_finished = None
         self.memory_path, self.walked_path = [], []
+        self.walked_times = []
+        self.collection_outcome = None
         self.memory_aim = None
         self.memory_loaded, self.memory_failed = False, False
         self.memory_state = 'learning' if path_memory else 'off'
@@ -305,19 +307,34 @@ class LocalNavigator:
     def arrived(self, position):
         if not self.path_memory or self.waypoint is None or self.memory_failed:
             return
+        self.learning_time = self.learning_finished
         self._observe_walk(position)
         if not self.memory_failed:
             if self.walked_path and self.walked_path[-1] != tuple(position):
                 self.walked_path.append(tuple(position))
+                self.walked_times.append(self._learning_elapsed())
             try:
                 if self.path_memory.remember(self.waypoint, self.walked_path,
                         (self.learning_finished - self.learning_started)
-                        if self.learning_finished is not None and self.learning_started is not None else None):
+                        if self.learning_finished is not None and self.learning_started is not None else None,
+                        sample_times=self.walked_times, collection_outcome=self.collection_outcome):
                     self.memory_state = 'saved'
             except (OSError, ValueError):
                 self.memory_state = 'write_error'
         self.walked_path = []
+        self.walked_times = []
         self.memory_leg = None
+
+    def _learning_elapsed(self):
+        if self.learning_time is None or self.learning_started is None:
+            return None
+        return max(0., self.learning_time-self.learning_started)
+
+    def discard_learning(self):
+        """A commanded jump is not ordinary walking evidence."""
+        if self.memory_leg is not None:
+            self.memory_failed = True
+            self.walked_path, self.walked_times = [], []
 
     def _observe_walk(self, position):
         if self.memory_failed:
@@ -334,6 +351,7 @@ class LocalNavigator:
                 self.memory_aim = None
             else:
                 self.walked_path.append(tuple(position))
+                self.walked_times.append(self._learning_elapsed())
 
     def invalidate(self):
         self.path, self.goal, self.obstacles = [], None, None
@@ -413,13 +431,19 @@ class LocalNavigator:
             self.learning_finished = None
             self.memory_loaded, self.memory_failed = False, False
             self.memory_path, self.walked_path = [], []
+            self.walked_times = []
             self.memory_aim = None
             self.memory_state = 'learning'
         self._observe_walk(position)
         if not self.memory_loaded:
             self.memory_loaded = True
             if not self.memory_failed:
-                self.memory_path = self.path_memory.lookup(self.waypoint, position)
+                before_plan()
+                self._refresh_obstacles(position, target)
+                def can_connect(point):
+                    a, b = (position[0], position[2]), (point[0], point[2])
+                    return self.obstacles.clear(a, b, escape=True) and self.obstacles.risk_cost(a, b) == 0
+                self.memory_path = self.path_memory.lookup(self.waypoint, position, can_connect=can_connect)
         if self.memory_aim is not None and distance(position, self.memory_aim) <= policy.COORD_NAV_LEG_REACH_RADIUS:
             end = self.memory_path.index(self.memory_aim)
             del self.memory_path[:end + 1]
