@@ -6,6 +6,7 @@ from utils.core import thresholds as policy
 from utils.core.coordinate_points import (choose_start_index, ordered_waypoints, validate_collect_wait,
                                           validate_loop_count)
 from utils.core.coordinate_navigation import NavigationWait, ObstacleMap
+from utils.core.direction_evidence import CalibrationBudget, DirectionEvidence
 from utils.core.special_approach import in_interaction_range, interaction_standpoint
 from utils.core import special_verdict
 from utils.core.special_verdict import snapshot as special_snapshot
@@ -32,6 +33,10 @@ class _Stopped(Exception):
 
 
 class _CalibrationRetry(Exception):
+    pass
+
+
+class _SkipPoint(Exception):
     pass
 
 
@@ -80,8 +85,8 @@ class _Follower:
         if waypoints is not None:
             self.budget = policy.COORD_POINT_PLAYBACK_SECONDS
             if collect_wait_seconds is not None:
-                self.budget += sum(p.get('collect_wait', collect_wait_seconds)
-                                   + policy.COORD_COLLECTION_PRESS_SECONDS for p in waypoints)
+                self.budget += sum(p.get('collect_count', 1) * (p.get('collect_wait', collect_wait_seconds) + policy.COORD_COLLECTION_PRESS_SECONDS)
+                                   for p in waypoints)
         self.last_report = float('-inf')
         self.recovery_attempts, self.jump_on_recovery = recovery_attempts, jump_on_recovery
         self.recovery = RecoveryProgress()
@@ -102,6 +107,7 @@ class _Follower:
         self.food = food
         self.stamina_status = {'state': 'unavailable'}
         self.last_stamina_check = float('-inf')
+        self.meal_refilling = False
         self.meal_pending = self.meal_menu_pending = False
         self.meal_before = self.meal_deadline = 0.
         self.meal_settle_until = 0.
@@ -109,8 +115,27 @@ class _Follower:
         self.repair_menu_pending = False
         self.special_progress = None
         self.scene_refresh = scene_refresh
+        self.calibration_budget = CalibrationBudget()
+        self.direction_evidence = DirectionEvidence()
+        self.skipped_count = 0
+        self.skipped_cycles = set()
+        self.approach_tag, self.approach_attempts = None, 0
+        self.direction_unsafe_until = float('-inf')
+
+    def approach_attempt(self, index):
+        tag = self.cycle,index
+        if self.approach_tag != tag:
+            self.approach_tag, self.approach_attempts = tag, 0
+        if self.approach_attempts >= policy.COORD_APPROACH_POINT_ATTEMPTS:
+            raise _SkipPoint('不同接近尝试仍未走通，本点本轮尝试结束')
+        self.approach_attempts += 1
 
     def report(self, state, message, **extra):
+        if 'position' not in extra and valid_position(self.position):
+            extra.update(position=list(self.position), position_source='last_successful_read',
+                         position_age_seconds=max(0., self.clock.monotonic()-self.position_at)
+                         if self.position_at is not None else None)
+        extra.setdefault('input_keys', sorted(self.keys))
         if self.waypoints is not None:
             message = f'第 {self.cycle}/{self.loop_count} 轮 · {message}'
             extra.update(cycle=self.cycle, loop_count=self.loop_count)
@@ -157,6 +182,9 @@ class _Follower:
         return self.position
 
     def set_keys(self, keys):
+        if 'space' in keys:
+            self.direction_unsafe_until = self.clock.monotonic()+policy.COORD_RECOVERY_JUMP_SECONDS \
+                + policy.COORD_RECOVERY_JUMP_SETTLE_SECONDS
         for key in sorted(self.keys - keys):
             self.device.execute({'type': 'key_up', 'key': key})
             self.keys.discard(key)
@@ -388,10 +416,11 @@ class _Follower:
         if 'special_resource' in point:
             return self.collect_special(point, index, total)
         if self.collection is None:
-            self.collection = {'sent': False, 'remaining': point.get('collect_wait', self.collect_wait_seconds)}
+            self.collection = {'sent': 0, 'remaining': point.get('collect_wait', self.collect_wait_seconds)}
         self.release()
         self.collection_position(point)
-        if not self.collection['sent']:
+        count = point.get('collect_count', 1)
+        if self.collection['sent'] < count and self.collection.get('ready', True):
             if self.food is not None:
                 self.read_stamina()
                 if self.maintain_stamina(index, total):
@@ -400,11 +429,12 @@ class _Follower:
                 self.read_tool()
                 if self.maintain_tool(index, total):
                     return False
-            self.report('collecting', f'点位 {index + 1}/{total} · 按 F 采集 · F6暂停 · F9停止',
+            self.report('collecting', f'点位 {index + 1}/{total} · 按 F 采集 {self.collection["sent"] + 1}/{count} · F6暂停 · F9停止',
                         waypoint=index + 1, waypoint_count=total)
             try:
                 self.set_keys({'f'})
-                self.collection['sent'] = True
+                self.collection['sent'] += 1
+                self.collection['ready'] = False
                 self.wait(policy.COORD_COLLECTION_PRESS_SECONDS)
             finally:
                 self.release()
@@ -428,7 +458,13 @@ class _Follower:
                 elapsed = step if completed else min(step, max(0., self.clock.monotonic() - before))
                 self.collection['remaining'] = max(0., remaining - elapsed)
         self.collection_position(point)
-        return self.collection['remaining'] <= 0
+        if self.collection['remaining'] > 0:
+            return False
+        if self.collection['sent'] < count:
+            self.collection['remaining'] = point.get('collect_wait', self.collect_wait_seconds)
+            self.collection['ready'] = True
+            return False
+        return True
 
     def special_objects(self, point):
         """Every live object matching this dynamic identity, or None when unreadable."""
@@ -642,7 +678,9 @@ class _Follower:
                     break
         if not usable_stamina(status):
             self.repair_pause('暂时无法读取本地角色体力，请等待读取恢复', index, total, state='food_paused')
-        if status['current'] >= 30 and not self.meal_pending and not self.meal_menu_pending:
+        if status['current'] < 30:
+            self.meal_refilling = True
+        if status['current'] >= 30 and not self.meal_refilling and not self.meal_pending and not self.meal_menu_pending:
             # Starting or resuming may leave a backpack from manual eating or
             # an earlier run open. Check once before movement, never per tick.
             if not self.food_menu_checked:
@@ -651,7 +689,7 @@ class _Follower:
         self.release()
         self.navigation_waiting = True
         try:
-            action = '正在搜索水果并补充' if status['current'] < 30 else '已恢复，正在收起背包'
+            action = '正在随机进食，补充至100' if status['current'] < 100 else '已恢复，正在收起背包'
             self.report('eating', f'体力 {status["current"]} / {status["maximum"]}，{action} · F6暂停 · F9停止',
                         waypoint=index+1, waypoint_count=total)
             if self.clock.monotonic() < self.meal_settle_until:
@@ -659,13 +697,22 @@ class _Follower:
                 status = self.read_stamina()
                 if not usable_stamina(status):
                     raise ValueError('体力正在更新，请稍后继续')
-            if not self.meal_pending and status['current'] < 30:
+            if not self.meal_pending and status['current'] < 100:
                 self.meal_menu_pending = True
-                target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device)
+                inventory_reader = getattr(self.reader, 'food_inventory_snapshot', None)
+                if callable(inventory_reader):
+                    inventory = inventory_reader(check=self.guard)
+                    target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device,
+                                               inventory=inventory,
+                                               query_check=getattr(self.reader, 'food_search_query', None))
+                    self.report('eating', f'正在食用{target["food"]}，目标体力100 · F6暂停 · F9停止',
+                                waypoint=index+1, waypoint_count=total, food_name=target['food'])
+                else:  # Simulation adapters retain their previous contract.
+                    target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device)
                 status = self.read_stamina()
                 if not usable_stamina(status):
                     raise ValueError('食用前无法确认体力')
-                if status['current'] < 30:
+                if status['current'] < 100:
                     # Retain the attempted use across F6, focus loss and a
                     # partial mouse press. Never eat twice before verifying.
                     self.meal_pending = True
@@ -683,7 +730,7 @@ class _Follower:
                 raise ValueError('食用后暂时无法确认体力，请等待恢复后继续')
             if self.meal_pending and status['current'] <= self.meal_before:
                 self.meal_pending = False
-                raise ValueError('食用后体力未增加，请检查水果数量或食用动作')
+                raise ValueError('食用后体力未增加，请检查食物数量或食用动作')
             if self.meal_pending:
                 self.meal_pending = False
                 self.meal_settle_until = self.clock.monotonic()+2.
@@ -691,7 +738,8 @@ class _Follower:
                 status = self.read_stamina()
                 if not usable_stamina(status):
                     raise ValueError('体力正在更新，请稍后继续')
-            if status['current'] >= 30:
+            if status['current'] >= 100:
+                self.meal_refilling = False
                 if self.meal_menu_pending:
                     self.food.close_menu(self.window, self.repair_tap, self.guard, self.wait, self.device)
                     self.meal_menu_pending = False
@@ -700,7 +748,7 @@ class _Follower:
                             waypoint=index+1, waypoint_count=total)
             return True
         except (ValueError, OSError) as exc:
-            self.repair_pause(f'自动吃水果未完成：{exc}', index, total, state='food_paused')
+            self.repair_pause(f'自动进食未完成：{exc}', index, total, state='food_paused')
         finally:
             self.release()
             self.navigation_waiting = False
@@ -896,14 +944,21 @@ class _Follower:
                         # must not discard this obstacle's failure history.
                         segment_start = reference
                     try:
+                        if self.navigator:
+                            scene = self.navigator.scene_provider() or {}
+                            scope = repr((scene.get('cache_context'), scene.get('terrain_revision')))
+                            if not self.calibration_budget.begin(reference, (self.cycle, index), scope):
+                                raise _SkipPoint('同一区域方向核对次数已达上限，当前方向无法可靠确认')
                         basis = self.calibrate(reference, target_index=index)
+                        self.direction_evidence = DirectionEvidence()
                     except _CalibrationRetry as exc:
                         self.release()
                         reference, basis, anchor = self.position, None, None
                         if self.navigator:
                             self.navigator.invalidate()
                         self.report('calibrating', f'点位 {index + 1}/{len(points)} · {exc}，稍后重新校准 · F9停止',
-                                    waypoint=index + 1, waypoint_count=len(points), navigation_path=[])
+                                    waypoint=index + 1, waypoint_count=len(points), navigation_path=[],
+                                    incident_kind='calibration_failed', target=points[index]['position'])
                         scene_ready = (self.navigator.scene_provider() or {}).get('state') == 'ready'
                         if self.jump_on_recovery and scene_ready:
                             try:
@@ -998,7 +1053,9 @@ class _Follower:
                     segment_start = position
                     best, progress_at = math.inf, now
                     if self.waypoints is not None and index == len(points):
-                        self.report('cycle_finished', '本轮点位回放完成 · F6暂停 · F9停止',
+                        partial = self.cycle in self.skipped_cycles
+                        self.report('cycle_partial' if partial else 'cycle_finished',
+                                    '本轮有未完成点位' if partial else '本轮点位回放完成 · F6暂停 · F9停止',
                                     waypoint=index, waypoint_count=len(points))
                         if self.cycle < self.loop_count:
                             self.cycle += 1
@@ -1024,6 +1081,7 @@ class _Follower:
                             if now - navigation_wait_since >= policy.COORD_NAV_RECOVERY_WAIT_SECONDS:
                                 self.navigation_waiting = False
                                 self.last_tick = self.clock.monotonic()
+                                self.approach_attempt(index)
                                 try:
                                     self.fail_recovery(index, len(points))
                                     if not self.recover(points[index]['position'], basis, segment_start, index, len(points)):
@@ -1040,7 +1098,8 @@ class _Follower:
                             navigation_wait_since = None
                         if now - self.last_report >= .5:
                             self.report('navigating', f'点位 {index + 1}/{len(points)} · {exc} · F6暂停 · F9停止',
-                                        waypoint=index + 1, waypoint_count=len(points), navigation_path=[])
+                                        waypoint=index + 1, waypoint_count=len(points), navigation_path=[],
+                                        navigation_wait_reason=exc.reason, target=points[index]['position'])
                             self.last_report = now
                         try:
                             self.wait(.1)
@@ -1066,8 +1125,25 @@ class _Follower:
                 elif now - progress_at >= policy.COORD_STUCK_SECONDS:
                     if self.waypoints is None:
                         raise ValueError('角色未向目标前进，可能遇到障碍，已停止')
+                    attempted_keys = sorted(self.keys)
+                    self.release()
+                    try:
+                        from utils.core.playback_trace import collision_context
+                        context = collision_context(self.navigator, position, target)
+                    except Exception as exc:
+                        # Optional diagnostics must never abort recovery.
+                        context = {'state': 'unavailable', 'contact_confirmed': False,
+                                   'diagnostic_error': str(exc)}
+                    self.report('recovering', f'点位 {index + 1}/{len(points)} · 检测到移动无进展，已记录现场',
+                                waypoint=index+1, waypoint_count=len(points), position=list(position),
+                                target=list(points[index]['position']), steering_target=list(target),
+                                input_keys=attempted_keys, incident_kind='movement_stall',
+                                stalled_seconds=now-progress_at,
+                                collision_context=context)
                     if self.navigator:
-                        self.navigator.blocked(position, target)
+                        self.approach_attempt(index)
+                        self.navigator.blocked(position, target,
+                                               attempt_id=(self.cycle,index,self.approach_attempts))
                     try:
                         improved = False
                         # A small advance followed by another stall (or an
@@ -1132,16 +1208,25 @@ class _Follower:
                                  anchor[2] + vector[1] / norm * length)
                     # Both corridors must be clear: wall-sliding is not evidence
                     # of camera rotation. Large verified changes recalibrate here.
-                    if length >= policy.COORD_MIN_CALIBRATION and self.navigator.motion_clear(anchor, position) \
-                            and self.navigator.motion_clear(anchor, projected):
-                        try:
-                            basis = rotate_basis(basis, held_keys, displacement)
-                        except ValueError:
+                    if length >= policy.COORD_MIN_CALIBRATION:
+                        observation = self.direction_evidence.observe(
+                            vector, (displacement[0], displacement[2]), now=now,
+                            geometry_clear=self.navigator.motion_clear(anchor, position)
+                            and self.navigator.motion_clear(anchor, projected),
+                            height_delta=displacement[1], mode='jump' if 'space' in held_keys else
+                            'transient' if now < self.direction_unsafe_until else 'walk',
+                            scope=repr((self.navigator.scene or {}).get('cache_context')))
+                        if observation['state'] == 'aligned':
+                            self.navigator.motion_succeeded(anchor,position)
+                        if observation['state'] == 'rotation_candidate' or (
+                                observation['state'] == 'unknown' and abs(observation.get('angle_degrees', 0))
+                                > policy.COORD_MAX_DIRECTION_CHANGE_DEGREES):
                             self.release()
                             self.navigator.invalidate()
                             reference, basis, navigation_leg, anchor = position, None, None, None
-                            self.report('calibrating', '移动方向改变，重新校准后继续当前点位',
-                                        waypoint=index + 1, waypoint_count=len(points), navigation_path=[])
+                            self.report('calibrating', '方向存在偏差，有限次数核对；尚未确认镜头变化',
+                                        waypoint=index + 1, waypoint_count=len(points), navigation_path=[],
+                                        incident_kind='direction_uncertain', direction_observation=observation)
                             continue
                     anchor, anchor_at = position, now
                 special_steering = ({'reach_radius': policy.COORD_SPECIAL_APPROACH_PRECISION}
@@ -1157,7 +1242,9 @@ class _Follower:
                     anchor, anchor_keys, anchor_at = position, set(desired), now
                 self.set_keys(desired)
                 if now - self.last_report >= .5:
-                    navigation = ({'navigation_path': [list(p) for p in self.navigator.path]} if self.navigator else {})
+                    navigation = ({'navigation_path': [list(p) for p in self.navigator.path],
+                                   'navigation_decision': self.navigator.last_decision,
+                                   'approach_attempts': self.approach_attempts} if self.navigator else {})
                     mode = '自动寻路' if self.navigator else '坐标回放'
                     if self.navigator and self.navigator.memory_state == 'reusing':
                         mode = '复用已走路线'
@@ -1174,6 +1261,25 @@ class _Follower:
                     self.wait(policy.COORD_NAV_APPROACH_SETTLE_SECONDS)
                 else:
                     self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
+            except _SkipPoint as exc:
+                self.release()
+                self.skipped_count += 1
+                self.skipped_cycles.add(self.cycle)
+                self.report('skipped', f'点位 {index+1}/{len(points)} 暂时跳过：{exc}',
+                            waypoint=index+1, skipped_count=self.skipped_count, incident_kind='point_skipped')
+                index += 1
+                self.collection, self.special_progress = None, None
+                self.recovery.reset()
+                reference, basis, anchor = self.position, None, None
+                dwell, segment_start, navigation_leg, navigation_wait_since = None, self.position, None, None
+                best, progress_at = math.inf, self.clock.monotonic()
+                self.navigator.invalidate()
+                if index == len(points):
+                    self.report('cycle_partial', '本轮有未完成点位', skipped_count=self.skipped_count)
+                    if self.cycle < self.loop_count:
+                        self.cycle += 1
+                        index, self.start_index = 0, 0
+                        self.active_time, self.last_tick = 0., self.clock.monotonic()
             except _Paused:
                 self.release()
                 if self.position is not None:
@@ -1187,6 +1293,10 @@ class _Follower:
                     navigation_leg = None
                     navigation_wait_since = None
                 self.clock.sleep(.01)
+        if self.skipped_count:
+            self.report('partial', f'回放结束，{self.skipped_count} 个点位流程未完成，详见回放记录',
+                        skipped_count=self.skipped_count)
+            return False
         return True
 
 

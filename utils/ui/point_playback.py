@@ -49,7 +49,7 @@ class PointPlayback:
         self.navigation_path = []
         self.path_memory = None
         self.history = None
-        self.history_root = Path(diagnostics_path).parent.parent/'回放记录' if diagnostics_path is not None else None
+        self.history_root = Path(diagnostics_path).parent.parent/'路线' if diagnostics_path is not None else None
         self.diagnostics = PlaybackDiagnostics(diagnostics_path) if diagnostics_path is not None else None
         self.results = queue.Queue(maxsize=1)
         self.result_lock = threading.Lock()
@@ -59,6 +59,7 @@ class PointPlayback:
         self.total = 0
         self.cycle, self.loop_count = 1, policy.COORD_PLAYBACK_DEFAULT_LOOPS
         self.special_outcome = None
+        self.incomplete_count = 0
 
     @property
     def active(self):
@@ -66,6 +67,8 @@ class PointPlayback:
 
     def update(self, state, message, window=None, **extra):
         with self.result_lock:
+            if state in ('skipped', 'partial'):
+                self.incomplete_count = extra.get('skipped_count', self.incomplete_count)
             if state == 'finished':
                 completed_at = self.wall_clock()
                 message += f' · 完成时间 {completed_at:%Y-%m-%d %H:%M:%S}'
@@ -75,7 +78,7 @@ class PointPlayback:
                 self.special_outcome = extra['resource_outcome']
             if 'navigation_path' in extra:
                 self.navigation_path = extra.pop('navigation_path')
-            if state in ('finished', 'stopped', 'error', 'reached', 'cycle_finished',
+            if state in ('finished', 'stopped', 'error', 'partial', 'skipped', 'reached', 'cycle_finished', 'cycle_partial',
                          'collecting', 'recovering', 'paused', 'blocked', 'repairing', 'repair_paused',
                          'equipping', 'equip_paused', 'eating', 'food_paused'):
                 self.navigation_path = []
@@ -89,6 +92,8 @@ class PointPlayback:
                 status['history_path'] = str(self.history.path)
                 if self.history.error:
                     status['message'] += f' · 回放记录写入失败：{self.history.error}'
+                if self.history.archive_error:
+                    status['message'] += f' · 路线学习索引写入失败：{self.history.archive_error}'
             self.results.put_nowait(status)
 
     def take_latest(self):
@@ -130,6 +135,7 @@ class PointPlayback:
         self.stop_event.clear()
         self.cycle, self.loop_count = 1, loop_count
         self.special_outcome = None
+        self.incomplete_count = 0
         self.navigation_path = []
         self.history = (PlaybackHistory(self.history_root, deepcopy(data),
                         Path(route_path).stem if route_path is not None else '未命名路线',
@@ -180,12 +186,14 @@ class PointPlayback:
                                      continuous_recovery=True, **navigation)
             finish_message = (('本次点位回放完成' if loop_count == 1 else f'已完成 {loop_count} 轮回放')
                               if completed else '回放已停止，按键已释放')
+            if not completed and self.incomplete_count:
+                finish_message = f'回放结束，{self.incomplete_count} 个点位流程未完成，详见回放记录'
             if completed and any('special_resource' in point for point in data.get('points', [])):
                 finish_message = SPECIAL_FINISH_TEXT.get(self.special_outcome, SPECIAL_FINISH_TEXT[None])
             if self.path_memory is not None:
                 finish_message += f' · 已更新路线学习 · 已记忆 {self.path_memory.count} 段走法'
-            self.update('finished' if completed else 'stopped', finish_message,
-                        cycle=loop_count if completed else self.cycle)
+            self.update('finished' if completed else 'partial' if self.incomplete_count else 'stopped', finish_message,
+                        cycle=loop_count if completed else self.cycle, skipped_count=self.incomplete_count)
         except Exception as exc:
             self.update('error', f'点位回放停止：{exc}')
         finally:

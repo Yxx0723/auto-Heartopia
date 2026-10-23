@@ -583,7 +583,7 @@ class CoordinateWindow:
                                        font=('Consolas', -12), anchor='e')
         self.stamina_value.grid(row=4, column=1, sticky='ew', pady=(6, 0))
         self.food_auto_var = tk.BooleanVar(self.root, True)
-        self.food_auto_check = tk.Checkbutton(toolcard, text='体力低于30自动吃水果',
+        self.food_auto_check = tk.Checkbutton(toolcard, text='低于30随机进食至100',
             variable=self.food_auto_var, bg=COLORS['card'], fg=COLORS['text'],
             selectcolor=COLORS['button'], activebackground=COLORS['card'], activeforeground=COLORS['text'],
             bd=0, highlightthickness=0, font=('Microsoft YaHei UI', -10))
@@ -780,7 +780,7 @@ class CoordinateWindow:
         playback = self.playback.take_latest()
         if playback is not None:
             self.playback_status = playback
-            if playback.get('state') in ('reached', 'finished', 'stopped', 'error'):
+            if playback.get('state') in ('reached', 'finished', 'stopped', 'error', 'partial'):
                 self.refresh_path_memory_info()
         self.render()
         self.timer = self.root.after(int(policy.COORD_MONITOR_REFRESH_SECONDS * 1000), self.tick)
@@ -1075,7 +1075,7 @@ class CoordinateWindow:
             canvas.create_line(*planned, fill=MAP_STYLE['navigation'], width=2.5, dash=(7, 4),
                                arrow='last', arrowshape=(8, 10, 4), tags='navigation-path')
         active = self.playback_status.get('waypoint') if self.playback_status.get('state') not in (
-            'idle', 'finished', 'stopped', 'error') else None
+            'idle', 'finished', 'stopped', 'error', 'partial') else None
         labels = layout_waypoints(self.saved_points, viewport, active, chrome_bounds(viewport, step))
         draw_waypoint_labels(canvas, viewport, self.saved_points, labels)
         draw_chrome(canvas, viewport, step, self.map_view == 'route', self.scene_roads_var.get(),

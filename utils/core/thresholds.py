@@ -387,6 +387,32 @@ COORD_SCENE_RADIUS = 150.
 # Display-only horizontal detail radius, requested by the user; not a measured
 # game loading distance, collision tolerance or conversion to physical metres.
 COORD_MAP_DETAIL_RADIUS = 20.
+# Local replay diagnostics only; not game-tested collision/contact tolerances.
+COORD_TRACE_COLLIDER_RADIUS = 4.
+COORD_TRACE_COLLIDER_LIMIT = 8
+# Conservative engineering budgets/observation filters, not game-tested
+# walkable slopes, support heights, or measured camera abilities.
+COORD_DIRECTION_EVIDENCE_SECONDS = 5.
+COORD_DIRECTION_SAMPLE_HEIGHT = .25
+COORD_DIRECTION_ALIGNED_DEGREES = 12.
+COORD_DIRECTION_AGREEMENT_DEGREES = 15.
+COORD_DIRECTION_EVIDENCE_LIMIT = 8
+COORD_DIRECTION_CONFIRM_SAMPLES = 3
+COORD_CALIBRATION_REGION_RADIUS = 3.
+COORD_CALIBRATION_REGION_ATTEMPTS = 3
+COORD_CALIBRATION_POINT_ATTEMPTS = 6
+# Directed temporary approach costs and finite per-point recovery budget.
+# Engineering defaults only; none is a measured game collision capability.
+COORD_APPROACH_RISK_RADIUS = 1.25
+COORD_APPROACH_HEIGHT_BAND = .75
+COORD_APPROACH_DIRECTION_COSINE = .5
+COORD_APPROACH_RISK_WEIGHT = 8.
+COORD_APPROACH_RISK_LIMIT = 32
+COORD_APPROACH_POINT_ATTEMPTS = 6
+COORD_DIRECTION_INDEPENDENT_COSINE = .85
+COORD_APPROACH_SUCCESS_COSINE = .9
+COORD_APPROACH_SUCCESS_LATERAL = .4
+COORD_APPROACH_FOCUS_DISTANCE = 1.
 COORD_SCENE_LIVE_RADIUS = 80.
 COORD_SCENE_CACHE_CELL_SIZE = 64.
 COORD_SCENE_CACHE_FAR_SECONDS = 10.

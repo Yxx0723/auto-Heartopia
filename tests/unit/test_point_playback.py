@@ -340,3 +340,9 @@ def test_worker_records_each_reader_sample_and_final_result(tmp_path, fail):
     source.close.assert_called_once()
     assert (folder/'trajectory.jsonl').read_text(encoding='utf-8').strip()
     worker.close()
+
+
+def test_playback_records_live_routes_in_the_routes_folder(tmp_path):
+    worker = PointPlayback('profile.json', diagnostics_path=tmp_path/'logs'/'playback.jsonl')
+    assert worker.history_root == tmp_path/'路线'
+    worker.close()

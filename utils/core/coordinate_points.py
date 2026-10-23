@@ -30,6 +30,10 @@ def validate_points(data):
                 or not point['name'].strip() or not valid_position(point.get('position')) \
                 or not valid_stamp(point.get('sample_at')) or not valid_stamp(point.get('saved_at')):
             raise ValueError(f'第 {number} 条点位数据无效，原文件未修改。')
+        if 'collect_count' in point:
+            count = point['collect_count']
+            if type(count) is not int or not 1 <= count <= 100:
+                raise ValueError('点位采集次数应为1～100次。')
         if 'collect_wait' in point:
             validate_collect_wait(point['collect_wait'])
         if 'special_resource' in point:
@@ -90,6 +94,7 @@ def ordered_waypoints(data):
     return [{'id': point['id'], 'name': point['name'],
              'position': list(point['position']), 'wait': 0.,
              **({'special_resource': dict(point['special_resource'])} if 'special_resource' in point else {}),
+             **({'collect_count': point['collect_count']} if 'collect_count' in point else {}),
              **({'collect_wait': point['collect_wait']} if 'collect_wait' in point else {})}
             for point in data['points']]
 

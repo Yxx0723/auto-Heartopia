@@ -1,5 +1,6 @@
 """Select ordinary fruit and the observed 食用 button in the backpack."""
 from pathlib import Path
+import random
 
 import cv2
 import numpy as np
@@ -29,6 +30,7 @@ class FruitMenu(RepairBoxMenu):
         self.search_header = read('food_search_header.png')
         self.search_results = read('food_search_results.png')
         self.search_end = read('food_search_end.png')
+        self.star_icon = read('food_star.png')
         self.fruits = {key: read(f'fruit_{key}.png') for key in FRUITS}
         if self.bag.shape[:2] != (28, 55) or self.close_icon.shape[:2] != (21, 21) or self.eat.shape[:2] != (18, 112) \
                 or self.category.shape[:2] != (23, 23) or any(t.shape[:2] != (31, 31) for t in self.fruits.values()):
@@ -64,7 +66,7 @@ class FruitMenu(RepairBoxMenu):
             else:
                 scores = cv2.matchTemplate(area, image, cv2.TM_CCOEFF_NORMED)
                 threshold = minimum
-            for _ in range(8):
+            for _ in range(20):
                 _, score, _, (x, y) = cv2.minMaxLoc(scores)
                 if score < threshold:
                     break
@@ -236,14 +238,25 @@ class FruitMenu(RepairBoxMenu):
         return first
 
     def stable_dialog(self, window, wait, check):
+        # The panel may animate/load for several frames after a registered
+        # click. Require two consecutive stable observations, with a deadline.
+        previous = None
+        for _ in range(20):
+            check()
+            current = self.search_dialog(window.snapshot())
+            if current is not None and previous is not None and abs(current['x']-previous['x']) <= 3 \
+                    and abs(current['y']-previous['y']) <= 3:
+                return current
+            previous = current
+            wait(.15)
+        raise ValueError('背包搜索框未确认，未输入文字')
+
+    def click_control(self, target, device, check, wait):
         check()
-        first = self.search_dialog(window.snapshot())
-        wait(.12)
+        device.execute({'type': 'cursor_move', 'x': target['x'], 'y': target['y']})
+        wait(.15)  # Let the game process pointer arrival before button input.
         check()
-        second = self.search_dialog(window.snapshot())
-        if first is None or second is None or abs(first['x']-second['x']) > 3 or abs(first['y']-second['y']) > 3:
-            raise ValueError('背包搜索框未确认，未输入文字')
-        return second
+        self.use(target, device, check, wait)
 
     def open_search(self, window, tap, wait, check, device):
         check()
@@ -266,17 +279,106 @@ class FruitMenu(RepairBoxMenu):
         if bag is None or bag.get('search_results'):
             raise ValueError('按 B 后未确认完整背包，未打开搜索')
         target = dict(bag, x=bag['x']-13*bag['scale'])
-        self.use(target, device, check, wait)
+        self.click_control(target, device, check, wait)
         wait(.3)
         return self.stable_dialog(window, wait, check)
 
-    def prepare(self, window, tap, wait, check, device):
-        # Search every new meal. Search results may also contain recipes, so a
-        # whitelisted fruit icon, its selected outline and the Eat action are
-        # still mandatory; a query match alone never authorizes consumption.
-        for food in FRUITS.values():
+    def ready_food(self, picture, food, cell):
+        if food in FRUITS.values():
+            target = self.ready(picture)
+            return target if target is not None and target['food'] == food else None
+        frame = self.frame(picture)
+        bag = self.bag_in(frame)
+        # Generic foods still require a filtered backpack, the selected cell
+        # border, real 食用 text and the independently checked cyan button.
+        if bag is None or not bag.get('search_results') or not self.selected(frame, cell):
+            return None
+        buttons = self.matches(frame, self.eat[:, 38:74], self.scales(frame), minimum=.88)
+        buttons = [b for b in buttons if self.is_food_button(frame, b, [cell])]
+        if not buttons:
+            return None
+        best = buttons[0]
+        if any(abs(b['x']-best['x']) > 8 or abs(b['y']-best['y']) > 8 for b in buttons):
+            raise ValueError('食用按钮位置存在歧义，未食用')
+        return dict(best, food=food)
+
+    def detail_stars(self, picture, button):
+        """Count stars in the confirmed item's cream header, not grid order.
+
+        Same-name search results can contain several quality variants. Require
+        the actual detail header and reject ambiguous/unmatched gold marks.
+        """
+        frame = self.frame(picture)
+        x, y, scale = button['x'], button['y'], button['scale']
+        left, right = max(0, round(x-100*scale)), min(frame.shape[1], round(x+140*scale))
+        top, bottom = max(0, round(y-185*scale)), max(0, round(y-30*scale))
+        roi = frame[top:bottom, left:right]
+        if not roi.size:
+            return None
+        blue, green, red = cv2.split(roi.astype(np.int16))
+        cream = ((red >= 225) & (green >= 205) & (green <= 245) & (blue >= 175)
+                 & (blue <= 220) & (red-green > 5) & (green-blue > 10)).astype(np.uint8)
+        _, _, stats, _ = cv2.connectedComponentsWithStats(cream)
+        headers = [r for r in stats[1:] if 110*scale <= r[2] <= 190*scale
+                   and 15*scale <= r[3] <= 65*scale and r[4] >= 1800*scale**2]
+        if len(headers) != 1:
+            return None
+        hx, hy, width, height, _ = headers[0]
+        band = roi[max(0, round(hy+height-10*scale)):min(roi.shape[0], round(hy+height+10*scale)),
+                   round(hx+5*scale):round(hx+width-5*scale)]
+        if not band.size:
+            return None
+        hsv = cv2.cvtColor(band, cv2.COLOR_BGR2HSV)
+        gold = (hsv[:, :, 0] >= 15) & (hsv[:, :, 0] <= 40) & (hsv[:, :, 1] >= 90) & (hsv[:, :, 2] >= 170)
+        centers = []
+        # The verified star capture is 15px at 1366px client width.
+        for factor in (1., .96, 1.04):
+            size = max(5, round(15*scale/(1366/778)*factor))
+            if size > min(band.shape[:2]):
+                continue
+            icon = cv2.resize(self.star_icon, (size, size), interpolation=cv2.INTER_AREA)
+            scores = cv2.matchTemplate(band, icon, cv2.TM_CCOEFF_NORMED)
+            for _ in range(6):
+                _, score, _, (sx, sy) = cv2.minMaxLoc(scores)
+                if score < .82:
+                    break
+                center = (sx+size/2, sy+size/2)
+                if not any(abs(center[0]-cx) < size*.65 and abs(center[1]-cy) < size*.65 for cx, cy in centers):
+                    centers.append(center)
+                scores[max(0, sy-size//2):sy+size//2+1, max(0, sx-size//2):sx+size//2+1] = -1
+        if len(centers) > 5 or (centers and max(cy for _, cy in centers)-min(cy for _, cy in centers) > 3*scale):
+            return None
+        covered = np.zeros(gold.shape, dtype=bool)
+        for cx, cy in centers:
+            radius = round(5*scale)
+            covered[max(0, round(cy)-radius):round(cy)+radius+1,
+                    max(0, round(cx)-radius):round(cx)+radius+1] = True
+        if np.count_nonzero(gold & ~covered) > max(3, 3*scale**2):
+            return None
+        return len(centers)
+
+    def prepare(self, window, tap, wait, check, device, inventory=None, query_check=None):
+        # Inventory is read before any search. Never invent ownership from a
+        # query, recipe card, warehouse item or a previously cached quantity.
+        candidates = [item for item in (inventory or []) if item.get('edible') is True
+                        and item.get('count', 0) > 0 and not item.get('locked')
+                        and isinstance(item.get('name'), str) and 1 <= len(item['name']) <= 32
+                        and not any(ord(c) < 32 for c in item['name'])]
+        prepared = [item for item in candidates if item.get('prepared') is True]
+        if prepared:
+            if any(type(item.get('star')) is not int or not 0 <= item['star'] <= 5 for item in prepared):
+                raise ValueError('成品料理星级未确认，稍后自动重试')
+            lowest_star = min(item['star'] for item in prepared)
+            prepared = [item for item in prepared if item['star'] == lowest_star]
+        # Randomize only within the lowest stocked quality tier. Search/UI
+        # uncertainty must retry rather than consuming higher-star dishes.
+        fruits = [item for item in candidates if item['name'] in FRUITS.values()]
+        foods = sorted({item['name'] for item in (prepared or fruits)})
+        if not foods:
+            raise ValueError('随身背包内没有确认可食用的食物')
+        for food in random.sample(foods, len(foods)):
             dialog = self.open_search(window, tap, wait, check, device)
-            self.use(dialog, device, check, wait)
+            self.click_control(dialog, device, check, wait)
             if self.search_dialog(window.snapshot()) is None:
                 raise ValueError('输入前搜索窗口已关闭，未输入文字')
             check()
@@ -288,34 +390,56 @@ class FruitMenu(RepairBoxMenu):
             tap('backspace')
             device.type_text(food, check, wait)
             dialog = self.stable_dialog(window, wait, check)
-            self.use(dialog['submit'], device, check, wait)
-            for _ in range(8):
+            self.click_control(dialog['submit'], device, check, wait)
+            for _ in range(20):
                 wait(.15)
                 check()
                 picture = window.snapshot()
-                if self.search_dialog(picture) is None and self.end_search_target(self.frame(picture)) is not None:
+                frame = self.frame(picture)
+                if self.search_dialog(picture) is None and self.end_search_target(frame) is not None \
+                        and self.bag_in(frame) is not None:
                     break
             else:
-                raise ValueError('未确认背包搜索结果，未选择水果')
+                raise ValueError('未确认背包搜索结果，未选择食物')
             frame = self.frame(picture)
             bag = self.bag_in(frame)
             if bag is None:
                 raise ValueError('搜索结果未确认')
-            fruits = [f for f in self.available(frame, bag) if f['food'] == food]
-            if not fruits:
-                continue
-            self.use(fruits[0], device, check, wait)
-            wait(.35)
             check()
-            first = self.ready(window.snapshot())
-            wait(.12)
-            check()
-            second = self.ready(window.snapshot())
-            if first is None or second is None or first['food'] != food or second['food'] != food \
-                    or abs(first['x']-second['x']) > 3 or abs(first['y']-second['y']) > 3:
-                raise ValueError('搜索后的水果或食用按钮未确认，未食用')
-            return second
-        raise ValueError('搜索后没有可用的苹果、蓝莓、树莓或橘子')
+            if query_check is not None and query_check() != food:
+                raise ValueError('背包实际搜索文字不符，未选择食物')
+            if food in FRUITS.values():
+                cells = [f for f in self.available(frame, bag) if f['food'] == food][:1]
+            else:
+                scale = bag['scale']
+                # Visible filtered rows, anchored to the detected header,
+                # never to desktop resolution. Quality variants can span more
+                # than one row. Recipes are rejected
+                # by the selected outline + actual 食用 action below.
+                rows = max(0, min(12, int((frame.shape[0]-55*scale-bag['y']-46*scale)/(54*scale))+1))
+                cells = [dict(x=bag['x']+(54*i-211)*scale, y=bag['y']+(46+54*j)*scale,
+                              scale=scale, food=food) for j in range(rows) for i in range(5)]
+                cells = [c for c in cells if 0 < c['x'] < frame.shape[1] and 0 < c['y'] < frame.shape[0]]
+            for cell in cells:
+                self.click_control(cell, device, check, wait)
+                wait(.35)
+                check()
+                first = self.ready_food(window.snapshot(), food, cell)
+                wait(.12)
+                check()
+                second = self.ready_food(window.snapshot(), food, cell)
+                if first is not None and second is not None and abs(first['x']-second['x']) <= 3 \
+                        and abs(first['y']-second['y']) <= 3:
+                    if prepared:
+                        first_star = self.detail_stars(window.snapshot(), second)
+                        wait(.12)
+                        check()
+                        second_star = self.detail_stars(window.snapshot(), second)
+                        if first_star != lowest_star or second_star != lowest_star:
+                            continue
+                        return dict(second, star=lowest_star)
+                    return second
+        raise ValueError('背包已有食物的搜索结果或食用按钮未确认，未食用')
 
     def close_target(self, picture):
         frame = self.frame(picture)

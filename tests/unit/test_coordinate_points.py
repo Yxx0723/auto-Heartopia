@@ -220,3 +220,17 @@ def test_wait_write_failure_preserves_the_original_file(tmp_path, monkeypatch):
             store.set_collect_wait(1, 5)
     assert store.path.read_bytes() == before
     assert store.set_collect_wait(1, 2)['points'][0]['collect_wait'] == 2
+
+
+def test_collection_count_survives_waypoint_conversion():
+    data = append_point(empty_points(), SNAPSHOT, STAMP)
+    data['points'][0]['collect_count'] = 3
+    assert ordered_waypoints(data)[0]['collect_count'] == 3
+
+
+@pytest.mark.parametrize('count', [0, -1, True, 1.5, 101, '3'])
+def test_invalid_collection_count_is_rejected(count):
+    data = append_point(empty_points(), SNAPSHOT, STAMP)
+    data['points'][0]['collect_count'] = count
+    with pytest.raises(ValueError):
+        ordered_waypoints(data)

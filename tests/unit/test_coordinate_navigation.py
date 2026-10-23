@@ -89,14 +89,15 @@ def test_recorded_endpoint_never_relaxes_water_clearance():
     assert not obstacles.clear((0, 8.35), (0, 8.35))
 
 
-def test_recovery_landing_inside_an_inferred_probe_discards_that_disproven_probe():
+def test_confirmed_same_direction_motion_can_clear_risk_without_creating_a_probe_wall():
     snapshot = scene()
     nav = LocalNavigator(lambda: snapshot, water_areas=())
     nav.next_target((0, 0, 0), (0, 0, 8))
     nav.blocked((0, 0, 0), (0, 0, 3))
-    assert len(nav.probes) == 1
-    following = nav.next_target((0, 0, 1), (0, 0, 8))
-    assert not nav.probes and following[2] > 1
+    assert not nav.probes and nav.risks.count == 1
+    nav.motion_succeeded((0, 0, 0), (0, 0, 3))
+    following = nav.next_target((0, 0, 3), (0, 0, 8))
+    assert not nav.risks.count and following[2] > 3
 
 
 def test_passing_temporary_legs_does_not_turn_back_and_final_arrival_remains_precise():

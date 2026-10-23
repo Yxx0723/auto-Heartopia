@@ -389,6 +389,22 @@ def recovery_run(game, positions=((0, 0, 5),), attempts=3, jump=False, report=No
                         recovery_attempts=attempts, jump_on_recovery=jump)
 
 
+def test_stall_records_target_and_released_keys_even_when_geometry_diagnostics_fail(monkeypatch):
+    import utils.core.playback_trace as trace
+    def failed(*args):
+        raise OSError('diagnostic unavailable')
+    monkeypatch.setattr(trace, 'collision_context', failed)
+    game, stalls = WallGame(), []
+    def report(state, message, **extra):
+        if extra.get('incident_kind') == 'movement_stall':
+            assert not game.keys
+            stalls.append(extra)
+    assert recovery_run(game, report=report)
+    assert stalls and stalls[0]['position'] and stalls[0]['target'] == [0, 0, 5]
+    assert stalls[0]['collision_context']['state'] == 'unavailable'
+    assert not game.keys and game.closed
+
+
 @pytest.mark.parametrize('right_only,expected', [(False, [1]), (True, [1, 2])])
 def test_backs_up_and_alternates_sides_without_skipping_saved_points(right_only, expected):
     game = WallGame(right_only)
@@ -689,3 +705,22 @@ def test_drift_during_the_final_wait_slice_cannot_complete_a_point():
     with pytest.raises(ValueError, match='离开|高度'):
         collection_run(game, positions=((0, 0, 0),), default_wait=.125, report=report)
     assert reached == [] and not game.keys and game.closed
+
+
+@pytest.mark.parametrize('pause', [False, True])
+def test_rare_wood_presses_f_three_times_and_waits_between_each(pause):
+    game = Game()
+    data = manual_points(((0, 0, 0),))
+    data['points'][0].update(collect_count=3, collect_wait=.5)
+    def on_input(event):
+        if pause and event == {'type': 'key_down', 'key': 'f'} and game.pause_at == math.inf:
+            game.pause_at, game.resume_at = game.time + .04, game.time + 1.
+    game.on_input = on_input
+    assert drive_points(data, game.size(), lambda: game, game, game, game,
+                        lambda *a, **k: None, clock=game, collect_wait_seconds=.5)
+    downs = [t for t, e in game.events if e == {'type': 'key_down', 'key': 'f'}]
+    ups = [t for t, e in game.events if e == {'type': 'key_up', 'key': 'f'}]
+    assert len(downs) == len(ups) == 3
+    assert all(downs[i+1] - ups[i] >= .5 - 1e-6 for i in range(2))
+    assert game.time - ups[-1] >= .5 - 1e-6
+    assert not game.keys and game.closed

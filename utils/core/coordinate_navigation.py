@@ -10,6 +10,7 @@ import math
 import time
 
 from utils.core import thresholds as policy
+from utils.core.approach_risk import ApproachRisks, local_geometry
 from utils.core.coordinate_route import direction_keys, distance, key_vector, valid_position
 from utils.core.navigation_water import NAVIGATION_WATER_AREAS as WATER_AREAS
 
@@ -75,8 +76,9 @@ def scene_geometry_signature(scene):
 
 
 class ObstacleMap:
-    def __init__(self, scene, position, probes=(), water_areas=WATER_AREAS, goal=None, search_radius=None):
+    def __init__(self, scene, position, probes=(), water_areas=WATER_AREAS, goal=None, search_radius=None, risks=None):
         self.height = position[1]
+        self.risks = risks
         self.origin = tuple(position)
         self.search_radius = policy.COORD_NAV_SEARCH_RADIUS if search_radius is None else search_radius
         self.radius = self.search_radius + policy.COORD_NAV_LEG_LENGTH
@@ -160,6 +162,12 @@ class ObstacleMap:
     def covers_search(self, position, radius):
         return max(abs(position[0] - self.origin[0]), abs(position[2] - self.origin[2])) + radius <= self.radius
 
+    def risk_cost(self, start, end):
+        return self.risks.cost(start, end, self.height) if self.risks is not None else 0.
+
+    def travel_cost(self, start, end):
+        return math.dist(start,end) + self.risk_cost(start,end)
+
 
 def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None, search_radius=None,
               max_nodes=None, horizon=None, approach_goal=None, before_search=lambda: None):
@@ -178,7 +186,7 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
     local = goal if remaining <= horizon else tuple(
         a + (b - a) * horizon / remaining for a, b in zip(start, goal))
     check()
-    if obstacles.clear(start, local, escape=True):
+    if obstacles.clear(start, local, escape=True) and obstacles.risk_cost(start,local) == 0:
         raw = [start, local]
     else:
         before_search()
@@ -189,7 +197,7 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
         counter = itertools.count()
         frontier = [(math.dist(start, local), next(counter), (0, 0), 0.)]
         costs, parents, closed = {(0, 0): 0.}, {}, set()
-        best, reached = (0, 0), None
+        best, reached, reached_cost = (0, 0), None, math.inf
         point_cache, edge_cache = {}, {}
         offsets = [(dx, dz) for dx in (-1, 0, 1) for dz in (-1, 0, 1) if dx or dz]
 
@@ -199,6 +207,8 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
             return point_cache[node]
 
         while frontier and len(closed) < max_nodes:
+            if reached is not None and frontier[0][0] >= reached_cost-1e-9:
+                break
             if len(closed) % 32 == 0:
                 check()
             _, _, node, cost = heapq.heappop(frontier)
@@ -209,8 +219,9 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
             if math.dist(point, goal) < math.dist(world(best), goal):
                 best = node
             if math.dist(point, local) <= step and obstacles.clear(point, local):
-                reached = node
-                break
+                candidate_cost = cost+obstacles.travel_cost(point,local)
+                if candidate_cost < reached_cost:
+                    reached, reached_cost = node, candidate_cost
             for dx, dz in offsets:
                 neighbor = (node[0] + dx, node[1] + dz)
                 if max(abs(neighbor[0]), abs(neighbor[1])) > limit or neighbor in closed:
@@ -224,11 +235,12 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
                     edge_cache[edge] = obstacles.clear(point, world(neighbor), escape=node == (0, 0))
                 if not edge_cache[edge]:
                     continue
-                new_cost = cost + step * math.hypot(dx, dz)
+                new_cost = cost + obstacles.travel_cost(point,world(neighbor))
                 if new_cost >= costs.get(neighbor, math.inf):
                     continue
                 costs[neighbor], parents[neighbor] = new_cost, node
                 heapq.heappush(frontier, (new_cost + math.dist(world(neighbor), local), next(counter), neighbor, new_cost))
+        found_local = reached is not None
         if reached is None:
             if remaining <= horizon or remaining - math.dist(world(best), goal) < policy.COORD_NAV_MIN_PROGRESS:
                 raise NavigationWait('暂未找到可通行路径，正在重新寻路')
@@ -237,7 +249,7 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
         while nodes[-1] != (0, 0):
             nodes.append(parents[nodes[-1]])
         raw = [world(node) for node in reversed(nodes)]
-        if obstacles.clear(raw[-1], local):
+        if obstacles.clear(raw[-1], local) and (found_local or obstacles.risk_cost(raw[-1],local) == 0):
             raw.append(local)
     # Greedy visible shortcuts, followed by short fixed steering legs. No
     # untested smoothing curve can cut a corner or pass through a thin wall.
@@ -246,7 +258,9 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
         check()
         end = index + 1
         for candidate in range(index + 2, len(raw)):
-            if obstacles.clear(raw[index], raw[candidate], escape=index == 0):
+            corridor_cost = sum(obstacles.travel_cost(a,b) for a,b in zip(raw[index:candidate],raw[index+1:candidate+1]))
+            if obstacles.clear(raw[index], raw[candidate], escape=index == 0) and obstacles.travel_cost(
+                    raw[index],raw[candidate]) <= corridor_cost+1e-8:
                 end = candidate
         length = math.dist(raw[index], raw[end])
         count = max(1, math.ceil(length / policy.COORD_NAV_LEG_LENGTH))
@@ -278,6 +292,9 @@ class LocalNavigator:
         self.stats = {'map_builds': 0, 'plans': 0}
         self.water_guard = None
         self.water_guard_context = None
+        self.risks = ApproachRisks(clock=clock)
+        self.risk_revision = self.risks.revision
+        self.last_decision = {}
 
     def set_waypoint(self, index):
         if self.waypoint != index:
@@ -345,9 +362,12 @@ class LocalNavigator:
             norm = math.hypot(*vector)
             unit = (vector[0] / norm, vector[1] / norm)
             end = tuple(a + b * travel for a, b in zip(start, unit))
-            return obstacles.clear(start, end, escape=True), sum(a * b for a, b in zip(delta, unit))
+            return obstacles.clear(start, end, escape=True), sum(a * b for a, b in zip(delta, unit)) - obstacles.risk_cost(start,end)
 
-        if candidate(preferred)[0]:
+        preferred_vector = key_vector(preferred,basis)
+        norm = math.hypot(*preferred_vector)
+        preferred_end = tuple(a+b/norm*travel for a,b in zip(start,preferred_vector))
+        if candidate(preferred)[0] and obstacles.risk_cost(start,preferred_end) == 0:
             return preferred
         alternatives = [(score, set(keys)) for keys in ('w', 'd', 's', 'a', 'wd', 'ds', 'sa', 'aw')
                         for clear, score in [candidate(set(keys))] if clear]
@@ -368,21 +388,20 @@ class LocalNavigator:
             self.water_guard_context = context
         return self.steering_keys(position, target, basis, travel, obstacles=self.water_guard)
 
-    def blocked(self, position, target):
+    def blocked(self, position, target, *, attempt_id=None, mode='walk'):
         if self.path_memory:
             self.path_memory.reject_selected()
         self.memory_path = []
         self.memory_aim = None
         self.memory_state = 'learning' if self.path_memory else 'off'
-        length = distance(position, target)
-        if length > policy.COORD_REACH_RADIUS:
-            center = (position[0] + (target[0] - position[0]) / length,
-                      position[2] + (target[2] - position[2]) / length)
-            polygon = tuple((center[0] + .45 * math.cos(i * math.pi / 4),
-                             center[1] + .45 * math.sin(i * math.pi / 4)) for i in range(8))
-            self.probes.append((self.clock() + policy.COORD_NAV_PROBE_SECONDS, polygon))
-            self.probes = self.probes[-32:]
+        self.risks.record(position,target,attempt_id=attempt_id,mode=mode,
+                          geometry=local_geometry(self.obstacles,position))
+        self.last_decision = {'kind':'approach_failed', 'risk_revision':self.risks.revision,
+                              'support_ref':None, 'physical_wall_confirmed':False}
         self.invalidate()
+
+    def motion_succeeded(self, before, after, mode='walk'):
+        self.risks.success(before,after,mode=mode)
 
     def next_target(self, position, target, check=lambda: None, before_plan=lambda: None):
         if self.path_memory is None or self.waypoint is None:
@@ -417,7 +436,8 @@ class LocalNavigator:
                 result = self._next_target(position, via, check, before_plan, approach_goal=target)
                 # Check the currently loaded corridor. Farther trace segments
                 # are checked later as scene coverage follows the character.
-                if self.obstacles.clear((position[0], position[2]), (via[0], via[2]), escape=True):
+                if self.obstacles.clear((position[0], position[2]), (via[0], via[2]), escape=True) and self.obstacles.risk_cost(
+                        (position[0],position[2]),(via[0],via[2])) == 0:
                     self.memory_state = 'reusing'
                     return result
             except NavigationWait as exc:
@@ -443,20 +463,27 @@ class LocalNavigator:
                 break
             if not self.obstacles.clear(start, end, escape=True):
                 break
+            if self.obstacles.risk_cost(start,end) > 0:
+                break
             selected = point
         return selected
 
     def _build_map(self, scene, position, target, radius):
         self.stats['map_builds'] += 1
         return ObstacleMap(scene, position, [p for _, p in self.probes], self.water_areas,
-                           goal=target, search_radius=radius)
+                           goal=target, search_radius=radius, risks=self.risks)
 
     def _refresh_obstacles(self, position, target):
         scene = self.scene_provider()
         if not scene or scene.get('state') != 'ready':
+            self.risks.clear()
             self.invalidate()
             raise NavigationWait('等待最新场景数据，稍后自动寻路', reason='scene')
         now = self.clock()
+        self.risks.bind(repr((scene.get('cache_context'),scene.get('terrain_revision'))))
+        self.risks.expire(now)
+        if self.risk_revision != self.risks.revision:
+            self.path, self.obstacles, self.retry_at = [], None, 0.
         current = (position[0], position[2])
         probes = [probe for probe in self.probes if probe[0] > now
                   and polygon_distance(current, current, probe[1]) > 1e-6]
@@ -469,6 +496,10 @@ class LocalNavigator:
         if changed or self.obstacles is None \
                 or abs(position[1] - self.obstacles.height) >= policy.COORD_NAV_HEIGHT_REFRESH:
             self.obstacles = self._build_map(scene, position, target, max(policy.COORD_NAV_SEARCH_RADIUS, self.search_radius))
+            before_revision = self.risks.revision
+            self.risks.revalidate(self.obstacles)
+            if before_revision != self.risks.revision:
+                self.path = []
             previous = (position[0], position[2])
             for index, point in enumerate(self.path):
                 following = (point[0], point[2])
@@ -478,6 +509,7 @@ class LocalNavigator:
                 previous = following
             self.retry_at = 0.
         self.obstacles.set_goal(target)
+        self.risk_revision = self.risks.revision
         return now
 
     def _next_target(self, position, target, check=lambda: None, before_plan=lambda: None, approach_goal=None):
@@ -533,13 +565,20 @@ class LocalNavigator:
                 self.retry_at = now + policy.COORD_NAV_RETRY_SECONDS
                 raise NavigationWait('暂未找到可通行路径，正在重新寻路')
             self.retry_at = 0.
+            self.last_decision = {'kind':'alternative_approach' if self.risks.count else 'normal_plan',
+                                  'risk_count':self.risks.count, 'risk_revision':self.risks.revision}
         # Follow a checked chord through temporary legs; the saved collection
         # destination and its precise arrival radius are unchanged.
         selected = self.path[0]
+        prefix = [position,self.path[0]]
         for point in self.path[1:]:
             if distance(position, point) > policy.COORD_NAV_STEERING_LOOKAHEAD:
                 break
             if not self.obstacles.clear(current, (point[0], point[2]), escape=True):
+                break
+            prefix.append(point)
+            if self.obstacles.travel_cost(current,(point[0],point[2])) > sum(
+                    self.obstacles.travel_cost((a[0],a[2]),(b[0],b[2])) for a,b in zip(prefix,prefix[1:]))+1e-8:
                 break
             selected = point
         return selected

@@ -195,6 +195,19 @@ class ReadOnlyPosition:
     def held_tool_snapshot(self):
         return self._tools_snapshot(held=True)
 
+    def food_inventory_snapshot(self, check=lambda: None):
+        if self.locator is None:
+            raise ValueError('当前坐标版本不支持背包检测')
+        from utils.drivers.food_inventory import FoodInventoryReader
+        if getattr(self, 'food_inventory_reader', None) is None:
+            self.food_inventory_reader = FoodInventoryReader(self)
+        return self.food_inventory_reader.snapshot(check)
+
+    def food_search_query(self):
+        if getattr(self, 'food_inventory_reader', None) is None:
+            raise ValueError('尚未读取当前背包')
+        return self.food_inventory_reader.search_query()
+
     def _tools_snapshot(self, held):
         if self.locator is None:
             raise ValueError('当前坐标版本不支持工具耐久检测')
