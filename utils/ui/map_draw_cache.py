@@ -7,6 +7,7 @@ from utils.core.coordinate_route import valid_position
 from utils.core import thresholds as policy
 from utils.core.scene_map import barrier_strokes
 from utils.core.map_resources import combine_resource_markers
+from utils.ui.collision_display import display_corners, collision_faces
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,24 @@ def polygon_data(polygon):
 
 def intersects(a, b):
     return a[1] >= b[0] and a[0] <= b[1] and a[3] >= b[2] and a[2] <= b[3]
+
+
+def nearby_model_key(obj):
+    return ('nearby-model', obj.get('model_type', obj.get('kind', 'object')), tuple(obj['position']))
+
+
+def polygon_distance(x, z, coords):
+    """Horizontal distance to the footprint, including a point inside it."""
+    points = list(zip(coords[::2], coords[1::2]))
+    inside, distance = False, math.inf
+    for (ax, az), (bx, bz) in zip(points, points[1:] + points[:1]):
+        if (az > z) != (bz > z) and x < (bx-ax)*(z-az)/(bz-az)+ax:
+            inside = not inside
+        dx, dz = bx-ax, bz-az
+        length = dx*dx+dz*dz
+        t = max(0., min(1., ((x-ax)*dx+(z-az)*dz)/length)) if length else 0.
+        distance = min(distance, math.hypot(ax+t*dx-x, az+t*dz-z))
+    return 0. if inside else distance
 
 
 def object_key(obj):
@@ -82,6 +101,7 @@ class SceneGeometryCache:
         self.object_cells, self.box_cells, self.wide_boxes = {}, {}, []
         self.preparations = 0
         self.global_indexes = []
+        self.models, self.model_cells, self.box_details = [], {}, []
 
     def candidates(self, index, bounds):
         xs, zs = cells_for(bounds)
@@ -90,7 +110,9 @@ class SceneGeometryCache:
     def select(self, scene, position, radius, viewport):
         objects, boxes = scene.get('objects', []), scene.get('colliders', [])
         definitions = scene.get('global_resources', ())
-        source_key = (id(scene), id(objects), len(objects), id(boxes), len(boxes), id(definitions), len(definitions))
+        models = scene.get('models', ())
+        source_key = (id(scene), id(objects), len(objects), id(boxes), len(boxes), id(definitions), len(definitions),
+                      id(models), len(models))
         if source_key != self.source_key:
             self.source, self.source_key = scene, source_key
             self.objects = sorted(combine_resource_markers(objects, definitions),
@@ -99,6 +121,19 @@ class SceneGeometryCache:
             self.barrier_kinds = {}
             self.cached_keys = set()
             self.object_cells, self.box_cells, self.wide_boxes = {}, {}, []
+            self.models, self.model_cells, self.box_details = [], {}, []
+            seen_models = set()
+            for obj in [*models, *(obj for obj in objects if obj.get('category') in (None, 'other'))]:
+                if obj.get('map_cached') or not valid_position(obj.get('position')):
+                    continue
+                key = nearby_model_key(obj)
+                if key in seen_models:
+                    continue
+                seen_models.add(key)
+                x, _, z = obj['position']
+                cell = math.floor(x/policy.COORD_SCENE_CACHE_CELL_SIZE), math.floor(z/policy.COORD_SCENE_CACHE_CELL_SIZE)
+                self.model_cells.setdefault(cell, []).append(len(self.models))
+                self.models.append(obj)
             for i, obj in enumerate(self.objects):
                 x, _, z = obj['position']
                 cell = math.floor(x/policy.COORD_SCENE_CACHE_CELL_SIZE), math.floor(z/policy.COORD_SCENE_CACHE_CELL_SIZE)
@@ -116,6 +151,7 @@ class SceneGeometryCache:
                     self.cached_keys.add(key)
                 i = len(self.boxes)
                 self.boxes.append((key, coords, bounds))
+                self.box_details.append((('nearby-collider', coords, tuple(box.get('height', ())), display_corners(box)), box))
                 xs, zs = cells_for(bounds)
                 if len(xs)*len(zs) > 256:
                     self.wide_boxes.append(i)
@@ -126,6 +162,8 @@ class SceneGeometryCache:
                 if kind:
                     self.barrier_kinds[key] = kind
             self.valid_keys = self.reference_keys | {object_key(obj) for obj in self.objects} | {box[0] for box in self.boxes}
+            self.valid_keys.update(nearby_model_key(obj) for obj in self.models)
+            self.valid_keys.update(key for key, _ in self.box_details)
             self.selection_key = None
             self.preparations += 1
         selection_key = (source_key, tuple(position) if position is not None else None, radius, viewport)
@@ -153,6 +191,22 @@ class SceneGeometryCache:
                                                 min(max(z, box[2][2]), box[2][3]) - z) <= radius]
                 self.selection = visible_objects, visible_boxes
         return self.selection
+
+    def nearby_details(self, position):
+        """Live display only. Never adds geometry to the navigation snapshot."""
+        if not valid_position(position):
+            return [], []
+        x, _, z = position
+        radius = policy.COORD_MAP_DETAIL_RADIUS
+        bounds = (x-radius, x+radius, z-radius, z+radius)
+        models = [self.models[i] for i in self.candidates(self.model_cells, bounds)
+                  if math.hypot(self.models[i]['position'][0]-x, self.models[i]['position'][2]-z) <= radius]
+        indexes = sorted(set(self.candidates(self.box_cells, bounds)) | set(self.wide_boxes))
+        boxes = [self.box_details[i] for i in indexes
+                 if not self.box_details[i][1].get('map_cached')
+                 and intersects(self.boxes[i][2], bounds)
+                 and polygon_distance(x, z, self.boxes[i][1]) <= radius]
+        return models, boxes
 
     def visible_water(self, viewport):
         bounds = viewport.bounds()
@@ -314,6 +368,32 @@ class MapDrawCache:
             item = self.canvas.create_line(*projected, **options)
             entry.commands.append((item, ()))
             self.register(entry, item, options.get('tags'))
+
+    def collision_detail(self, key, box):
+        if self.existing(key) is not None:
+            return
+        faces = collision_faces(box)
+        entry = self.new_entry(key, -1, None)
+        if faces is None:
+            coords = [v for point in box['polygon'] for v in self.viewport.screen(*point)]
+            tags = ('scene-collider', 'nearby-collision', 'collision-unknown')
+            item = self.canvas.create_polygon(*coords, fill='', outline='#aaa9a0', width=1.5,
+                                              dash=(4, 3), tags=tags)
+            entry.commands.append((item, ()))
+            self.register(entry, item, tags)
+            return
+        # Fill candidate top faces first; projected side edges stay visible.
+        for kind, polygon in sorted(faces, key=lambda f: f[0] != 'top'):
+            projected = [self.viewport.screen(*point) for point in polygon]
+            coords = [v for point in projected for v in point]
+            tags = ('scene-collider', 'nearby-collision', 'collision-'+kind)
+            if kind == 'top':
+                item = self.canvas.create_polygon(*coords, fill='#bfdac0', stipple='gray25',
+                                                  outline='#9ab69b', width=1, tags=tags)
+            else:
+                item = self.canvas.create_line(*coords, *projected[0], fill='#edaa6d', width=2, tags=tags)
+            entry.commands.append((item, ()))
+            self.register(entry, item, tags)
 
     def barrier(self, key, coords, color, kind):
         """Retain each true collision footprint and its rail/post detail."""

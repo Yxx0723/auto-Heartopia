@@ -1,4 +1,5 @@
 """Version-pinned read-only scene metadata; no target-side API calls."""
+import math
 import struct
 from utils.core import thresholds as policy
 from utils.core.scene_map import box_geometry, compose_transform
@@ -524,7 +525,7 @@ class MemorySceneMap:
             transforms[address] = result
             return result
 
-        objects, groups = [], []
+        objects, groups, models = [], [], []
         for hierarchy in entries:
             try:
                 owner = meta.ref(hierarchy, '_hierarchyObject')
@@ -534,9 +535,17 @@ class MemorySceneMap:
                 owners[owner] = hierarchy
                 if info['name'] == 'PhysicGroup':
                     groups.append(owner)
+                elif info['name'] not in ('StaticLevelObjectWrap', 'LevelEntityComponent') and hierarchy != local_hierarchy:
+                    # A hierarchy anchor is a display landmark, not proof of a
+                    # building mesh, solid collider, or traversability.
+                    position = world(hierarchy)[0]
+                    if math.hypot(position[0]-sample['position'][0], position[2]-sample['position'][2]) <= policy.COORD_MAP_DETAIL_RADIUS:
+                        models.append({'position': position, 'model_type': info['name'],
+                                       'source': 'loaded-hierarchy-anchor'})
                 if info['name'] in ('StaticLevelObjectWrap', 'LevelEntityComponent') and hierarchy != local_hierarchy:
                     obj = {'position': world(hierarchy)[0],
                            'kind': 'entity' if info['name'] == 'LevelEntityComponent' else 'object',
+                           'model_type': info['name'],
                            'category': self.object_category(owner, info)}
                     if obj['category'] in ('fluorite', 'roaming_oak'):
                         entity = meta.ref(owner, '<entity>k__BackingField')
@@ -646,7 +655,7 @@ class MemorySceneMap:
         return {'terrain_state': 'ready' if terrain else 'unavailable',
                 'terrain_revision': 'main-terrain-v1' if terrain else None,
                 'schema': 'memory-scene-map-v1', 'state': 'ready', 'read_only': True,
-                'scope': 'loaded-scene-partial', 'objects': objects, 'colliders': colliders,
+                'scope': 'loaded-scene-partial', 'objects': objects, 'colliders': colliders, 'models': models,
                 'position': current['position'], 'barrier_state': barrier_state, 'world_state': world_state,
                 'global_resources': global_resources, 'global_resource_state': global_state,
                 'global_resource_counts': {category: sum(p['category'] == category for p in global_resources)

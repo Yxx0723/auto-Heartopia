@@ -303,6 +303,27 @@ def category_window(tmp_path):
     return window
 
 
+def test_nearby_models_and_collision_overlay_render_without_resource_filter_changes(tmp_path):
+    window = category_window(tmp_path)
+    x, y, z = window.view.position
+    window.scene_state = {'objects': [], 'models': [
+        {'position': [x+1, y, z], 'model_type': 'LoadedBuilding'},
+        {'position': [x+21, y, z], 'model_type': 'FarBuilding'}], 'colliders': [
+            {'polygon': [[x+18, z-1], [x+50, z-1], [x+50, z+1], [x+18, z+1]], 'height': [y, y+6]}]}
+    window.scene_categories = None
+    window.scene_colliders_var.set(True)
+    window.map_hover = Mock()
+    window.draw()
+    assert {'nearby-model', 'nearby-collision'} <= window.map_cache.visible_tags
+    targets = window.map_hover.update.call_args.args[1]
+    assert sum(target.title == '附近模型 / 场景对象' for target in targets) == 1
+    assert any(target.title == '附近碰撞轮廓' for target in targets)
+    window.scene_objects_var.set(False)
+    window.scene_colliders_var.set(False)
+    window.draw()
+    assert not {'nearby-model', 'nearby-collision'} & window.map_cache.visible_tags
+
+
 def drawn_object_tags(window):
     return {tag for tag in window.map_cache.visible_tags if tag.startswith('scene-')}
 

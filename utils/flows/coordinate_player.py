@@ -1219,7 +1219,7 @@ def drive_route(data, reader_factory, device, window, controls, report, clock=Pr
 def drive_points(data, size, reader_factory, device, window, controls, report, clock=PreciseClock, start_mode='first',
                  recovery_attempts=0, jump_on_recovery=False, collect_wait_seconds=None,
                  loop_count=policy.COORD_PLAYBACK_DEFAULT_LOOPS, continuous_recovery=False, navigator=None,
-                 repair_box=None, tool_selector=None, food=None):
+                 repair_box=None, tool_selector=None, food=None, scene_refresh=None):
     reader = None
     try:
         points = ordered_waypoints(data)
@@ -1247,7 +1247,8 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
                          waypoints=points, start_mode=start_mode, recovery_attempts=recovery_attempts,
                          jump_on_recovery=jump_on_recovery, collect_wait_seconds=collect_wait_seconds,
                          loop_count=loop_count, continuous_recovery=continuous_recovery, navigator=navigator,
-                         repair_box=repair_box, tool_selector=tool_selector, food=food).follow()
+                         repair_box=repair_box, tool_selector=tool_selector, food=food,
+                         scene_refresh=scene_refresh).follow()
     except _Stopped:
         return False
     finally:

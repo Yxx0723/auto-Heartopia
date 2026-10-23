@@ -23,7 +23,8 @@ from utils.ui.point_playback import PointPlayback
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
 from utils.ui.scene_map_worker import SceneMapWorker
-from utils.ui.map_draw_cache import MapDrawCache, Viewport, object_key, muted_color
+from utils.ui.map_draw_cache import MapDrawCache, Viewport, object_key, muted_color, nearby_model_key
+from utils.ui.collision_display import collision_faces
 from utils.ui.map_presentation import (MAP_STYLE, draw_grid, draw_chrome, draw_player, chrome_bounds,
                                       draw_waypoint_labels, draw_target_indicator)
 from utils.ui.map_labels import layout_waypoints, HoverTarget, MapHover, target_indicator
@@ -989,6 +990,11 @@ class CoordinateWindow:
         draw_grid(self.map_cache.live, viewport, step)
         scene_objects, scene_boxes = self.map_cache.geometry.select(
             self.scene_state, view.position, getattr(self, 'scene_radius', policy.COORD_SCENE_RADIUS), viewport)
+        nearby_models, nearby_boxes = self.map_cache.geometry.nearby_details(view.position)
+        if not self.scene_objects_var.get() or (self.scene_categories is not None and 'other' not in self.scene_categories):
+            nearby_models = []
+        if not self.scene_colliders_var.get():
+            nearby_boxes = []
         if not self.scene_objects_var.get():
             scene_objects = []
         elif self.scene_categories is not None:
@@ -1013,8 +1019,11 @@ class CoordinateWindow:
             for key, coords, _ in self.map_cache.geometry.visible_water_islands(viewport):
                 self.map_cache.polygon(key, coords, -1, fill=MAP_STYLE['ground'],
                                        outline=MAP_STYLE['shore'], width=1., tags='reference-water-island')
+        detail_footprints = {tuple(value for point in box['polygon'] for value in point) for _, box in nearby_boxes}
         for key, coords, _ in scene_boxes:
             kind = self.map_cache.geometry.barrier_kinds.get(key)
+            if not kind and coords in detail_footprints:
+                continue  # Avoid a solid old outline underneath unknown dashes.
             cached = key in self.map_cache.geometry.cached_keys
             if kind == 'mountain':
                 if self.scene_colliders_var.get():
@@ -1028,6 +1037,15 @@ class CoordinateWindow:
                 color = muted_color(MAP_STYLE['collision']) if cached else MAP_STYLE['collision']
                 self.map_cache.polygon(key, coords, -1, fill='', outline=color, width=1,
                                        tags='scene-collider')
+        # Keep this detail overlay separate from resource categories and from
+        # navigation geometry. Coordinates are game units, not calibrated metres.
+        for key, box in nearby_boxes:
+            self.map_cache.collision_detail(key, box)
+        for obj in nearby_models:
+            self.map_cache.symbol(nearby_model_key(obj), (obj['position'][0], obj['position'][2]), 0,
+                                  lambda painter, x, z: painter.create_polygon(
+                                      x, z-4, x+4, z, x, z+4, x-4, z,
+                                      fill='', outline='#8fd2db', width=1.5, tags='nearby-model'))
         for obj in scene_objects:
             category = obj.get('category')
             self.map_cache.symbol(object_key(obj), (obj['position'][0], obj['position'][2]),
@@ -1074,6 +1092,21 @@ class CoordinateWindow:
                                font=('Microsoft YaHei UI', -13), justify='center')
         if hasattr(self, 'map_hover'):
             targets = []
+            for obj in nearby_models:
+                position = obj['position']
+                targets.append(HoverTarget(px(position[0]), pz(position[2]), '附近模型 / 场景对象',
+                                           obj.get('model_type', obj.get('kind', '未知类型'))+' · '+self.map_distance(position)
+                                           +'\n浅蓝菱形为位置锚点，橙线为实际读取的碰撞投影'))
+            for _, box in nearby_boxes:
+                polygon = box['polygon']
+                x = sum(p[0] for p in polygon)/len(polygon)
+                z = sum(p[1] for p in polygon)/len(polygon)
+                height = box.get('height')
+                detail = ('高度范围 '+f'{height[0]:.2f} ～ {height[1]:.2f}'
+                          if height and len(height) == 2 else '高度信息不可用')
+                explanation = ('浅色为候选顶面，橙线为侧面投影；未验证可通行'
+                               if collision_faces(box) is not None else '虚线：缺少可靠三维表面，不补造顶面或通路')
+                targets.append(HoverTarget(px(x), pz(z), '附近碰撞轮廓', detail+'\n'+explanation))
             for obj in scene_objects:
                 position = obj['position']
                 name = SCENE_CATEGORIES.get(obj.get('category'), SCENE_CATEGORIES['other'])[0]

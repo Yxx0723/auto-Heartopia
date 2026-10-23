@@ -65,7 +65,8 @@ def box_geometry(position, rotation, center, size, parent=None):
                 if not valid_position(world):
                     raise ValueError('Invalid world box')
                 corners.append(world)
-    return {'polygon': hull((v[0], v[2]) for v in corners),
+    return {'display_box': {'schema': 'oriented-box-v1', 'corners': corners},
+            'polygon': hull((v[0], v[2]) for v in corners),
             'height': [min(v[1] for v in corners), max(v[1] for v in corners)]}
 
 

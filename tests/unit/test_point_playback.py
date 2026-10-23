@@ -218,6 +218,38 @@ def test_worker_navigation_is_lazy_before_f6_and_uses_the_bound_process():
     assert worker.take_latest()['state'] == 'stopped'
 
 
+def test_real_runner_accepts_scene_refresh_without_opening_reader_before_f6():
+    provider, refresh, readers = Mock(), Mock(), Mock()
+    device = Mock()
+    worker = PointPlayback('profile.json', runner=drive_points, window_factory=FakeWindow,
+                           controls_factory=WaitingControls, device_factory=lambda window: device,
+                           reader_factory=readers, scene_provider=provider, scene_refresh=refresh)
+    worker.start(points(), 77, auto_navigate=True)
+    worker.stop()
+    worker.close()
+    assert worker.take_latest()['state'] == 'stopped'
+    readers.assert_not_called()
+    provider.assert_not_called()
+    refresh.assert_not_called()
+    device.execute.assert_not_called()
+
+
+@pytest.mark.parametrize('callback', [None, Mock()])
+def test_drive_points_forwards_optional_scene_refresh_to_follower(monkeypatch, callback):
+    from tests.unit.test_coordinate_player import Game
+    from utils.flows.coordinate_player import _Follower
+    game = Game()
+    observed = []
+    def follow(follower):
+        observed.append(follower.scene_refresh)
+        return True
+    monkeypatch.setattr(_Follower, 'follow', follow)
+    assert drive_points(points(), game.size(), lambda: game, game, game, game, Mock(),
+                        clock=game, scene_refresh=callback)
+    assert observed == [callback]
+    assert game.closed and not game.events
+
+
 def test_worker_passes_navigation_with_fresh_scene_provider_to_runner():
     provider = Mock(return_value={'state': 'ready', 'objects': [], 'colliders': []})
     runner = Mock(return_value=True)
