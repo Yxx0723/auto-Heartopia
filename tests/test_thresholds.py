@@ -14,6 +14,7 @@ from utils.core import thresholds
 
 #: 常量名 -> 搬运时的原值。新增阈值时在这里补一行。
 GOLDEN_VALUES = {
+    'COOKING_MAX_MATERIAL_SLOTS': 8,
     'COOKING_TARGET_DRIFT_PIXELS': 4.,
     'COOKING_TASK_SECONDS': 300.,
     'COOKING_RECEIPT_SECONDS': 15.,

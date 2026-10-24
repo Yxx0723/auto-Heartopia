@@ -9,12 +9,12 @@ from tkinter import messagebox, ttk
 from PIL import ImageTk
 
 from utils.drivers.point_game_window import PointGameWindow
-from utils.vision.cooking_menu import REQUIRED
+from utils.vision.cooking_menu import DEFAULT_REQUIRED
 
 
 LABELS = {'menu': '选菜标题', 'recipe': '咖啡名称', 'materials': '四格咖啡豆',
           'start': '开始烹饪按钮', 'cooking': '烹饪中标记', 'stir': '翻炒提示',
-          'collect': '收菜提示', 'interact': '灶台入口（可选）'}
+          'collect': '收菜提示', 'interact': '灶台入口'}
 
 
 class CookingDialog:
@@ -22,17 +22,16 @@ class CookingDialog:
         self.control, self.pid = control, pid
         self.config_path = Path(config_path)
         self.top = tk.Toplevel(parent)
-        self.top.title('单灶自动烹饪 · 咖啡')
-        self.top.geometry('470x650')
+        self.top.title('单灶自动烹饪 · 默认食谱')
+        self.top.geometry('470x550')
         self.top.protocol('WM_DELETE_WINDOW', self.close)
         self.closed = False
         self.capture_pending = False
-        self.status = tk.StringVar(value='先核对咖啡及四格咖啡豆；F6开始/暂停，F9停止')
+        self.status = tk.StringVar(value='站到灶台旁，开始后自动打开并使用默认食谱；F9停止')
         self.count = tk.StringVar(value='1')
         self.reserve = tk.StringVar(value='20')
         self.max_star = tk.StringVar(value='1')
-        self.confirm = tk.BooleanVar(value=False)
-        self.visual = {'schema': 'cooking-profile-v1', 'recipe_name': '咖啡', 'templates': {}}
+        self.visual = {'schema': 'cooking-profile-v1', 'templates': {}}
         for path in (self.config_path, Path(bundled_profile)):
             if path.exists():
                 try:
@@ -41,16 +40,14 @@ class CookingDialog:
                 except (OSError, ValueError):
                     pass
         body = ttk.Frame(self.top, padding=12); body.pack(fill='both', expand=True)
-        ttk.Label(body, text='首版：咖啡 · 咖啡豆 × 4 · 单灶', font=('Microsoft YaHei UI', 12, 'bold')).pack(anchor='w')
-        ttk.Label(body, text='已拥有的锁定、高星同名原料会阻止自动投料。', wraplength=430).pack(anchor='w', pady=8)
-        for text, var, high in (('成功锅数', self.count, 10000), ('咖啡豆至少保留', self.reserve, 1000000),
+        ttk.Label(body, text='使用灶台默认食谱 · 单灶', font=('Microsoft YaHei UI', 12, 'bold')).pack(anchor='w')
+        ttk.Label(body, text='自动核对默认填料；材料未填满或受保护时停止，不自动换料。', wraplength=430).pack(anchor='w', pady=8)
+        for text, var, high in (('成功锅数', self.count, 10000), ('每种食材至少保留', self.reserve, 1000000),
                                  ('允许原料最高星级', self.max_star, 5)):
             row = ttk.Frame(body); row.pack(fill='x', pady=4)
             ttk.Label(row, text=text, width=24).pack(side='left')
             ttk.Spinbox(row, from_=0 if var != self.count else 1, to=high, width=8,
                         textvariable=var).pack(side='left')
-        tk.Checkbutton(body, text='已核对游戏中选择咖啡，四格均为允许使用的咖啡豆',
-                        variable=self.confirm, wraplength=420).pack(anchor='w', pady=8)
         buttons = ttk.Frame(body); buttons.pack(fill='x')
         ttk.Button(buttons, text='开始任务', command=self.start).pack(side='left', expand=True, fill='x')
         ttk.Button(buttons, text='停止 F9', command=control.stop).pack(side='left', expand=True, fill='x', padx=(8, 0))
@@ -59,7 +56,7 @@ class CookingDialog:
                   '标定只截图，不会自动投料；翻炒/收菜须分别采样。', wraplength=430).pack(anchor='w')
         self.calibration_buttons = {}
         grid = ttk.Frame(body); grid.pack(fill='x', pady=8)
-        for i, name in enumerate((*REQUIRED, 'interact')):
+        for i, name in enumerate(DEFAULT_REQUIRED):
             button = ttk.Button(grid, text=LABELS[name], command=lambda n=name: self.capture(n))
             button.grid(row=i//2, column=i%2, sticky='ew', padx=3, pady=3)
             self.calibration_buttons[name] = button
@@ -81,11 +78,9 @@ class CookingDialog:
         try:
             if self.capture_pending:
                 raise ValueError('画面标定尚未完成')
-            if not self.confirm.get():
-                raise ValueError('请先核对食谱和实际填入的四格原料')
             self.control.start(self.pid, self.visual, int(self.count.get()),
                                int(self.reserve.get()), int(self.max_star.get()))
-            self.status.set('已就绪，切回游戏按F6；暂停不会停止游戏内烹饪计时')
+            self.status.set('正在切回游戏并核对默认食谱；F6暂停，F9停止')
         except (OSError, ValueError) as exc:
             messagebox.showerror('无法开始烹饪', str(exc), parent=self.top)
 

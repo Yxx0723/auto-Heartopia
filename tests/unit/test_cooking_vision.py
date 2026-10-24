@@ -32,6 +32,14 @@ def test_menu_requires_recipe_name_and_all_four_materials():
         assert CookingMenu(p).observe(image).stage == 'unknown'
 
 
+def test_default_menu_ignores_coffee_templates_but_rejects_dimmed_modal():
+    p, image = scene('menu', 'start')
+    del p['templates']['recipe']; del p['templates']['materials']
+    assert CookingMenu(p, default_mode=True).observe(image).stage == 'menu'
+    dimmed = Image.fromarray((np.asarray(image)*.4).astype(np.uint8))
+    assert CookingMenu(p, default_mode=True).observe(dimmed).stage == 'unknown'
+
+
 @pytest.mark.parametrize('part,stage', [('cooking', 'cooking'), ('stir', 'stir'),
                                        ('collect', 'done'), ('interact', 'interact')])
 def test_separate_world_prompts_are_identified(part, stage):

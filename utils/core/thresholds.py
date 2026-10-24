@@ -493,3 +493,6 @@ COOKING_RECEIPT_SECONDS = 15.
 COOKING_POLL_SECONDS = .1
 COOKING_INVENTORY_SECONDS = .5
 COOKING_TARGET_DRIFT_PIXELS = 4.
+
+# Engineering bound for typed default recipe material-slot traversal.
+COOKING_MAX_MATERIAL_SLOTS = 8

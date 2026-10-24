@@ -1,5 +1,6 @@
 """One background cooking task, independent of Tk and coordinate route memory."""
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime
 import json
 from pathlib import Path
@@ -7,7 +8,7 @@ import queue
 import threading
 from uuid import uuid4
 
-from utils.core.cooking import Recipe, CookingSession
+from utils.core.cooking import CookingSession
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.point_game_window import PointGameWindow
 from utils.drivers.timeline_hotkeys import PlaybackControls
@@ -40,6 +41,8 @@ class CookingControl:
         return bool(self.thread and self.thread.is_alive())
 
     def update(self, state, message, window=None, **extra):
+        if state in ('paused', 'playback_wait', 'playing'):
+            message = message.replace('回放', '烹饪').replace('站回起点、恢复镜头 · ', '').replace('站回起点后', '')
         with self.lock:
             pot = extra.get('pot') or {}
             signature = (state, message, pot.get('id'), pot.get('stirs'), pot.get('confirmed'))
@@ -72,14 +75,11 @@ class CookingControl:
         if self.runner is None:
             raise ValueError('烹饪入口未装配，请使用新版窗口程序')
         if type(reserve) is not int or not 0 <= reserve <= 100000000:
-            raise ValueError('咖啡豆保留量无效')
+            raise ValueError('食材保留量无效')
         if type(max_star) is not int or not 0 <= max_star <= 5:
             raise ValueError('原料星级范围无效')
-        menu = CookingMenu(visual_profile)
-        if menu.profile.get('recipe_name') != '咖啡':
-            raise ValueError('首版仅支持已只读核对的咖啡食谱')
-        # 2026-10-24: exact TableBagitem names 45108/46106 and four observed slots.
-        session = CookingSession(Recipe('咖啡', (45108,), {46106: 4}, {46106: reserve}), target)
+        menu = CookingMenu(visual_profile, default_mode=True)
+        session = CookingSession(None, target, default_mode=True, material_reserve=reserve, max_star=max_star)
         window = self.window_factory(pid)
         if tuple(window.size()) != menu.size:
             raise ValueError('当前游戏尺寸与烹饪标定不符，请恢复尺寸或重新标定')
@@ -111,8 +111,15 @@ class CookingControl:
             controls.start()
             # Opening this handle is read-only; no food/equipment maintenance is run.
             reader = self.reader_factory(pid, self.profile, hwnd=window.hwnd)
-            self.update('cooking_wait', '咖啡单灶任务已就绪 · 切回游戏按 F6 · F9停止')
-            self.runner(session, window, controls, device, menu.observe,
+            if window.activate() and controls.resume():
+                self.update('cooking', '正在打开灶台并核对默认食谱 · F6暂停 · F9停止')
+            else:
+                self.update('cooking_wait', '请切回游戏按 F6，继续默认食谱烹饪 · F9停止')
+            def observe(picture):
+                observation = menu.observe(picture)
+                # A cached recipe detail alone never authorizes starting a pot.
+                return replace(observation, recipe_view=reader.cooking_recipe_snapshot())
+            self.runner(session, window, controls, device, observe,
                         lambda: reader.cooking_inventory_snapshot(max_star), self.clock, self.update)
         except Exception as exc:
             self.update('error', '自动烹饪停止：'+str(exc), **session.record())

@@ -47,7 +47,8 @@ def test_popup_builds_without_input_or_unsupported_widget_options(tmp_path):
         dialog = CookingDialog(root, control, 123, tmp_path/'local.json', tmp_path/'not-present.json')
         dialog.top.withdraw()
         assert dialog.count.get() == '1'
-        assert not dialog.confirm.get()
+        assert not hasattr(dialog, 'confirm')
+        assert '默认食谱' in dialog.top.title()
         dialog.close()
         control.stop.assert_called_once()
         control.start.assert_not_called()
@@ -70,7 +71,7 @@ def test_worker_failure_releases_device_controls_reader_and_gate(tmp_path):
     control = CookingControl(tmp_path/'profile.json', tmp_path, input_gate=gate,
         device_factory=lambda window: device, controls_factory=lambda *args: controls,
         reader_factory=lambda *args, **kw: reader, runner=Mock(side_effect=RuntimeError('failed')))
-    window = SimpleNamespace(hwnd=1, size=lambda: [1366, 768])
+    window = SimpleNamespace(hwnd=1, size=lambda: [1366, 768], activate=lambda: True)
     control._run(123, window, SimpleNamespace(observe=lambda image: None), session(), 1)
     device.release_all.assert_called_once()
     controls.close.assert_called_once()

@@ -1,6 +1,8 @@
 """Bind point playback to the monitored PID, never to the monitor's similar title."""
 import win32gui
 import win32process
+import win32con
+import pywintypes
 
 from utils.drivers.town_window import TownWindow
 
@@ -26,4 +28,16 @@ class PointGameWindow(TownWindow):
         return bool(super().foreground() and win32process.GetWindowThreadProcessId(self.hwnd)[1] == self.pid)
 
     def bind_foreground(self):
+        return self.foreground()
+
+    def activate(self):
+        """Activate only this PID's bound window after the user starts a task."""
+        if win32process.GetWindowThreadProcessId(self.hwnd)[1] != self.pid:
+            return False
+        try:
+            if win32gui.IsIconic(self.hwnd):
+                win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(self.hwnd)
+        except pywintypes.error:
+            return False
         return self.foreground()

@@ -66,6 +66,14 @@ class PlaybackControls:
         self.listener.wait()
         self.feedback.update('playback_wait', f'回放已就绪 · 站回起点、恢复镜头 · 切到{self.window.title}按F6', window=self.window)
 
+    def resume(self):
+        """Explicit task-start resume; the caller must activate the bound game."""
+        with self.lock:
+            if self.stopped or self.stop_requested() or not self.window.foreground() or self.window.size() != self.size:
+                return False
+            self.running = True
+            return True
+
     def close(self):
         if self.listener:
             self.listener.stop()

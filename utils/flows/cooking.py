@@ -1,7 +1,7 @@
 """Interruptible single-stove runner with injectable vision, inventory and input."""
 import math
 
-from utils.core.cooking import CookingSession
+from utils.core.cooking import CookingSession, bind_default_recipe, inventory_valid
 from utils.core import thresholds as policy
 
 
@@ -37,6 +37,10 @@ def run_cooking(session, window, controls, device, observe, inventory, clock, re
     def same(first, second):
         if first is None or second is None or first.stage != second.stage or first.key != second.key:
             return False
+        if session.default_mode and first.stage == 'menu':
+            a, b = first.recipe_view, second.recipe_view
+            if not a or not b or (a.get('scope'), a.get('signature')) != (b.get('scope'), b.get('signature')):
+                return False
         if first.target is None or second.target is None:
             return first.target is second.target
         return (len(first.target) == len(second.target) == 2 and
@@ -95,7 +99,8 @@ def run_cooking(session, window, controls, device, observe, inventory, clock, re
             if observation.stage == 'unknown' or stable < 2:
                 # Timeouts still advance even while vision cannot classify the frame.
                 from utils.core.cooking import Observation
-                session.update(Observation('unknown'), stock, now)
+                session.update(Observation('unknown', recipe_view=observation.recipe_view), stock, now)
+                report('cooking', session.reason, **session.record())
                 wait(poll_seconds)
                 continue
             # Starts use a fresh owned inventory snapshot, not the polling cache.
@@ -118,8 +123,20 @@ def run_cooking(session, window, controls, device, observe, inventory, clock, re
                 fresh = observe(window.snapshot()) if guard() == 'running' else None
                 if not same(fresh, observation):
                     session.state, session.reason = 'unconfirmed', '操作前画面变化，未派发输入或重试投料'
-                elif not click(fresh.target, fresh.key):
-                    session.state, session.reason = 'unconfirmed', '操作派发时暂停或失焦，未自动重试投料'
+                else:
+                    if action == 'start' and session.default_mode:
+                        # Locks/counts can change without moving any menu pixels.
+                        latest = inventory()
+                        if not inventory_valid(latest) or latest['scope'] != session.pot['scope']:
+                            raise ValueError('开始前背包归属变化，未投料')
+                        selected = bind_default_recipe(fresh.recipe_view, latest, session.material_reserve, session.max_star)
+                        usable = latest.get('selectable_counts', {})
+                        if any(usable.get(i, 0)-n < selected.reserves[i] for i, n in selected.ingredients.items()):
+                            raise ValueError('开始前食材不足或达到保留量，未投料')
+                        session.pot['inventory_before'] = dict(latest['counts'])
+                        session.pot['inventory_last'] = dict(latest['counts'])
+                    if not click(fresh.target, fresh.key):
+                        session.state, session.reason = 'unconfirmed', '操作派发时暂停或失焦，未自动重试投料'
             wait(poll_seconds)
         report('finished' if session.state == 'finished' else 'partial', session.reason, **session.record())
         return session.state == 'finished'

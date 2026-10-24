@@ -288,7 +288,7 @@ class FoodInventoryReader:
                 protected.add(identity)
             else:
                 usable[identity] = usable.get(identity, 0)+count
-            items.append({'item_id': identity, 'count': count, 'star': star,
+            items.append({'item_id': identity, 'net_id': value('netId', 9, 'I'), 'count': count, 'star': star,
                           'locked': bool(locked), 'disabled': bool(disabled),
                           'prepared': value('entityType', 17) == PREPARED_FOOD_TYPE})
         if with_names:
@@ -298,6 +298,7 @@ class FoodInventoryReader:
         import hashlib
         scope = hashlib.sha256(repr((self.meta.domain, context)).encode()).hexdigest()
         return {'scope': scope, 'counts': counts, 'items': items,
+                'selectable_counts': dict(usable),
                 'usable_counts': {i: n for i, n in usable.items() if i not in protected},
                 'protected_ids': sorted(protected)}
 

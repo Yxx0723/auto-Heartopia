@@ -10,6 +10,8 @@ def test_cooking_counts_do_not_treat_locked_variants_as_selectable():
     assert 40502 not in snapshot['usable_counts']
     assert 40201 not in snapshot['usable_counts']
     assert snapshot['usable_counts'][40101] == 12
+    assert snapshot['selectable_counts'][40101] == 12
+    assert snapshot['items'][0]['net_id'] == 140101
     reader.discover_names.assert_not_called()
 
 

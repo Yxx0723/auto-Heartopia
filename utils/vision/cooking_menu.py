@@ -10,10 +10,12 @@ from utils.core.cooking import Observation
 
 
 REQUIRED = ('menu', 'recipe', 'materials', 'start', 'cooking', 'stir', 'collect')
+DEFAULT_REQUIRED = ('menu', 'start', 'cooking', 'stir', 'collect', 'interact')
 
 
 class CookingMenu:
-    def __init__(self, profile):
+    def __init__(self, profile, default_mode=False):
+        self.default_mode = default_mode
         if isinstance(profile, (str, Path)):
             if Path(profile).stat().st_size > 8000000:
                 raise ValueError('烹饪识别配置过大')
@@ -26,7 +28,7 @@ class CookingMenu:
             raise ValueError('烹饪标定窗口尺寸无效')
         self.templates = {}
         self.variants = {}
-        names = REQUIRED + (('interact',) if 'interact' in profile.get('templates', {}) else ())
+        names = DEFAULT_REQUIRED if default_mode else REQUIRED + (('interact',) if 'interact' in profile.get('templates', {}) else ())
         for name in names:
             item = profile.get('templates', {}).get(name)
             if not isinstance(item, dict):
@@ -97,8 +99,18 @@ class CookingMenu:
         if tuple(picture.size) != self.size:
             raise ValueError('烹饪窗口尺寸已变化，请重新标定或恢复原尺寸')
         frame = cv2.cvtColor(np.asarray(picture.convert('RGB')), cv2.COLOR_RGB2BGR)
-        menu, recipe, materials, start = (self.match(frame, n) for n in ('menu', 'recipe', 'materials', 'start'))
+        menu, start = (self.match(frame, n) for n in ('menu', 'start'))
         if menu:
+            if self.default_mode:
+                # Correlation alone also matches a dimmed button behind a modal.
+                if start:
+                    x, y = start
+                    patch = frame[max(0, y-12):y+12, max(0, x-60):x+60].astype(float)
+                    b, g, r = patch[:, :, 0], patch[:, :, 1], patch[:, :, 2]
+                    if ((g > 150) & (b > 140) & (g-r > 50)).mean() > .15:
+                        return Observation('menu', start, key='enter')
+                return Observation()
+            recipe, materials = (self.match(frame, n) for n in ('recipe', 'materials'))
             return Observation('menu', start, key='enter') if recipe and materials and start else Observation()
         stir, collect, cooking = (self.match(frame, n) for n in ('stir', 'collect', 'cooking'))
         if stir and collect:

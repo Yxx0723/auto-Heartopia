@@ -233,6 +233,14 @@ class ReadOnlyPosition:
             self.food_inventory_reader = FoodInventoryReader(self)
         return self.food_inventory_reader.cooking_snapshot(max_star, with_names, check)
 
+    def cooking_recipe_snapshot(self):
+        if self.locator is None:
+            raise ValueError('当前版本不支持默认食谱核对')
+        from utils.drivers.cooking_recipe import CookingRecipeReader
+        if getattr(self, 'cooking_recipe_reader', None) is None:
+            self.cooking_recipe_reader = CookingRecipeReader(self)
+        return self.cooking_recipe_reader.snapshot()
+
     def food_search_query(self):
         if getattr(self, 'food_inventory_reader', None) is None:
             raise ValueError('尚未读取当前背包')
