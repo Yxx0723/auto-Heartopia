@@ -308,11 +308,10 @@ class CoordinateWindow:
         self.workspace = workspace
         workspace.grid(row=0, column=0, sticky='nsew')
         workspace.grid_columnconfigure(0, weight=1)
-        workspace.grid_columnconfigure(1, minsize=300)
         workspace.grid_rowconfigure(0, weight=1)
         plotcard = self.frame(workspace, card=True)
         self.plotcard = plotcard
-        plotcard.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
+        plotcard.grid(row=0, column=0, sticky='nsew')
         plotcard.grid_columnconfigure(0, weight=1)
         plotcard.grid_rowconfigure(2, weight=1)
         plothead = self.frame(plotcard, card=True)
@@ -353,8 +352,13 @@ class CoordinateWindow:
         self.scene_filter_hint = self.label(plotfoot, color='muted', font=('Microsoft YaHei UI', -10))
         self.scene_filter_hint.pack(side='right', padx=4)
         self.update_scene_filter_controls()
-        pointcard = self.frame(workspace, card=True)
-        pointcard.grid(row=1, column=0, sticky='ew', padx=(0, 10), pady=(6, 0))
+        lower_panel = self.frame(body)
+        lower_panel.grid(row=1, column=0, sticky='ew', pady=(8, 0))
+        lower_panel.grid_columnconfigure(0, minsize=300)
+        lower_panel.grid_columnconfigure(1, weight=1)
+        lower_panel.grid_rowconfigure(1, weight=1)
+        pointcard = self.frame(lower_panel, card=True)
+        pointcard.grid(row=0, column=1, sticky='ew', padx=(10, 0))
         routebar = self.frame(pointcard, card=True, border=False)
         routebar.pack(fill='x', padx=8, pady=(6, 0))
         self.label(routebar, '当前路线', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left', padx=(0, 6))
@@ -383,11 +387,11 @@ class CoordinateWindow:
         self.saved_summary = self.field(pointinfo, 'saved_summary', '点击按钮，将当前 XYZ 添加到当前路线',
                                         color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1)
         self.saved_summary.pack(fill='x', pady=(3, 0))
-        sidebar = self.frame(workspace, card=True)
-        sidebar.grid(row=0, column=1, rowspan=2, sticky='nsew')
+        sidebar = self.frame(lower_panel, card=True, width=300)
+        sidebar.grid(row=0, column=0, rowspan=2, sticky='nsew')
         self.build_sidebar(sidebar)
-        bottom = self.frame(body)
-        bottom.grid(row=1, column=0, sticky='ew', pady=(8, 0))
+        bottom = self.frame(lower_panel)
+        bottom.grid(row=1, column=1, sticky='new', padx=(10, 0), pady=(8, 0))
         toolbar = self.frame(bottom)
         toolbar.pack(fill='x')
         self.label(toolbar, '起点方式', color='muted', font=('Microsoft YaHei UI', -12)).pack(
@@ -408,16 +412,18 @@ class CoordinateWindow:
         self.loop_count_spin.pack(side='left', padx=(6, 3))
         self.label(toolbar, '次', color='muted', font=('Microsoft YaHei UI', -12)).pack(
             side='left', padx=(0, 12))
-        self.label(toolbar, '按 F 后等待', color='muted',
+        waitbar = self.frame(bottom)
+        waitbar.pack(fill='x', pady=(5, 0))
+        self.label(waitbar, '按 F 后等待', color='muted',
                    font=('Microsoft YaHei UI', -12)).pack(side='left')
         self.collect_wait_var = tk.StringVar(self.root, value=f'{policy.COORD_COLLECTION_DEFAULT_WAIT:g}')
-        self.collect_wait_spin = tk.Spinbox(toolbar, from_=0, to=policy.COORD_COLLECTION_MAX_WAIT,
+        self.collect_wait_spin = tk.Spinbox(waitbar, from_=0, to=policy.COORD_COLLECTION_MAX_WAIT,
             increment=.1, textvariable=self.collect_wait_var, width=5,
             bg=COLORS['button'], fg=COLORS['text'], buttonbackground=COLORS['button'],
             insertbackground=COLORS['text'], relief='flat', font=('Microsoft YaHei UI', -12))
         self.collect_wait_spin.pack(side='left', padx=(6, 3))
-        self.label(toolbar, '秒', color='muted', font=('Microsoft YaHei UI', -12)).pack(side='left')
-        self.point_wait_button = self.button(toolbar, '逐点等待', self.edit_point_waits, small=True)
+        self.label(waitbar, '秒', color='muted', font=('Microsoft YaHei UI', -12)).pack(side='left')
+        self.point_wait_button = self.button(waitbar, '逐点等待', self.edit_point_waits, small=True)
         self.point_wait_button.pack(side='left', padx=(8, 0))
         recoverybar = self.frame(bottom)
         recoverybar.pack(fill='x', pady=(5, 0))
@@ -436,21 +442,23 @@ class CoordinateWindow:
             selectcolor=COLORS['button'], font=('Microsoft YaHei UI', -12), bd=0,
             highlightthickness=0)
         self.recovery_jump_check.pack(side='left', padx=(12, 16))
+        navigationbar = self.frame(bottom)
+        navigationbar.pack(fill='x', pady=(5, 0))
         self.navigation_var = tk.BooleanVar(self.root, value=True)
-        self.navigation_check = tk.Checkbutton(recoverybar, text='自动寻路', variable=self.navigation_var,
+        self.navigation_check = tk.Checkbutton(navigationbar, text='自动寻路', variable=self.navigation_var,
             bg=COLORS['bg'], fg=COLORS['text'], activebackground=COLORS['bg'],
             activeforeground=COLORS['text'], selectcolor=COLORS['button'],
             font=('Microsoft YaHei UI', -12), bd=0, highlightthickness=0)
         self.navigation_check.pack(side='left', padx=(0, 12))
         self.path_memory_var = tk.BooleanVar(self.root, value=True)
-        self.path_memory_check = tk.Checkbutton(recoverybar, text='记忆走法', variable=self.path_memory_var,
+        self.path_memory_check = tk.Checkbutton(navigationbar, text='记忆走法', variable=self.path_memory_var,
             bg=COLORS['bg'], fg=COLORS['text'], activebackground=COLORS['bg'],
             activeforeground=COLORS['text'], selectcolor=COLORS['button'],
             font=('Microsoft YaHei UI', -12), bd=0, highlightthickness=0)
         self.path_memory_check.pack(side='left', padx=(0, 5))
-        self.path_memory_label = self.label(recoverybar, '0 段', color='muted', font=('Microsoft YaHei UI', -11))
+        self.path_memory_label = self.label(navigationbar, '0 段', color='muted', font=('Microsoft YaHei UI', -11))
         self.path_memory_label.pack(side='left', padx=(0, 5))
-        self.clear_path_memory_button = self.button(recoverybar, '清除记忆', self.clear_path_memory, small=True)
+        self.clear_path_memory_button = self.button(navigationbar, '清除记忆', self.clear_path_memory, small=True)
         self.clear_path_memory_button.pack(side='left')
         self.refresh_path_memory_info()
         self.playback_label = self.field(bottom, 'playback', self.playback_status['message'],
@@ -464,7 +472,7 @@ class CoordinateWindow:
         self.save_point_button.configure(state='disabled')
         self.play_button.configure(state='disabled')
         self.stop_button.configure(state='disabled')
-        self.map_expand_widgets = (sidebar, pointcard, bottom, footer)
+        self.map_expand_widgets = (lower_panel, footer)
         self.expanded_status = self.label(plotcard, textvariable=self.fields['playback'],
             color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1)
         self.expanded_status.grid(row=4, column=0, sticky='ew', padx=14, pady=6)
@@ -1492,8 +1500,6 @@ class CoordinateWindow:
         self.map_expanded = not self.map_expanded
         for widget in self.map_expand_widgets:
             widget.grid_remove() if self.map_expanded else widget.grid()
-        self.workspace.grid_columnconfigure(1, minsize=0 if self.map_expanded else 300)
-        self.plotcard.grid_configure(padx=(0, 0 if self.map_expanded else 10))
         self.map_expand_button.configure(text='还原布局' if self.map_expanded else '大地图')
         self.expanded_status.grid() if self.map_expanded else self.expanded_status.grid_remove()
         self.root.update_idletasks()
