@@ -515,7 +515,7 @@ class CoordinateWindow:
                 side='left', fill='x', expand=True)
         self.message = self.label(inner, '正在连接心动小镇…', color='muted', font=('Microsoft YaHei UI', -11),
                                   wraplength=250, justify='left', anchor='w')
-        self.message.grid(row=8, column=0, columnspan=2, sticky='ew', pady=(4, 4))
+        # Keep status updates available internally without showing the hint.
         controls = self.frame(inner, card=True, border=False)
         controls.grid(row=9, column=0, columnspan=2, sticky='ew')
         self.button(controls, '重新连接', self.reconnect, small=True).pack(fill='x')
@@ -562,7 +562,7 @@ class CoordinateWindow:
             color='muted', font=('Microsoft YaHei UI', -10), justify='left').grid(
             row=16, column=0, columnspan=2, sticky='w', pady=(7, 0))
         toolcard = self.frame(inner, card=True, border=False)
-        toolcard.grid(row=7, column=0, columnspan=2, sticky='ew', pady=(9, 4))
+        # Hidden as a group; Tk variables retain the existing maintenance settings.
         toolcard.grid_columnconfigure(1, weight=1)
         self.tool_title = self.label(toolcard, '手持工具耐久', font=('Microsoft YaHei UI', -11, 'bold'))
         self.tool_title.grid(
