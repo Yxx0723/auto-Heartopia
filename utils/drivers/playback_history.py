@@ -105,6 +105,9 @@ class PlaybackHistory:
                     self.summary['started_at'] = stamp
                 self.summary.update(state=state, last_message=status.get('message', ''), **{
                     k: status[k] for k in ('cycle', 'waypoint', 'waypoint_count', 'loop_count', 'skipped_count') if k in status})
+                self.summary.update({k: status[k] for k in (
+                    'patrol_checked', 'patrol_total', 'patrol_missing', 'patrol_failed',
+                    'patrol_result', 'resource_outcome', 'resource_confirmed') if k in status})
                 if state == 'reached':
                     self.summary['reached_count'] += 1
                 if state == 'cycle_finished':

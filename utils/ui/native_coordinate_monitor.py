@@ -17,6 +17,7 @@ from utils.core.coordinate_ce_table import current_position_table
 from utils.core.coordinate_trail_export import trail_capture_payload
 from utils.core.coordinate_points import ordered_waypoints, validate_collect_wait, validate_loop_count
 from utils.core import thresholds as policy
+from utils.core.special_patrol import make_patrol_data
 from utils.drivers.coordinate_point_routes import PointRoutes
 from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
@@ -520,7 +521,7 @@ class CoordinateWindow:
         pressbar = self.frame(controls, card=True, border=False)
         pressbar.pack(fill='x', pady=(3, 0))
         self.label(pressbar, '连按 F', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left')
-        self.special_press_var = tk.StringVar(self.root, value='10')
+        self.special_press_var = tk.StringVar(self.root, value='3')
         self.dropdown(pressbar, self.special_press_var, ['3', '5', '10', '20', '30'], width=4).pack(side='left', padx=6)
         self.label(pressbar, '次', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left')
         self.frame(inner, card=True, height=1).grid(row=10, column=0, columnspan=2, sticky='ew', pady=(14, 8))
@@ -1306,30 +1307,19 @@ class CoordinateWindow:
 
     def start_special_gather(self, category):
         try:
-            self.view.point_snapshot(self.clock())
+            snapshot = self.view.point_snapshot(self.clock())
             scene = self.navigation_scene(self.view.status.get('pid')) or {}
-            matches = [obj for obj in scene.get('objects', [])
-                       if obj.get('category') == category and obj.get('map_dynamic') is True
-                       and not obj.get('map_cached') and type(obj.get('resource_available')) is int
-                       and obj['resource_available'] > 0]
             name = SCENE_CATEGORIES[category][0]
-            if scene.get('state') != 'ready' or len(matches) != 1:
-                raise ValueError(f'当前未唯一识别到可采集的{name}。请靠近当天资源后重试；'
-                                 '未加载区域不使用旧坐标，也不会当作全图没有该资源。')
-            target = matches[0]
             stamp = self.wall_clock().isoformat(timespec='milliseconds')
-            data = {'schema': 'coordinate-points-v1', 'points': [{
-                'id': 1, 'name': name, 'position': list(target['position']),
-                'sample_at': stamp, 'saved_at': stamp,
-                'special_resource': {'category': category, 'static_id': target['resource_static_id'],
-                                     'press_count': int(self.special_press_var.get())}}]}
+            data = make_patrol_data(scene, snapshot['position'], category, name,
+                                    int(self.special_press_var.get()), stamp)
             self.playback.start(data, self.view.status.get('pid'),
                 recovery_attempts=int(self.recovery_count_var.get()), jump_on_recovery=self.recovery_jump_var.get(),
                 collect_wait_seconds=0., loop_count=1, auto_navigate=True,
                 auto_repair=self.repair_auto_var.get(), auto_eat=self.food_auto_var.get(),
                 food_fallback=self.food_fallback_mode(),
                 route_path=self.point_store.path.parent/f'动态采集-{name}.json', remember_paths=False)
-            self.playback_status = {'state': 'playback_wait', 'message': f'{name}动态采集已就绪 · 切回游戏按 F6 · F9停止'}
+            self.playback_status = {'state': 'playback_wait', 'message': f'{name}房门巡查已就绪 · 1→12号 · 切回游戏按 F6 · F9停止'}
             self.render()
         except (OSError, ValueError) as exc:
             messagebox.showerror('无法开始动态采集', str(exc), parent=self.root)

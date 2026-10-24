@@ -1,5 +1,6 @@
 """Version-pinned read-only scene metadata; no target-side API calls."""
 import math
+import hashlib
 import struct
 from utils.core import thresholds as policy
 from utils.core.scene_map import box_geometry, compose_transform
@@ -7,6 +8,7 @@ from utils.core.terrain_map import verified_terrain_walls
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.native_world_collisions import NativeWorldCollisions
 from utils.drivers.global_minerals import GlobalMineralReader
+from utils.drivers.house_entrances import HouseEntranceReader
 from utils.drivers.special_gather import SPECIAL_COMPONENTS, special_gather
 
 # Verified on 2026-10-14 against the standing player's blueberry bush and the
@@ -644,6 +646,18 @@ class MemorySceneMap:
             global_state = 'ready'
         except ValueError:
             pass  # Optional display definitions must never discard live navigation geometry.
+        house_entrances, house_state, patrol_context = [], 'unavailable', None
+        try:
+            if getattr(self, 'house_entrances', None) is None:
+                self.house_entrances = HouseEntranceReader(meta, self.memory.base, {})
+            house_entrances = self.house_entrances.snapshot()
+            house_state = 'ready'
+            # The main-level identity is stable across streaming collision changes.
+            # Keep addresses out of the persisted task context.
+            patrol_context = hashlib.sha256(repr((self.memory.pid, meta.domain,
+                self.house_entrances.cache['context'])).encode()).hexdigest()
+        except (ValueError, OSError):
+            pass  # Missing entrances must not discard live objects or collision geometry.
         terrain = ()
         if world_state == 'ready' and global_state == 'ready':
             try:
@@ -658,6 +672,8 @@ class MemorySceneMap:
                 'scope': 'loaded-scene-partial', 'objects': objects, 'colliders': colliders, 'models': models,
                 'position': current['position'], 'barrier_state': barrier_state, 'world_state': world_state,
                 'global_resources': global_resources, 'global_resource_state': global_state,
+                'house_entrances': house_entrances, 'house_entrance_state': house_state,
+                'patrol_context': patrol_context,
                 'global_resource_counts': {category: sum(p['category'] == category for p in global_resources)
                                            for category in ('rock', 'ore')},
                 'cache_context': (self.memory.pid, self.native.scene_key) if world_state == 'ready' else None,

@@ -9,6 +9,7 @@ from utils.core.coordinate_points import ordered_waypoints, validate_collect_wai
 from utils.core.coordinate_recovery import validate_recovery_options
 from utils.core.coordinate_navigation import LocalNavigator
 from utils.core import special_verdict
+from utils.core.special_patrol import validate_patrol
 from utils.core import thresholds as policy
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.route_path_memory import RoutePathMemory
@@ -24,8 +25,8 @@ from utils.ui.playback_diagnostics import PlaybackDiagnostics
 SPECIAL_FINISH_TEXT = {
     None: '动态资源采集结束，请核对背包',
     special_verdict.GATHERED: '动态资源已确认采到，按键已释放',
-    special_verdict.GONE: '动态资源已从场景消失，采集完成',
-    special_verdict.COOLING: '动态资源冷却已开始，判定采集成功',
+    special_verdict.GONE: '动态资源已从场景消失，采集结果未确认',
+    special_verdict.COOLING: '动态资源冷却已开始，产出未确认',
     special_verdict.CHANGED: '动态资源状态有变化但未见掉落标志，请核对背包',
     special_verdict.UNCHANGED: '动态资源连按未见状态变化，请核对背包',
     special_verdict.UNKNOWN: '动态资源状态未能读取，请核对背包',
@@ -62,6 +63,7 @@ class PointPlayback:
         self.cycle, self.loop_count = 1, policy.COORD_PLAYBACK_DEFAULT_LOOPS
         self.special_outcome = None
         self.incomplete_count = 0
+        self.patrol_result = None
 
     @property
     def active(self):
@@ -78,6 +80,8 @@ class PointPlayback:
             self.cycle = extra.get('cycle', self.cycle)
             if 'resource_outcome' in extra:
                 self.special_outcome = extra['resource_outcome']
+            if 'patrol_result' in extra:
+                self.patrol_result = extra['patrol_result']
             if 'navigation_path' in extra:
                 self.navigation_path = extra.pop('navigation_path')
             if state in ('finished', 'stopped', 'error', 'partial', 'skipped', 'reached', 'cycle_finished', 'cycle_partial',
@@ -133,6 +137,10 @@ class PointPlayback:
         if auto_navigate and self.scene_provider is None:
             raise ValueError('场景导航尚未连接，请重新打开新版程序。')
         self.total = len(ordered_waypoints(data))
+        if 'special_patrol' in data:
+            validate_patrol(data)
+            if not auto_navigate or remember_paths:
+                raise ValueError('房门巡查必须启用实时寻路并关闭该任务的走法记忆')
         if type(pid) is not int or pid <= 0:
             raise ValueError('没有可用的游戏进程，请重新连接。')
         self.path_memory = (RoutePathMemory(route_path, data)
@@ -140,6 +148,7 @@ class PointPlayback:
         self.stop_event.clear()
         self.cycle, self.loop_count = 1, loop_count
         self.special_outcome = None
+        self.patrol_result = None
         self.incomplete_count = 0
         self.navigation_path = []
         self.history = (PlaybackHistory(self.history_root, deepcopy(data),
@@ -194,11 +203,18 @@ class PointPlayback:
                               if completed else '回放已停止，按键已释放')
             if not completed and self.incomplete_count:
                 finish_message = f'回放结束，{self.incomplete_count} 个点位流程未完成，详见回放记录'
-            if completed and any('special_resource' in point for point in data.get('points', [])):
+            if 'special_patrol' in data:
+                finish_message = {'gathered': '已确认采到目标，巡查结束',
+                                  'not_found': '本轮巡查结束，未发现目标；不代表全图没有',
+                                  'partial': '巡查未完成，存在未到达房门',
+                                  'unconfirmed': '已尝试采集，结果未确认',
+                                  'data_unavailable': '场景数据持续未确认，请重新连接后重试'}.get(
+                                      self.patrol_result, '巡查已停止，按键已释放')
+            elif completed and any('special_resource' in point for point in data.get('points', [])):
                 finish_message = SPECIAL_FINISH_TEXT.get(self.special_outcome, SPECIAL_FINISH_TEXT[None])
             if self.path_memory is not None:
                 finish_message += f' · 已更新路线学习 · 已记忆 {self.path_memory.count} 段走法'
-            self.update('finished' if completed else 'partial' if self.incomplete_count else 'stopped', finish_message,
+            self.update('finished' if completed else 'partial' if self.incomplete_count or self.patrol_result else 'stopped', finish_message,
                         cycle=loop_count if completed else self.cycle, skipped_count=self.incomplete_count)
         except Exception as exc:
             self.update('error', f'点位回放停止：{exc}')

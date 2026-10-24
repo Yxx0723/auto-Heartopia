@@ -11,9 +11,10 @@ def test_a_moved_collectable_counter_is_the_only_confirmed_drop():
     assert verdict.confirmed(verdict.GATHERED)
 
 
-def test_a_vanished_target_counts_as_collected():
+def test_a_vanished_target_is_settled_but_not_a_confirmed_collection():
     assert verdict.verdict(BEFORE, None) == verdict.GONE
-    assert verdict.confirmed(verdict.GONE)
+    assert not verdict.confirmed(verdict.GONE)
+    assert verdict.conclusive(verdict.GONE)
 
 
 def test_a_forward_cold_end_is_probable_not_proven():

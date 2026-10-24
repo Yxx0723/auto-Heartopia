@@ -12,16 +12,17 @@ observable:
 * ``unchanged`` nothing moved at all;
 * ``unknown``   the scene was not readable, so no claim is made either way.
 
-Only ``gathered`` and ``gone`` are treated as confirmed. Nothing here writes
+Only ``gathered`` is treated as confirmed. Disappearance may be unloading.
+Nothing here writes
 to the game, and a digest match is never used to claim a drop.
 """
 
 GATHERED, GONE, COOLING = 'gathered', 'gone', 'cooling'
 CHANGED, UNCHANGED, UNKNOWN = 'changed', 'unchanged', 'unknown'
 
-CONFIRMED = (GATHERED, GONE)
+CONFIRMED = (GATHERED,)
 # A cooldown start ends the press loop but is reported as probable, not proven.
-SETTLED = CONFIRMED + (COOLING,)
+SETTLED = CONFIRMED + (COOLING, GONE)
 
 # One press can be sampled several times while the game settles. The strongest
 # observation wins so a later quiet sample cannot erase a real change.
@@ -39,13 +40,17 @@ def snapshot(target):
         return None
     return {'available': target.get('resource_available'),
             'cold_end': target.get('resource_cold_end_ms'),
-            'digest': target.get('resource_state_digest')}
+            'digest': target.get('resource_state_digest'),
+            'entity': target.get('resource_entity'), 'component': target.get('resource_component')}
 
 
 def verdict(before, after):
     """Classify one press. ``after`` is ``None`` when the target has vanished."""
     if after is None:
         return GONE
+    if before and any(before.get(k) is not None and before.get(k) != after.get(k)
+                      for k in ('entity', 'component')):
+        return UNKNOWN  # A replacement/pool slot is not the previous target's drop.
     if not before or type(before.get('available')) is not int \
             or type(after.get('available')) is not int:
         return UNKNOWN

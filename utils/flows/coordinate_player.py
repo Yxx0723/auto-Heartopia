@@ -10,6 +10,7 @@ from utils.core.coordinate_navigation import NavigationWait, ObstacleMap
 from utils.core.direction_evidence import CalibrationBudget, DirectionEvidence
 from utils.core.special_approach import in_interaction_range, interaction_standpoint
 from utils.core import special_verdict
+from utils.core.special_patrol import SpecialTargetUnavailable
 from utils.core.special_verdict import snapshot as special_snapshot
 from utils.core.tool_repair import ToolRepairCycle
 from utils.core.stamina import usable_stamina
@@ -60,8 +61,8 @@ SPECIAL_OUTCOME_TEXT = {
 SPECIAL_REACHED_TEXT = {
     None: '动态采集已结束',
     special_verdict.GATHERED: '已确认采到',
-    special_verdict.GONE: '资源已消失，判定采集完成',
-    special_verdict.COOLING: '冷却已开始，判定采集成功',
+    special_verdict.GONE: '资源已消失，结果未确认',
+    special_verdict.COOLING: '冷却已开始，产出未确认',
     special_verdict.CHANGED: '状态有变化，请核对背包',
     special_verdict.UNCHANGED: '未见状态变化，请核对背包',
     special_verdict.UNKNOWN: '状态未能读取，请核对背包',
@@ -490,9 +491,9 @@ class _Follower:
     def special_target(self, point):
         targets = self.special_objects(point)
         if targets is None:
-            raise ValueError('动态资源场景尚未就绪，未按 F')
+            raise SpecialTargetUnavailable('动态资源场景尚未就绪，未按 F')
         if len(targets) != 1 or type(targets[0].get('resource_available')) is not int:
-            raise ValueError('当前动态资源未加载、已离开视野或存在歧义，未按 F；请靠近后重新启动采集')
+            raise SpecialTargetUnavailable('当前动态资源未加载、已离开视野或存在歧义，未按 F')
         return targets[0]
 
     def sample_special(self, point):
@@ -558,9 +559,9 @@ class _Follower:
         if outcome == special_verdict.GATHERED:
             message = f'{name} · 已确认采到（可用次数 {before}→{after.get("available")}）· 共按 F {sent} 次'
         elif outcome == special_verdict.GONE:
-            message = f'{name} · 资源已从场景消失，判定采集完成 · 共按 F {sent} 次'
+            message = f'{name} · 资源已从场景消失，结果未确认 · 共按 F {sent} 次'
         elif outcome == special_verdict.COOLING:
-            message = f'{name} · 冷却已开始，判定本次采集成功 · 共按 F {sent} 次'
+            message = f'{name} · 冷却已开始，产出未确认 · 共按 F {sent} 次'
         elif outcome == special_verdict.UNCHANGED:
             message = (f'{name} · 连按 F {sent} 次资源状态无变化，已停止 · 请核对背包'
                        '（可能已在冷却或未命中）')
@@ -597,7 +598,7 @@ class _Follower:
                 return self.finish_special(point, index, total)
             raise
         if target['resource_available'] <= 0:
-            raise ValueError('资源当前没有可用采集标志，已释放按键，请核对是否已采完或处于冷却')
+            raise SpecialTargetUnavailable('资源当前没有可用采集标志，已释放按键，请核对是否已采完或处于冷却')
         current = self.read(force=True)
         if not in_interaction_range(current, target['position']):
             return False
@@ -1376,6 +1377,14 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
                  recovery_attempts=0, jump_on_recovery=False, collect_wait_seconds=None,
                  loop_count=policy.COORD_PLAYBACK_DEFAULT_LOOPS, continuous_recovery=False, navigator=None,
                  repair_box=None, tool_selector=None, food=None, scene_refresh=None, food_fallback='fruit'):
+    if 'special_patrol' in data:
+        from utils.flows.special_patrol import drive_special_patrol
+        return drive_special_patrol(data, size, reader_factory, device, window, controls, report,
+            clock=clock, navigator=navigator, point_runner=drive_points, scene_refresh=scene_refresh,
+            start_mode=start_mode, recovery_attempts=recovery_attempts, jump_on_recovery=jump_on_recovery,
+            collect_wait_seconds=collect_wait_seconds, loop_count=loop_count,
+            continuous_recovery=continuous_recovery, repair_box=repair_box, tool_selector=tool_selector,
+            food=food, food_fallback=food_fallback)
     reader = None
     try:
         if food_fallback not in FALLBACK_MODES:
