@@ -524,7 +524,7 @@ class CoordinateWindow:
         self.button(specialbar, '巡查采集萤石和橡木', lambda: self.start_special_gather('both'), small=True).pack(
             side='left', fill='x', expand=True)
         pressbar = self.frame(controls, card=True, border=False)
-        pressbar.pack(fill='x', pady=(3, 0))
+        # Hidden controls retain the default three presses used by collection.
         self.label(pressbar, '连按 F', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left')
         self.special_press_var = tk.StringVar(self.root, value='3')
         self.dropdown(pressbar, self.special_press_var, ['3', '5', '10', '20', '30'], width=4).pack(side='left', padx=6)
@@ -536,8 +536,7 @@ class CoordinateWindow:
         self.scene_range_var = tk.StringVar(self.root, value=f'{self.scene_radius:g} 单位')
         self.scene_range_menu = self.dropdown(maphead, self.scene_range_var,
             [f'{r} 单位' for r in SCENE_RANGE_OPTIONS], width=8, command=self.set_scene_radius)
-        self.scene_range_menu.pack(side='right')
-        self.label(maphead, '范围', color='muted', font=('Microsoft YaHei UI', -10)).pack(side='right', padx=(8, 5))
+        # Keep the configured loading radius internally without showing a selector.
         self.scene_status = self.label(inner, '进入角色后自动读取场景', color='muted',
             font=('Microsoft YaHei UI', -11), wraplength=250, justify='left', anchor='w')
         self.scene_status.grid(row=12, column=0, columnspan=2, sticky='ew', pady=5)
