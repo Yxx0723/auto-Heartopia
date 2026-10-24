@@ -23,7 +23,6 @@ from utils.drivers.input_task_gate import InputTaskGate
 from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
 from utils.ui.cooking_control import CookingControl
-from utils.ui.cooking_dialog import CookingDialog
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
 from utils.ui.scene_map_worker import SceneMapWorker
@@ -195,7 +194,6 @@ class CoordinateWindow:
                                       busy=lambda: self.playback.active, runner=cooking_runner, input_gate=self.input_gate)
         self.playback.input_busy = lambda: self.cooking.active
         self.cooking_dialog = None
-        self.cooking_config = data_dir/'烹饪配置'/'咖啡.json'
         self.playback_status = {'state': 'idle', 'message': '按保存顺序回放 · F6开始/暂停 · F9停止'}
         self.scene_state = {'state': 'waiting', 'objects': [], 'colliders': []}
         # None means the explicit "all" mode; an empty set hides every object category.
@@ -525,7 +523,6 @@ class CoordinateWindow:
         specialbar.pack(fill='x', pady=(5, 0))
         self.button(specialbar, '巡查采集萤石和橡木', lambda: self.start_special_gather('both'), small=True).pack(
             side='left', fill='x', expand=True)
-        self.button(controls, '单灶自动烹饪', self.open_cooking, small=True).pack(fill='x', pady=(4, 0))
         pressbar = self.frame(controls, card=True, border=False)
         pressbar.pack(fill='x', pady=(3, 0))
         self.label(pressbar, '连按 F', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left')
@@ -1317,17 +1314,6 @@ class CoordinateWindow:
     def food_fallback_mode(self):
         value=self.food_fallback_var.get() if hasattr(self,'food_fallback_var') else '仅水果'
         return {'仅水果':'fruit','水果和菌类':'fruit_mushroom','全部可食用':'all'}.get(value,'fruit')
-
-    def open_cooking(self):
-        try:
-            self.view.point_snapshot(self.clock())
-            if self.cooking_dialog and not self.cooking_dialog.closed:
-                self.cooking_dialog.top.lift()
-                return
-            self.cooking_dialog = CookingDialog(self.root, self.cooking, self.view.status.get('pid'),
-                self.cooking_config, self.resources/'cooking-coffee.json')
-        except (OSError, ValueError) as exc:
-            messagebox.showerror('无法打开烹饪', str(exc), parent=self.root)
 
     def start_special_gather(self, category):
         try:
