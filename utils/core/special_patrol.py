@@ -13,6 +13,15 @@ class SpecialTargetUnavailable(ValueError):
 def patrol_target(scene, category):
     if scene.get('state') != 'ready':
         return 'wait', None
+    if category == 'both':
+        # A different species is not duplicate identity. Same-species ambiguity stays unknown.
+        for obj in scene.get('objects', ()):
+            kind=obj.get('category')
+            if kind in SPECIAL_IDS:
+                state,target=patrol_target(scene,kind)
+                if state=='live':
+                    return state,target
+        return ('wait',None) if any(patrol_target(scene,k)[0]=='wait' for k in SPECIAL_IDS) else ('search',None)
     live = [o for o in scene.get('objects', ()) if o.get('category') == category
             and o.get('resource_static_id') == SPECIAL_IDS[category]
             and o.get('map_dynamic') is True and not o.get('map_cached')
@@ -43,22 +52,26 @@ def patrol_checkpoints(scene):
 def validate_patrol(data):
     validate_points(data)
     c = data.get('special_patrol', {})
-    if c.get('category') not in SPECIAL_IDS or c.get('static_id') != SPECIAL_IDS[c['category']] \
+    combined=c.get('category')=='both'
+    if (not combined and (c.get('category') not in SPECIAL_IDS or c.get('static_id') != SPECIAL_IDS[c['category']])) \
             or type(c.get('press_count')) is not int or not 1 <= c['press_count'] <= 100 \
-            or not c.get('context') or c.get('checkpoint_kind') != 'house-entrances' \
+            or not c.get('context') or c.get('checkpoint_kind') not in ('house-entrances','house-public-side') \
             or len(data['points']) != 1:
         raise ValueError('房门巡查任务无效')
     positions, numbers = c.get('checkpoints'), c.get('checkpoint_houses')
     if not isinstance(positions, list) or numbers not in ([], list(range(1, 13))) \
             or len(positions) != len(numbers) or any(not valid_position(p) for p in positions):
         raise ValueError('房门巡查点不完整')
-    if data['points'][0].get('special_resource') != {k: c[k] for k in ('category', 'static_id', 'press_count')}:
+    if combined and c.get('categories')!=['fluorite','roaming_oak']:
+        raise ValueError('联合巡查种类配置无效')
+    if not combined and data['points'][0].get('special_resource') != {k: c[k] for k in ('category', 'static_id', 'press_count')}:
         raise ValueError('巡查与采集目标不一致')
     return data
 
 
 def make_patrol_data(scene, position, category, name, count, stamp):
-    if category not in SPECIAL_IDS or type(count) is not int or not 1 <= count <= 100:
+    combined=category=='both'
+    if category not in (*SPECIAL_IDS,'both') or type(count) is not int or not 1 <= count <= 100:
         raise ValueError('巡查类型或连按次数无效')
     if scene.get('state') != 'ready' or not scene.get('patrol_context') or not valid_position(position):
         raise ValueError('场景与主地图身份尚未确认，请等待同步后启动巡查')
@@ -66,9 +79,12 @@ def make_patrol_data(scene, position, category, name, count, stamp):
     state, target = patrol_target(scene, category)
     if not checkpoints and state != 'live':
         raise ValueError('1～12号房门入口尚未完整读取，请等待主地图加载后重试')
-    identity = {'category': category, 'static_id': SPECIAL_IDS[category], 'press_count': count}
+    seed='fluorite' if combined else category
+    identity = {'category': seed, 'static_id': SPECIAL_IDS[seed], 'press_count': count}
     data = {'schema': 'coordinate-points-v1',
-            'special_patrol': {**identity, 'context': deepcopy(scene['patrol_context']),
+            'special_patrol': {**identity, 'category':category,
+                               **({'categories':['fluorite','roaming_oak']} if combined else {}),
+                               'context': deepcopy(scene['patrol_context']),
                                'checkpoints': checkpoints, 'checkpoint_kind': 'house-entrances',
                                'checkpoint_houses': list(range(1, 13)) if checkpoints else []},
             'points': [{'id': 1, 'name': name, 'position': list(position),

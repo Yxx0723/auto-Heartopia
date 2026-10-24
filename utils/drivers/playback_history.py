@@ -107,7 +107,12 @@ class PlaybackHistory:
                     k: status[k] for k in ('cycle', 'waypoint', 'waypoint_count', 'loop_count', 'skipped_count') if k in status})
                 self.summary.update({k: status[k] for k in (
                     'patrol_checked', 'patrol_total', 'patrol_missing', 'patrol_failed',
-                    'patrol_result', 'resource_outcome', 'resource_confirmed') if k in status})
+                    'patrol_result', 'patrol_completed_resources', 'resource_outcome', 'resource_confirmed') if k in status})
+                if status.get('resource_evidence_id'):
+                    # One evidence id is updated, never summed per polling/report event.
+                    harvests = self.summary.setdefault('harvest_evidence', {})
+                    harvests[status['resource_evidence_id']] = {
+                        k: v for k, v in status.items() if k.startswith('resource_')}
                 if state == 'reached':
                     self.summary['reached_count'] += 1
                 if state == 'cycle_finished':

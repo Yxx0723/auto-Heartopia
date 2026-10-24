@@ -466,3 +466,23 @@ COORD_PATROL_MAX_LEG_SECONDS = 120.
 COORD_PATROL_TARGET_SECONDS = 90.
 COORD_PATROL_DATA_WAIT_SECONDS = 30.
 COORD_PATROL_MAX_TARGET_ATTEMPTS = 3
+# Patrol-only public-side safety buffer. Engineering default, NOT a measured land boundary.
+COORD_PATROL_HOME_MARGIN = 2.
+
+# Direction acquisition engineering tolerances; not measured character abilities.
+COORD_DIRECTION_POSITION_TOLERANCE = 2.
+COORD_DIRECTION_READ_SECONDS = .1
+COORD_DIRECTION_STABLE_DEGREES = 5.
+COORD_DIRECTION_WAIT_SECONDS = 1.
+COORD_DIRECTION_PROBE_SECONDS = .15
+COORD_DIRECTION_SAFE_RADIUS = 3.
+COORD_DIRECTION_CAMERA_NORM_TOLERANCE = .1
+COORD_DIRECTION_CAMERA_PLANAR_MIN = .05
+
+# Engineering polling limits, not measured game drop latency. Keep F released;
+# a missing/unstable bag read never means zero and cannot create a baseline.
+COORD_SPECIAL_INVENTORY_SETTLE_SECONDS = 6.
+
+# Pending bag reconciliation during the same patrol; bounded engineering window.
+COORD_SPECIAL_INVENTORY_POLL_SECONDS = 1.
+COORD_SPECIAL_PENDING_SECONDS = 120.

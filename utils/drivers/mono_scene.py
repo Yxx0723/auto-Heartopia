@@ -674,6 +674,7 @@ class MemorySceneMap:
                 'global_resources': global_resources, 'global_resource_state': global_state,
                 'house_entrances': house_entrances, 'house_entrance_state': house_state,
                 'patrol_context': patrol_context,
+                'house_exclusions': [], 'house_exclusion_state': 'disabled',
                 'global_resource_counts': {category: sum(p['category'] == category for p in global_resources)
                                            for category in ('rock', 'ore')},
                 'cache_context': (self.memory.pid, self.native.scene_key) if world_state == 'ready' else None,

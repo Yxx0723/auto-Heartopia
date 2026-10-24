@@ -169,7 +169,7 @@ class FoodInventoryReader:
         if missing:
             raise ValueError('正在核对新食物名称，稍后自动重试')
 
-    def snapshot(self, check=lambda: None):
+    def owned_rows(self, check=lambda: None):
         m = self.meta
         check()
         self.memory.locator.snapshot()  # Require a valid current local role.
@@ -197,6 +197,20 @@ class FoodInventoryReader:
         bag = bags[0]
         items = m.ref(bag, 'items')
         rows, stable = self.dictionary_rows(items)
+        def unchanged():
+            if (not stable() or m.ref(bag, 'items') != items or m.ref(system, '_storages') != stores
+                    or m.dictionary(stores, max_items=32) != stores_list or m.ref(module, 'BackPackSystem') != system
+                    or m.ref(module, OWNER) != owner or m.ref(system, OWNER) != owner
+                    or m.ref(node, '_instance') != owner or m.ref(node, '_viewModules') != modules
+                    or m.ref(modules, 'group') != group or m.ref(group, '_modules') != array
+                    or m.array_refs(array) != members or m.static_ref(self.world_class, '_currentLevel') != node
+                    or m.pointer(self.memory.base+0x4d3878) != m.domain):
+                raise ValueError('背包在读取期间发生变化，稍后重试')
+            return True
+        return rows, unchanged, (node, owner, module, system, bag)
+
+    def snapshot(self, check=lambda: None):
+        rows, stable, context = self.owned_rows(check)
         foods, locked_variants, locked_ids, uncertain_locked = [], set(), set(), set()
         for ci, raw in rows:
             check()
@@ -228,16 +242,26 @@ class FoodInventoryReader:
                                                  or food['item_id'] in uncertain_locked)
             food['verify_star'] = food['item_id'] in locked_ids
         self.discover_names({f['item_id'] for f in foods}, check)
-        if (not stable() or m.ref(bag, 'items') != items or m.ref(system, '_storages') != stores
-                or m.dictionary(stores, max_items=32) != stores_list or m.ref(module, 'BackPackSystem') != system
-                or m.ref(module, OWNER) != owner or m.ref(system, OWNER) != owner
-                or m.ref(node, '_instance') != owner or m.ref(node, '_viewModules') != modules
-                or m.ref(modules, 'group') != group or m.ref(group, '_modules') != array
-                or m.array_refs(array) != members or m.static_ref(self.world_class, '_currentLevel') != node
-                or m.pointer(self.memory.base+0x4d3878) != m.domain):
-            raise ValueError('背包在读取期间发生变化，稍后重试')
-        self.context = (node, owner, module, system)
+        stable()
+        self.context = context[:4]
         return [dict(f, name=self.names[f['item_id']]) for f in foods]
+
+    def counts_snapshot(self, check=lambda: None):
+        """Owned backpack totals, including locked items; no names scan or warehouse."""
+        import hashlib
+        rows, stable, context = self.owned_rows(check)
+        counts = {}
+        for ci, raw in rows:
+            check()
+            identity = struct.unpack_from('<i', raw, self.offset(ci, 'staticId', 8, 4)-16)[0]
+            count = struct.unpack_from('<i', raw, self.offset(ci, 'count', 8, 4)-16)[0]
+            if identity <= 0 or not 0 <= count <= 100000000:
+                raise ValueError('背包物品编号或数量无效')
+            counts[identity] = counts.get(identity, 0) + count
+        stable()
+        # Opaque per-process scope: neither dictionary resize nor stack ordering changes it.
+        scope = hashlib.sha256(repr((self.meta.domain, context)).encode()).hexdigest()
+        return {'scope': scope, 'counts': counts}
 
     def search_query(self):
         if not getattr(self, 'context', None):

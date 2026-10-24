@@ -514,9 +514,7 @@ class CoordinateWindow:
         self.button(controls, '重新连接', self.reconnect, small=True).pack(fill='x')
         specialbar = self.frame(controls, card=True, border=False)
         specialbar.pack(fill='x', pady=(5, 0))
-        self.button(specialbar, '采集萤石', lambda: self.start_special_gather('fluorite'), small=True).pack(
-            side='left', fill='x', expand=True, padx=(0, 4))
-        self.button(specialbar, '采集橡木', lambda: self.start_special_gather('roaming_oak'), small=True).pack(
+        self.button(specialbar, '巡查采集萤石和橡木', lambda: self.start_special_gather('both'), small=True).pack(
             side='left', fill='x', expand=True)
         pressbar = self.frame(controls, card=True, border=False)
         pressbar.pack(fill='x', pady=(3, 0))
@@ -1309,7 +1307,7 @@ class CoordinateWindow:
         try:
             snapshot = self.view.point_snapshot(self.clock())
             scene = self.navigation_scene(self.view.status.get('pid')) or {}
-            name = SCENE_CATEGORIES[category][0]
+            name = '萤石与橡木' if category=='both' else SCENE_CATEGORIES[category][0]
             stamp = self.wall_clock().isoformat(timespec='milliseconds')
             data = make_patrol_data(scene, snapshot['position'], category, name,
                                     int(self.special_press_var.get()), stamp)

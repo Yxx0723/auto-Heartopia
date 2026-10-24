@@ -9,6 +9,7 @@ from utils.core.coordinate_points import (choose_start_index, ordered_waypoints,
 from utils.core.coordinate_navigation import NavigationWait, ObstacleMap
 from utils.core.direction_evidence import CalibrationBudget, DirectionEvidence
 from utils.core.special_approach import in_interaction_range, interaction_standpoint
+from utils.core.harvest_evidence import HarvestEvidence
 from utils.core import special_verdict
 from utils.core.special_patrol import SpecialTargetUnavailable
 from utils.core.special_verdict import snapshot as special_snapshot
@@ -49,7 +50,7 @@ class _RecoveryLimit(Exception):
 
 
 SPECIAL_OUTCOME_TEXT = {
-    special_verdict.GATHERED: '已确认采到',
+    special_verdict.GATHERED: '资源次数减少，等待背包确认',
     special_verdict.GONE: '资源已消失',
     special_verdict.COOLING: '冷却已开始',
     special_verdict.CHANGED: '状态有变化',
@@ -60,7 +61,7 @@ SPECIAL_OUTCOME_TEXT = {
 # The per-point line must repeat the verdict, never a bare "presses sent".
 SPECIAL_REACHED_TEXT = {
     None: '动态采集已结束',
-    special_verdict.GATHERED: '已确认采到',
+    special_verdict.GATHERED: '资源次数减少，等待背包确认',
     special_verdict.GONE: '资源已消失，结果未确认',
     special_verdict.COOLING: '冷却已开始，产出未确认',
     special_verdict.CHANGED: '状态有变化，请核对背包',
@@ -119,6 +120,15 @@ class _Follower:
         self.food_fallback = 'fruit'
         self.repair_menu_pending = False
         self.special_progress = None
+        self.heading_cache = None  # Ephemeral, one patrol only; never saved as route memory.
+        self.direction_method = getattr(reader,'movement_basis',None)
+        self.direction_method = self.direction_method if callable(self.direction_method) else None
+        self.direction_poll_at = float('-inf')
+        self.direction_candidate = self.direction_memory = self.direction_conflict = None
+        self.direction_bad_since = None
+        self.direction_safe_probe = False
+        self.direction_source = 'legacy'
+        self.calibration_seconds = policy.COORD_CALIBRATION_SECONDS
         self.scene_refresh = scene_refresh
         self.calibration_budget = CalibrationBudget()
         self.direction_evidence = DirectionEvidence()
@@ -136,6 +146,7 @@ class _Follower:
         self.approach_attempts += 1
 
     def report(self, state, message, **extra):
+        extra.setdefault('direction_source', self.direction_source)
         if 'position' not in extra and valid_position(self.position):
             extra.update(position=list(self.position), position_source='last_successful_read',
                          position_age_seconds=max(0., self.clock.monotonic()-self.position_at)
@@ -216,12 +227,81 @@ class _Follower:
         before = self.read(force=True)
         self.set_keys({key})
         try:
-            self.wait(policy.COORD_CALIBRATION_SECONDS)
+            self.wait(self.calibration_seconds)
         finally:
             self.release()
         self.wait(policy.COORD_SETTLE_SECONDS)
         after = self.read(force=True)
         return [b - a for a, b in zip(before, after)]
+
+    @staticmethod
+    def basis_angle(first, second):
+        a,b=first['forward'],second['forward']
+        return math.degrees(math.acos(max(-1.,min(1.,sum(x*y for x,y in zip(a,b))))))
+
+    def read_direction(self):
+        now=self.clock.monotonic()
+        if now-self.direction_poll_at<policy.COORD_DIRECTION_READ_SECONDS:
+            return self.direction_memory
+        self.direction_poll_at=now
+        try:
+            raw=self.direction_method()
+            basis=make_basis([raw['forward'][0],0.,raw['forward'][1]],
+                             [raw['right'][0],0.,raw['right'][1]])
+            if self.direction_conflict and self.basis_angle(basis,self.direction_conflict) \
+                    <=policy.COORD_DIRECTION_STABLE_DEGREES:
+                self.direction_memory=None
+                self.direction_safe_probe=True
+                if self.direction_bad_since is None:self.direction_bad_since=now
+                return None
+            self.direction_conflict=None
+        except (OSError,ValueError,TypeError,KeyError,IndexError) as exc:
+            self.direction_memory=self.direction_candidate=None
+            self.direction_safe_probe=bool(getattr(exc,'safe_to_probe',False))
+            if self.direction_bad_since is None:self.direction_bad_since=now
+            return None
+        previous=self.direction_candidate
+        self.direction_candidate=basis
+        if previous is None or self.basis_angle(previous,basis)>policy.COORD_DIRECTION_STABLE_DEGREES:
+            self.direction_memory=None
+            self.direction_safe_probe=False
+            return None
+        self.direction_memory=basis
+        self.direction_bad_since=None
+        self.direction_safe_probe=False
+        return basis
+
+    def safe_direction_probe(self, position, index):
+        """An engineering open-space check, never a claim of grounded/NavMesh data."""
+        if self.navigator is None:
+            return False
+        scene=self.navigator.scene_provider() or {}
+        if scene.get('state')!='ready':
+            return False
+        radius=policy.COORD_DIRECTION_SAFE_RADIUS
+        if self.waypoints and 'special_resource' in self.waypoints[index] \
+                and distance(position,self.waypoints[index]['position'])<radius:
+            return False
+        if any(obj.get('category') in ('tree','bush','blueberry','raspberry','rock','ore','fluorite','roaming_oak')
+               and valid_position(obj.get('position')) and distance(position,obj['position'])<radius
+               for obj in scene.get('objects',())):
+            return False
+        obstacles=ObstacleMap(scene,position,water_areas=self.navigator.water_areas)
+        start=(position[0],position[2])
+        return all(obstacles.clear(start,(start[0]+radius*math.cos(i*math.tau/8),
+                                          start[1]+radius*math.sin(i*math.tau/8))) for i in range(8))
+
+    def wait_direction(self, index, total):
+        self.release()
+        if self.clock.monotonic()-self.last_report>=.5:
+            self.report('navigating','等待可靠方向数据；未执行走动校准 · F6暂停 · F9停止',
+                        waypoint=index+1,waypoint_count=total,navigation_path=[],direction_source='unconfirmed')
+            self.last_report=self.clock.monotonic()
+        self.navigation_waiting=True
+        try:self.wait(policy.COORD_SAMPLE_SECONDS)
+        finally:
+            self.navigation_waiting=False
+            self.last_tick=self.clock.monotonic()
 
     def calibrate(self, reference, target_index=0):
         position = self.read(force=True)
@@ -255,7 +335,7 @@ class _Follower:
                 basis = make_basis(*axes)
             except ValueError as exc:
                 raise _CalibrationRetry(str(exc)) from exc
-            self.calibration_speed = max(lengths) / policy.COORD_CALIBRATION_SECONDS
+            self.calibration_speed = max(lengths) / self.calibration_seconds
             self.report('playing', '方向校准完成，从当前位置继续寻路', position=list(self.position), **extra)
             return basis
         basis = make_basis(forward, right)
@@ -512,52 +592,65 @@ class _Follower:
             return 'unknown'
         return targets[0]
 
-    def settle_special(self, point):
-        """Judge the press that just happened from a fresh sample, and only report what moved."""
+    def special_inventory(self):
+        method = getattr(self.reader, 'backpack_counts_snapshot', None)
+        if not callable(method):
+            return None
+        try:
+            return method()
+        except (OSError, ValueError):
+            return None  # Unknown is never a zero stock snapshot.
+
+    def observe_special(self, point, target='unknown'):
         progress = self.special_progress
-        before = progress['before']
-        if before is None:
+        evidence = progress.get('evidence')
+        if evidence is not None:
+            evidence.observe(target, self.special_inventory())
+            progress['outcome'] = (special_verdict.GATHERED if evidence.fields()['resource_confirmed']
+                                   else evidence.counter_outcome)
+            progress['after'] = evidence.after
+
+    def settle_special(self, point):
+        """Keep the original target/bag baseline across F, repair and pause."""
+        progress = self.special_progress
+        if progress['before'] is None:
             return
-        progress['before'] = None
         deadline = self.clock.monotonic() + policy.COORD_SPECIAL_STATE_SETTLE_SECONDS
-        observed, samples = [], {}
         while True:
             self.wait(policy.COORD_SPECIAL_STATE_POLL_SECONDS)
-            sample = self.sample_special(point)
-            if sample != 'unknown':
-                after = special_snapshot(sample) if sample is not None else None
-                outcome = special_verdict.verdict(before, after)
-                observed.append(outcome)
-                samples[outcome] = after
-                if special_verdict.conclusive(outcome):
-                    break
-            if self.clock.monotonic() >= deadline:
+            self.observe_special(point, self.sample_special(point))
+            if special_verdict.conclusive(progress['outcome']) or self.clock.monotonic() >= deadline:
                 break
-        outcome = special_verdict.strongest(observed)
-        after = samples.get(outcome)
-        progress['outcome'] = outcome
-        progress['after'] = after
-        if outcome == special_verdict.UNCHANGED:
-            progress['unchanged'] += 1
-        else:
-            progress['unchanged'] = 0
+        # Clear only after settling: F6 during a press/settle retains pending evidence.
+        progress['before'] = None
+        outcome = progress['outcome']
+        progress['unchanged'] = progress['unchanged']+1 if outcome == special_verdict.UNCHANGED else 0
         self.report('collecting', f'{point["name"]} · 第 {progress["sent"]} 次按 F · {SPECIAL_OUTCOME_TEXT[outcome]}',
                     waypoint=progress.get('index', 1), waypoint_count=progress.get('total', 1),
                     resource_press_count=progress['sent'], resource_outcome=outcome,
-                    resource_available_before=before.get('available'),
-                    resource_available_after=(after or {}).get('available'),
-                    resource_cold_end_before=before.get('cold_end'),
-                    resource_cold_end_after=(after or {}).get('cold_end'),
-                    resource_state_digest=(after or {}).get('digest'))
+                    **progress['evidence'].fields())
 
     def finish_special(self, point, index, total):
         """Report what is actually known about this dynamic resource and end the point."""
         progress = self.special_progress
         sent, outcome = progress['sent'], progress['outcome']
-        before, after = progress.get('pressed_from'), progress.get('after')
+        evidence = progress.get('evidence')
+        # Final bounded reconciliation also runs when the entity vanished/cools.
+        if evidence is not None and not evidence.fields()['resource_confirmed'] and sent:
+            if progress.get('final_deadline') is None:
+                progress['final_deadline'] = self.clock.monotonic()+policy.COORD_SPECIAL_INVENTORY_SETTLE_SECONDS
+            while self.clock.monotonic() < progress['final_deadline']:
+                self.wait(policy.COORD_SPECIAL_STATE_POLL_SECONDS)
+                self.observe_special(point, self.sample_special(point))
+                if evidence.fields()['resource_confirmed']:
+                    break
+        outcome = progress['outcome']
+        fields = evidence.fields() if evidence else {'resource_confirmed': False}
         name = point['name']
-        if outcome == special_verdict.GATHERED:
-            message = f'{name} · 已确认采到（可用次数 {before}→{after.get("available")}）· 共按 F {sent} 次'
+        if fields['resource_confirmed']:
+            message = f'{name} · 已确认采到（背包增加 {fields["resource_inventory_delta"]}）· 共按 F {sent} 次'
+        elif outcome == special_verdict.GATHERED:
+            message = f'{name} · 资源次数已减少，背包增量尚未确认 · 共按 F {sent} 次'
         elif outcome == special_verdict.GONE:
             message = f'{name} · 资源已从场景消失，结果未确认 · 共按 F {sent} 次'
         elif outcome == special_verdict.COOLING:
@@ -571,7 +664,7 @@ class _Follower:
             message = f'{name} · 已按 F {sent} 次，未能读到资源状态 · 请核对背包'
         self.report('collecting', message, waypoint=index+1, waypoint_count=total,
                     resource_press_count=sent, resource_outcome=outcome,
-                    resource_confirmed=special_verdict.confirmed(outcome))
+                    **fields)
         return True
 
     def collect_special(self, point, index, total):
@@ -582,9 +675,12 @@ class _Follower:
             progress = self.special_progress = {'sent': 0, 'unchanged': 0, 'outcome': None,
                                                 'before': None, 'after': None, 'pressed_from': None}
         progress['index'], progress['total'] = index, total
+        if progress['sent']:
+            self.observe_special(point, self.sample_special(point))
         if progress['before'] is not None:
             self.settle_special(point)
-        if special_verdict.conclusive(progress['outcome']) \
+        if (progress.get('evidence') and progress['evidence'].invalid) \
+                or special_verdict.conclusive(progress['outcome']) \
                 or progress['unchanged'] >= policy.COORD_SPECIAL_UNCHANGED_LIMIT \
                 or progress['sent'] >= limit:
             return self.finish_special(point, index, total)
@@ -602,19 +698,26 @@ class _Follower:
         current = self.read(force=True)
         if not in_interaction_range(current, target['position']):
             return False
+        if progress.get('evidence') is None:
+            progress['evidence'] = HarvestEvidence(point['special_resource']['category'], target, self.special_inventory())
+            journal = getattr(self, 'harvest_journal', None)
+            if journal is not None:
+                journal.append((self.clock.monotonic(), progress['evidence']))
         progress['before'] = special_snapshot(target)
         progress['pressed_from'] = progress['before']['available']
         self.report('collecting', f'{point["name"]} · 连按 F {progress["sent"]+1}/{limit} · F6暂停 · F9停止',
                     waypoint=index+1, waypoint_count=total, resource_press_count=progress['sent'],
-                    position=list(self.position))
+                    position=list(self.position), **progress['evidence'].fields())
         try:
             self.set_keys({'f'})
             progress['sent'] += 1
+            progress['evidence'].pressed = True
             self.wait(policy.COORD_COLLECTION_PRESS_SECONDS)
         finally:
             self.release()
         self.settle_special(point)
-        if special_verdict.conclusive(progress['outcome']) \
+        if (progress.get('evidence') and progress['evidence'].invalid) \
+                or special_verdict.conclusive(progress['outcome']) \
                 or progress['unchanged'] >= policy.COORD_SPECIAL_UNCHANGED_LIMIT:
             return self.finish_special(point, index, total)
         return False
@@ -930,6 +1033,13 @@ class _Follower:
     def follow(self):
         points = self.waypoints if self.waypoints is not None else build_waypoints(self.data['samples'])
         index, basis = 0, None
+        if self.heading_cache and 'basis' in self.heading_cache:
+            try:
+                cached=self.heading_cache['basis']
+                basis=make_basis([cached['forward'][0],0.,cached['forward'][1]],
+                                 [cached['right'][0],0.,cached['right'][1]])
+            except (KeyError,TypeError,ValueError,IndexError):
+                self.heading_cache.clear()
         selected = self.waypoints is None
         dwell = None
         # Manual points may begin far away. Calibrate at the current position,
@@ -945,7 +1055,14 @@ class _Follower:
                 self.guard()
                 special_near = False
                 if 'special_resource' in points[index]:
-                    live_target = self.special_target(points[index])
+                    try:
+                        live_target = self.special_target(points[index])
+                    except SpecialTargetUnavailable:
+                        if not self.special_progress or not self.special_progress['sent']:
+                            raise
+                        # No more input to an unloaded entity: let collect_special
+                        # reconcile the pending bag update through the normal point flow.
+                        live_target = {'position': list(self.read(force=True))}
                     current = self.read(force=True)
                     special_near = in_interaction_range(current, live_target['position'])
                     if special_near:
@@ -972,6 +1089,32 @@ class _Follower:
                     if self.navigator:
                         self.navigator.invalidate()
                     continue
+                if self.direction_method and not special_near and self.collection is None:
+                    memory=self.read_direction()
+                    if memory is not None:
+                        if basis is None or self.basis_angle(basis,memory)>policy.COORD_DIRECTION_STABLE_DEGREES:
+                            self.release()
+                            anchor,navigation_leg,navigation_wait_since=None,None,None
+                            self.direction_evidence=DirectionEvidence()
+                            if self.navigator:self.navigator.invalidate()
+                        basis=memory
+                        self.direction_source='memory'
+                        if not selected:
+                            reference=self.read(force=True)
+                            index=choose_start_index(points,reference,self.start_mode)
+                            self.start_index,selected=index,True
+                        self.resume_from_current=False
+                    elif not (self.direction_source=='probe' and basis is not None and self.direction_safe_probe):
+                        current=self.read(force=True)
+                        may_probe=self.direction_safe_probe and self.direction_bad_since is not None \
+                            and self.clock.monotonic()-self.direction_bad_since>=policy.COORD_DIRECTION_WAIT_SECONDS
+                        if not may_probe or not self.safe_direction_probe(current,index):
+                            self.wait_direction(index,len(points))
+                            anchor,navigation_leg,navigation_wait_since=None,None,None
+                            continue
+                        basis=None
+                        reference=current
+                        self.calibration_seconds=policy.COORD_DIRECTION_PROBE_SECONDS
                 if basis is None and self.collection is None and not special_near:
                     # A paused period is outside the coordinate jump/time budget.
                     self.position_at = None
@@ -994,6 +1137,10 @@ class _Follower:
                             if not self.calibration_budget.begin(reference, (self.cycle, index), scope):
                                 raise _SkipPoint('同一区域方向核对次数已达上限，当前方向无法可靠确认')
                         basis = self.calibrate(reference, target_index=index)
+                        if self.direction_method:
+                            self.direction_source='probe'
+                        if self.heading_cache is not None:
+                            self.heading_cache['basis'] = basis
                         self.direction_evidence = DirectionEvidence()
                     except _CalibrationRetry as exc:
                         self.release()
@@ -1004,7 +1151,10 @@ class _Follower:
                                     waypoint=index + 1, waypoint_count=len(points), navigation_path=[],
                                     incident_kind='calibration_failed', target=points[index]['position'])
                         scene_ready = (self.navigator.scene_provider() or {}).get('state') == 'ready'
-                        if self.jump_on_recovery and scene_ready:
+                        if self.direction_method:
+                            self.direction_bad_since=self.clock.monotonic()
+                            self.wait_direction(index,len(points))
+                        elif self.jump_on_recovery and scene_ready:
                             try:
                                 self.set_keys({'space'})
                                 self.wait(policy.COORD_RECOVERY_JUMP_SECONDS)
@@ -1022,6 +1172,8 @@ class _Follower:
                     anchor = None
                     best, progress_at = math.inf, self.clock.monotonic()
                 position = self.read()
+                if segment_start is None:
+                    segment_start = position
                 held_keys = set(self.keys)
                 target = points[index]['position']
                 remaining = distance(position, target)
@@ -1084,7 +1236,9 @@ class _Follower:
                     if self.waypoints is not None:
                         text = '已完成采集与等待' if self.collect_wait_seconds is not None else '已到达点位'
                         if 'special_resource' in points[index-1]:
-                            text = SPECIAL_REACHED_TEXT[(self.special_progress or {}).get('outcome')]
+                            evidence = (self.special_progress or {}).get('evidence')
+                            text = ('已确认采到（背包增量核对）' if evidence and evidence.fields()['resource_confirmed']
+                                    else SPECIAL_REACHED_TEXT[(self.special_progress or {}).get('outcome')])
                         if self.navigator and self.navigator.memory_state == 'write_error':
                             text += '（走法记忆暂未保存）'
                         self.report('reached', f'{text} {index}/{len(points)} · F6暂停 · F9停止',
@@ -1265,9 +1419,24 @@ class _Follower:
                             scope=repr((self.navigator.scene or {}).get('cache_context')))
                         if observation['state'] == 'aligned':
                             self.navigator.motion_succeeded(anchor,position)
-                        if observation['state'] == 'rotation_candidate' or (
+                            if self.direction_method and now>anchor_at:
+                                measured=math.hypot(displacement[0],displacement[2])/(now-anchor_at)
+                                if 0.<measured<=policy.COORD_MAX_SPEED:
+                                    self.calibration_speed=.8*self.calibration_speed+.2*measured
+                        if self.direction_method and observation['state']=='rotation_candidate':
+                            self.direction_conflict=self.direction_memory or basis
+                            self.direction_memory=self.direction_candidate=None
+                            self.direction_safe_probe=True
+                            self.direction_bad_since=self.clock.monotonic()
+                            self.release()
+                            reference,basis,navigation_leg,anchor=position,None,None,None
+                            self.navigator.invalidate()
+                            self.report('navigating','正常行走与方向读数持续不符，先重新核对；未盲目校准',
+                                direction_source='motion_conflict',direction_observation=observation)
+                            continue
+                        if not self.direction_method and (observation['state'] == 'rotation_candidate' or (
                                 observation['state'] == 'unknown' and abs(observation.get('angle_degrees', 0))
-                                > policy.COORD_MAX_DIRECTION_CHANGE_DEGREES):
+                                > policy.COORD_MAX_DIRECTION_CHANGE_DEGREES)):
                             self.release()
                             self.navigator.invalidate()
                             reference, basis, navigation_leg, anchor = position, None, None, None
@@ -1279,6 +1448,8 @@ class _Follower:
                 special_steering = ({'reach_radius': policy.COORD_SPECIAL_APPROACH_PRECISION}
                                     if 'special_resource' in points[index] else {})
                 desired = direction_keys(position, target, basis, **special_steering)
+                if self.heading_cache is not None:
+                    self.heading_cache['basis'] = basis
                 if self.navigator:
                     steering_travel = max(.15, self.calibration_speed * policy.COORD_SAMPLE_SECONDS * 2)
                     if special_steering:
@@ -1329,6 +1500,13 @@ class _Follower:
                         self.active_time, self.last_tick = 0., self.clock.monotonic()
             except _Paused:
                 self.release()
+                self.direction_poll_at=float('-inf')
+                self.direction_candidate=self.direction_memory=self.direction_conflict=None
+                self.direction_bad_since=None
+                self.direction_safe_probe=False
+                self.direction_source='legacy'
+                if self.heading_cache is not None:
+                    self.heading_cache.clear()
                 if self.position is not None:
                     reference = self.position
                 self.last_tick, self.position_at, basis = None, None, None
@@ -1376,7 +1554,8 @@ def drive_route(data, reader_factory, device, window, controls, report, clock=Pr
 def drive_points(data, size, reader_factory, device, window, controls, report, clock=PreciseClock, start_mode='first',
                  recovery_attempts=0, jump_on_recovery=False, collect_wait_seconds=None,
                  loop_count=policy.COORD_PLAYBACK_DEFAULT_LOOPS, continuous_recovery=False, navigator=None,
-                 repair_box=None, tool_selector=None, food=None, scene_refresh=None, food_fallback='fruit'):
+                 repair_box=None, tool_selector=None, food=None, scene_refresh=None, food_fallback='fruit',
+                 heading_cache=None, harvest_journal=None):
     if 'special_patrol' in data:
         from utils.flows.special_patrol import drive_special_patrol
         return drive_special_patrol(data, size, reader_factory, device, window, controls, report,
@@ -1417,6 +1596,8 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
                          repair_box=repair_box, tool_selector=tool_selector, food=food,
                          scene_refresh=scene_refresh)
         follower.food_fallback = food_fallback
+        follower.heading_cache = heading_cache
+        follower.harvest_journal = harvest_journal
         return follower.follow()
     except _Stopped:
         return False

@@ -177,6 +177,19 @@ class ReadOnlyPosition:
     def read(self):
         return self.snapshot()['position']
 
+    def movement_basis(self):
+        """Version-pinned read-only local camera direction; never sends input."""
+        if self.locator is None:
+            raise ValueError('当前坐标版本不支持只读方向检测')
+        from utils.drivers.movement_basis import MovementBasisReader
+        try:
+            if getattr(self,'movement_reader',None) is None:
+                self.movement_reader=MovementBasisReader(self._read,self.locator)
+            return self.movement_reader.snapshot()
+        except (OSError,ValueError):
+            self.movement_reader=None
+            raise
+
     def tools_snapshot(self):
         return self._tools_snapshot(held=False)
 
@@ -202,6 +215,15 @@ class ReadOnlyPosition:
         if getattr(self, 'food_inventory_reader', None) is None:
             self.food_inventory_reader = FoodInventoryReader(self)
         return self.food_inventory_reader.snapshot(check)
+
+    def backpack_counts_snapshot(self):
+        """Read-only owned stock totals; shares the validated food metadata reader."""
+        if self.locator is None:
+            raise ValueError('当前坐标版本不支持背包检测')
+        from utils.drivers.food_inventory import FoodInventoryReader
+        if getattr(self, 'food_inventory_reader', None) is None:
+            self.food_inventory_reader = FoodInventoryReader(self)
+        return self.food_inventory_reader.counts_snapshot()
 
     def food_search_query(self):
         if getattr(self, 'food_inventory_reader', None) is None:

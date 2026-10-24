@@ -86,7 +86,7 @@ def test_live_discovery_interrupts_walking_then_collects_and_confirms():
         try:
             r.read()
             if 'special_resource' in p:
-                report('collecting', 'ok', resource_outcome=special_verdict.GATHERED)
+                report('collecting', 'ok', resource_outcome=special_verdict.GATHERED, resource_confirmed=True)
                 return True
             s['objects'] = [target()]
             game.position = [4., 0., 0.]; r.read()
@@ -187,6 +187,7 @@ def test_actual_gather_with_counter_drop_and_zero_remaining_is_confirmed():
     from utils.core.coordinate_navigation import LocalNavigator
     s = scene(); obj = target(position=[0.,0.,0.]); s['objects'] = [obj]
     game = Game()
+    game.backpack_counts_snapshot = lambda: {'scope':'local-bag', 'counts':{40006: 1 if any(e.get('key')=='f' for _,e in game.events) else 0}}
     def on_input(event):
         if event == {'type':'key_down','key':'f'}: obj['resource_available'] = 0
     game.on_input = on_input

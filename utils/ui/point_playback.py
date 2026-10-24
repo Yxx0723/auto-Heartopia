@@ -208,6 +208,7 @@ class PointPlayback:
                                   'not_found': '本轮巡查结束，未发现目标；不代表全图没有',
                                   'partial': '巡查未完成，存在未到达房门',
                                   'unconfirmed': '已尝试采集，结果未确认',
+                                  'partial_resources': '本轮只确认采到一种资源，另一种未完成，详见巡查记录',
                                   'data_unavailable': '场景数据持续未确认，请重新连接后重试'}.get(
                                       self.patrol_result, '巡查已停止，按键已释放')
             elif completed and any('special_resource' in point for point in data.get('points', [])):

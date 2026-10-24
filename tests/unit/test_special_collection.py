@@ -118,9 +118,10 @@ def test_horizontal_proximity_never_allows_collection_on_another_floor():
     assert not in_interaction_range([0., 2., 0.], [0., 0., 0.])
 
 
-def test_confirmed_counter_drop_stops_the_loop_on_the_first_press():
+def test_counter_drop_with_backpack_gain_confirms_and_stops_first_press():
     f, game, point, target, _ = follower()
     point['special_resource']['press_count'] = 10
+    game.backpack_counts_snapshot = lambda: {'scope': 'local-bag', 'counts': {40026: 1 if game.events else 0}}
 
     def on_input(event):
         if event == {'type': 'key_down', 'key': 'f'}:

@@ -63,6 +63,11 @@ def polygon_distance(a, b, polygon):
 def scene_geometry_signature(scene):
     """Ignore timestamps, object labels and collider order when geometry agrees."""
     result = set()
+    for polygon in scene.get('navigation_exclusions', ()):
+        if isinstance(polygon, (list, tuple)) and len(polygon) >= 3 and all(
+                isinstance(p, (list, tuple)) and len(p) == 2 and all(
+                    type(v) in (int, float) and math.isfinite(v) for v in p) for p in polygon):
+            result.add(('navigation-exclusion', tuple(tuple(p) for p in polygon)))
     for box in scene.get('colliders', ()):
         heights, polygon = box.get('height'), box.get('polygon')
         if not isinstance(heights, (list, tuple)) or len(heights) != 2 \
@@ -96,6 +101,8 @@ class ObstacleMap:
                 continue
             candidates.append((box.get('polygon'), policy.COORD_NAV_CLEARANCE, box.get('category') != 'mountain'))
         candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False) for polygon in water_areas)
+        candidates.extend((polygon, policy.COORD_PATROL_HOME_MARGIN, False)
+                          for polygon in scene.get('navigation_exclusions', ()))
         candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False) for polygon in probes)
         for polygon, clearance, approachable in candidates:
             if not isinstance(polygon, (list, tuple)) or len(polygon) < 3 \

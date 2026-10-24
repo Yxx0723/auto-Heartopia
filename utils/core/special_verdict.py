@@ -12,7 +12,8 @@ observable:
 * ``unchanged`` nothing moved at all;
 * ``unknown``   the scene was not readable, so no claim is made either way.
 
-Only ``gathered`` is treated as confirmed. Disappearance may be unloading.
+``gathered`` only confirms a counter observation. The harvest session requires
+an owned-backpack increment to confirm actual collection. Disappearance may be unloading.
 Nothing here writes
 to the game, and a digest match is never used to claim a drop.
 """
@@ -26,7 +27,7 @@ SETTLED = CONFIRMED + (COOLING, GONE)
 
 # One press can be sampled several times while the game settles. The strongest
 # observation wins so a later quiet sample cannot erase a real change.
-_RANK = {GONE: 5, GATHERED: 5, COOLING: 4, CHANGED: 3, UNCHANGED: 2, UNKNOWN: 1}
+_RANK = {GONE: 5, GATHERED: 6, COOLING: 4, CHANGED: 3, UNCHANGED: 2, UNKNOWN: 1}
 
 
 def strongest(outcomes):
@@ -67,9 +68,10 @@ def verdict(before, after):
 
 
 def conclusive(outcome):
-    """True when pressing again cannot add information: stop the loop."""
+    """Stop further input, but continue reconciling the owned backpack."""
     return outcome in SETTLED
 
 
 def confirmed(outcome):
+    """Legacy counter-observation helper; not proof of an inventory gain."""
     return outcome in CONFIRMED
