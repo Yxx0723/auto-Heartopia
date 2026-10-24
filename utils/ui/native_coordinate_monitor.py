@@ -492,6 +492,9 @@ class CoordinateWindow:
                                          color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1,
                                          wraplength=420, justify='left')
         self.playback_label.pack(fill='x', pady=(6, 0))
+        self.special_gather_button = self.button(bottom, '巡查采集萤石和橡木',
+            lambda: self.start_special_gather('both'), small=True)
+        self.special_gather_button.pack(anchor='w', pady=(8, 0))
         footer = self.frame(body)
         footer.grid(row=2, column=0, sticky='ew', pady=(5, 0))
         self.label(footer, '点位自动保存到当前路线；各条路线保存在程序旁的「点位」文件夹。', color='muted', font=('Microsoft YaHei UI', -10)).pack(side='left')
@@ -555,10 +558,6 @@ class CoordinateWindow:
         controls = self.frame(inner, card=True, border=False)
         controls.grid(row=9, column=0, columnspan=2, sticky='ew')
         self.button(controls, '重新连接', self.reconnect, small=True).pack(fill='x')
-        specialbar = self.frame(controls, card=True, border=False)
-        specialbar.pack(fill='x', pady=(5, 0))
-        self.button(specialbar, '巡查采集萤石和橡木', lambda: self.start_special_gather('both'), small=True).pack(
-            side='left', fill='x', expand=True)
         pressbar = self.frame(controls, card=True, border=False)
         # Hidden controls retain the default three presses used by collection.
         self.label(pressbar, '连按 F', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left')

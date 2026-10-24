@@ -18,6 +18,7 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
             assert tabs.winfo_rooty() > window.canvas.winfo_rooty()+window.canvas.winfo_height()
             assert window.canvas.winfo_width() > root.winfo_width()*.9
             assert window.route_menu.winfo_ismapped()
+            assert window.special_gather_button.winfo_ismapped()
             assert window.save_point_button.grid_info()['row'] == 1
             assert window.clear_points_button.grid_info()['column'] == 3
             for widget in (window.clear_points_button, window.loop_count_spin, window.point_wait_button):
@@ -25,6 +26,7 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
             tabs.select(1); root.update()
             assert window.recovery_jump_check.winfo_ismapped()
             assert not window.route_menu.winfo_ismapped()
+            assert not window.special_gather_button.winfo_ismapped()
             tabs.select(2); root.update()
             sidebar = window.sidebar_canvas.master
             assert sidebar.winfo_ismapped()
