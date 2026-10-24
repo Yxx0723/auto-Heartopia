@@ -6,6 +6,7 @@ icon = root / 'packaging/assets/monitor.ico'
 a = Analysis([str(root / 'tools/coordinate_monitor.py')], pathex=[str(root)],
     binaries=[], datas=[(str(root / 'webui/coordinate-monitor/profile.json'), 'monitor'),
                          (str(icon), 'monitor'),
+                         (str(root/'webui/coordinate-monitor/cooking-coffee.json'), 'monitor'),
                          (str(root/'webui/coordinate-monitor/repair_box_menu.png'), 'monitor'),
                          (str(root/'webui/coordinate-monitor/repair_menu_marker.png'), 'monitor'),
                          (str(root/'webui/coordinate-monitor/axe_pick_icon.png'), 'monitor'),

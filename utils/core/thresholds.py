@@ -486,3 +486,10 @@ COORD_SPECIAL_INVENTORY_SETTLE_SECONDS = 6.
 # Pending bag reconciliation during the same patrol; bounded engineering window.
 COORD_SPECIAL_INVENTORY_POLL_SECONDS = 1.
 COORD_SPECIAL_PENDING_SECONDS = 120.
+
+# Single-stove engineering safety budgets; not game-measured cooking durations.
+COOKING_TASK_SECONDS = 300.
+COOKING_RECEIPT_SECONDS = 15.
+COOKING_POLL_SECONDS = .1
+COOKING_INVENTORY_SECONDS = .5
+COOKING_TARGET_DRIFT_PIXELS = 4.

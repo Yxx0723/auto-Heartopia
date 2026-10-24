@@ -19,8 +19,11 @@ from utils.core.coordinate_points import ordered_waypoints, validate_collect_wai
 from utils.core import thresholds as policy
 from utils.core.special_patrol import make_patrol_data
 from utils.drivers.coordinate_point_routes import PointRoutes
+from utils.drivers.input_task_gate import InputTaskGate
 from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
+from utils.ui.cooking_control import CookingControl
+from utils.ui.cooking_dialog import CookingDialog
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
 from utils.ui.scene_map_worker import SceneMapWorker
@@ -166,7 +169,7 @@ class MonitorWorker:
 
 class CoordinateWindow:
     def __init__(self, root, monitor, resources, clock=time.monotonic, point_path=None, wall_clock=None,
-                 playback_runner=None, scene_factory=None):
+                 playback_runner=None, scene_factory=None, cooking_runner=None):
         self.root, self.resources, self.clock = root, Path(resources), clock
         self.wall_clock = wall_clock or (lambda: datetime.now().astimezone())
         data_dir = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) \
@@ -184,9 +187,15 @@ class CoordinateWindow:
         self.view = MonitorView()
         self.worker = MonitorWorker(monitor)
         diagnostics_dir = Path(point_path).parent if point_path else data_dir
+        self.input_gate = InputTaskGate()
         self.playback = PointPlayback(self.resources / 'profile.json', runner=playback_runner,
                                       scene_provider=self.navigation_scene, scene_refresh=self.refresh_scene,
-                                      diagnostics_path=diagnostics_dir / '日志' / '点位回放.jsonl')
+                                      diagnostics_path=diagnostics_dir / '日志' / '点位回放.jsonl', input_gate=self.input_gate)
+        self.cooking = CookingControl(self.resources/'profile.json', data_dir/'烹饪记录',
+                                      busy=lambda: self.playback.active, runner=cooking_runner, input_gate=self.input_gate)
+        self.playback.input_busy = lambda: self.cooking.active
+        self.cooking_dialog = None
+        self.cooking_config = data_dir/'烹饪配置'/'咖啡.json'
         self.playback_status = {'state': 'idle', 'message': '按保存顺序回放 · F6开始/暂停 · F9停止'}
         self.scene_state = {'state': 'waiting', 'objects': [], 'colliders': []}
         # None means the explicit "all" mode; an empty set hides every object category.
@@ -516,6 +525,7 @@ class CoordinateWindow:
         specialbar.pack(fill='x', pady=(5, 0))
         self.button(specialbar, '巡查采集萤石和橡木', lambda: self.start_special_gather('both'), small=True).pack(
             side='left', fill='x', expand=True)
+        self.button(controls, '单灶自动烹饪', self.open_cooking, small=True).pack(fill='x', pady=(4, 0))
         pressbar = self.frame(controls, card=True, border=False)
         pressbar.pack(fill='x', pady=(3, 0))
         self.label(pressbar, '连按 F', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left')
@@ -795,7 +805,7 @@ class CoordinateWindow:
             return
         view, status = self.view, self.view.status
         live = view.position is not None and not view.paused
-        playing = self.playback.active
+        playing = self.playback.active or bool(getattr(self, 'cooking', None) and self.cooking.active)
         configure_changed(self.route_menu, state='disabled' if playing else 'readonly')
         for action, button in self.route_buttons.items():
             enabled = not playing and (action not in ('copy', 'rename') or not self.points_error)
@@ -821,7 +831,12 @@ class CoordinateWindow:
         configure_changed(self.save_point_button, state='normal' if live and not playing else 'disabled')
         configure_changed(self.play_button, state='normal' if live and self.saved_points and not playing and not self.points_error else 'disabled')
         configure_changed(self.stop_button, state='normal' if playing else 'disabled')
-        self.fields['playback'].set(user_feedback(self.playback_status['message']))
+        cooking = getattr(self, 'cooking', None)
+        cooking_dialog = getattr(self, 'cooking_dialog', None)
+        message = (cooking_dialog.status.get() if cooking and cooking.active and cooking_dialog
+                   and not cooking_dialog.closed else '烹饪任务运行中 · F9停止' if cooking and cooking.active
+                   else self.playback_status['message'])
+        self.fields['playback'].set(user_feedback(message))
         playback_color = COLORS['red' if self.playback_status['state'] in ('error', 'blocked', 'repair_paused', 'equip_paused', 'food_paused') else 'green' if playing else 'muted']
         configure_changed(self.playback_label, fg=playback_color)
         configure_changed(self.expanded_status, fg=playback_color)
@@ -1303,6 +1318,17 @@ class CoordinateWindow:
         value=self.food_fallback_var.get() if hasattr(self,'food_fallback_var') else '仅水果'
         return {'仅水果':'fruit','水果和菌类':'fruit_mushroom','全部可食用':'all'}.get(value,'fruit')
 
+    def open_cooking(self):
+        try:
+            self.view.point_snapshot(self.clock())
+            if self.cooking_dialog and not self.cooking_dialog.closed:
+                self.cooking_dialog.top.lift()
+                return
+            self.cooking_dialog = CookingDialog(self.root, self.cooking, self.view.status.get('pid'),
+                self.cooking_config, self.resources/'cooking-coffee.json')
+        except (OSError, ValueError) as exc:
+            messagebox.showerror('无法打开烹饪', str(exc), parent=self.root)
+
     def start_special_gather(self, category):
         try:
             snapshot = self.view.point_snapshot(self.clock())
@@ -1391,6 +1417,8 @@ class CoordinateWindow:
         self.render()
 
     def stop_playback(self):
+        if getattr(self, 'cooking', None) and self.cooking.active:
+            self.cooking.stop()
         self.playback.stop()
         self.playback_status = {'state': 'stopping', 'message': '正在停止回放并释放按键…'}
         self.render()
@@ -1487,7 +1515,7 @@ class CoordinateWindow:
         self.draw()
 
     def reconnect(self):
-        if self.playback.active:
+        if self.playback.active or bool(getattr(self, 'cooking', None) and self.cooking.active):
             self.stop_playback()
         if self.scene_worker:
             self.scene_worker.set_pid(None)
@@ -1521,6 +1549,8 @@ class CoordinateWindow:
             self.root.after_cancel(self.map_hover_job)
         if self.draw_job is not None:
             self.root.after_cancel(self.draw_job)
+        if getattr(self, 'cooking', None):
+            self.cooking.close()
         self.playback.close()
         if self.scene_worker:
             self.scene_worker.close()
@@ -1528,7 +1558,7 @@ class CoordinateWindow:
         self.root.destroy()
 
 
-def main(playback_runner=None):
+def main(playback_runner=None, cooking_runner=None):
     parser = argparse.ArgumentParser(description='心动小镇原生坐标监视窗口')
     parser.add_argument('--check-output', type=Path)
     parser.add_argument('--check-scene-output', type=Path)
@@ -1571,5 +1601,5 @@ def main(playback_runner=None):
             monitor.close()
         return
     root = tk.Tk()
-    CoordinateWindow(root, monitor, resources, playback_runner=playback_runner, scene_factory=MemorySceneMap)
+    CoordinateWindow(root, monitor, resources, playback_runner=playback_runner, scene_factory=MemorySceneMap, cooking_runner=cooking_runner)
     root.mainloop()

@@ -208,3 +208,7 @@ test.bat
 *.lock
 !packaging/HeartopiaMonitor.spec
 /回放记录/
+
+# Private cooking calibration and per-pot inventory evidence
+/烹饪记录/
+/烹饪配置/

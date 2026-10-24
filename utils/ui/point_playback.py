@@ -37,13 +37,15 @@ class PointPlayback:
     def __init__(self, profile, runner=None, window_factory=PointGameWindow, controls_factory=PlaybackControls,
                  reader_factory=ReadOnlyPosition, device_factory=TimelineInput, clock=PreciseClock,
                  scene_provider=None, navigator_factory=LocalNavigator, diagnostics_path=None, repair_factory=None,
-                 tool_factory=None, food_factory=None, wall_clock=None, scene_refresh=None):
+                 tool_factory=None, food_factory=None, wall_clock=None, scene_refresh=None, input_busy=None, input_gate=None):
         self.profile = Path(profile)
         self.runner = runner
         self.window_factory, self.controls_factory = window_factory, controls_factory
         self.reader_factory, self.device_factory, self.clock = reader_factory, device_factory, clock
         self.scene_provider, self.navigator_factory = scene_provider, navigator_factory
         self.scene_refresh = scene_refresh
+        self.input_busy = input_busy or (lambda: False)
+        self.input_gate = input_gate
         self.repair_factory = repair_factory
         self.tool_factory = tool_factory
         self.food_factory = food_factory
@@ -112,7 +114,7 @@ class PointPlayback:
               jump_on_recovery=True, collect_wait_seconds=policy.COORD_COLLECTION_DEFAULT_WAIT,
               loop_count=policy.COORD_PLAYBACK_DEFAULT_LOOPS, auto_navigate=False, auto_repair=False, auto_eat=False,
               route_path=None, remember_paths=True, food_fallback='fruit'):
-        if self.closed or self.active:
+        if self.closed or self.active or self.input_busy():
             raise ValueError('已有点位回放正在运行，请先停止。')
         if self.runner is None:
             raise ValueError('回放入口未装配，请从窗口版程序入口启动。')
@@ -165,7 +167,18 @@ class PointPlayback:
                                        name='point-playback', daemon=True)
         self.thread.start()
 
-    def _run(self, data, pid, start_mode, recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat):
+    def _run(self, *args):
+        if self.input_gate is None:
+            return self._execute(*args)
+        try:
+            with self.input_gate.claim('点位回放'):
+                return self._execute(*args)
+        except ValueError as exc:
+            self.update('error', str(exc))
+            if self.history:
+                self.history.close()
+
+    def _execute(self, data, pid, start_mode, recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat):
         controls, device = None, None
         try:
             window = self.window_factory(pid)

@@ -14,6 +14,11 @@ from utils.core import thresholds
 
 #: 常量名 -> 搬运时的原值。新增阈值时在这里补一行。
 GOLDEN_VALUES = {
+    'COOKING_TARGET_DRIFT_PIXELS': 4.,
+    'COOKING_TASK_SECONDS': 300.,
+    'COOKING_RECEIPT_SECONDS': 15.,
+    'COOKING_POLL_SECONDS': .1,
+    'COOKING_INVENTORY_SECONDS': .5,
     'COORD_SPECIAL_INVENTORY_SETTLE_SECONDS': 6.,
     'COORD_SPECIAL_INVENTORY_POLL_SECONDS': 1.,
     'COORD_SPECIAL_PENDING_SECONDS': 120.,
@@ -256,7 +261,7 @@ def test_every_public_constant_is_pinned():
 def test_thresholds_are_probabilities():
     """matchTemplate 归一化结果落在 [0, 1]。"""
     for name, value in GOLDEN_VALUES.items():
-        if name.startswith(("COORD_", "MONO_")):
+        if name.startswith(("COORD_", "MONO_", "COOKING_")):
             continue  # Coordinate units/timing and metadata traversal budgets.
         assert 0.0 < value <= 1.0, f"{name} = {value} 不在匹配度取值范围内"
 

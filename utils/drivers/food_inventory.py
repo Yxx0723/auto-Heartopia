@@ -263,6 +263,44 @@ class FoodInventoryReader:
         scope = hashlib.sha256(repr((self.meta.domain, context)).encode()).hexdigest()
         return {'scope': scope, 'counts': counts}
 
+    def cooking_snapshot(self, max_star=1, with_names=False, check=lambda: None):
+        """Stock plus conservative selectable ingredients, never warehouse stock.
+
+        If a protected variant shares an id, reject that entire id: the cooking
+        UI's automatic stack choice has not been verified to respect variants.
+        """
+        if type(max_star) is not int or not 0 <= max_star <= 5:
+            raise ValueError('可用原料最高星级无效')
+        rows, stable, context = self.owned_rows(check)
+        counts, usable, protected, items = {}, {}, set(), []
+        for ci, raw in rows:
+            check()
+            def value(name, code=8, fmt='i', width=4):
+                return struct.unpack_from('<'+fmt, raw, self.offset(ci, name, code, width)-16)[0]
+            identity, count, star = value('staticId'), value('count'), value('_starRate')
+            locked, disabled = value('isLock', 2, 'B', 1), value('IsDisable', 2, 'B', 1)
+            if identity <= 0 or not 0 <= count <= 100000000 or locked not in (0, 1) or disabled not in (0, 1):
+                raise ValueError('背包原料数量或保护状态未确认')
+            if not count:
+                continue
+            counts[identity] = counts.get(identity, 0)+count
+            if locked or disabled or not 0 <= star <= max_star:
+                protected.add(identity)
+            else:
+                usable[identity] = usable.get(identity, 0)+count
+            items.append({'item_id': identity, 'count': count, 'star': star,
+                          'locked': bool(locked), 'disabled': bool(disabled),
+                          'prepared': value('entityType', 17) == PREPARED_FOOD_TYPE})
+        if with_names:
+            self.discover_names(set(counts), check)
+            items = [dict(item, name=self.names[item['item_id']]) for item in items]
+        stable()
+        import hashlib
+        scope = hashlib.sha256(repr((self.meta.domain, context)).encode()).hexdigest()
+        return {'scope': scope, 'counts': counts, 'items': items,
+                'usable_counts': {i: n for i, n in usable.items() if i not in protected},
+                'protected_ids': sorted(protected)}
+
     def search_query(self):
         if not getattr(self, 'context', None):
             raise ValueError('尚未读取当前背包')
