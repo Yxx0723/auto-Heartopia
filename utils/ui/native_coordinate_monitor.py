@@ -352,46 +352,73 @@ class CoordinateWindow:
         self.scene_filter_hint = self.label(plotfoot, color='muted', font=('Microsoft YaHei UI', -10))
         self.scene_filter_hint.pack(side='right', padx=4)
         self.update_scene_filter_controls()
-        lower_panel = self.frame(body)
+        lower_panel = tk.LabelFrame(body, text='分类显示', bg=COLORS['bg'], fg=COLORS['text'],
+                                    font=('Microsoft YaHei UI', -12), bd=1, relief='solid', padx=4, pady=3)
         lower_panel.grid(row=1, column=0, sticky='ew', pady=(8, 0))
-        lower_panel.grid_columnconfigure(0, minsize=300)
-        lower_panel.grid_columnconfigure(1, weight=1)
-        lower_panel.grid_rowconfigure(1, weight=1)
-        pointcard = self.frame(lower_panel, card=True)
-        pointcard.grid(row=0, column=1, sticky='ew', padx=(10, 0))
+        style = ttk.Style(self.root)
+        style.configure('Monitor.TNotebook', background=COLORS['bg'], borderwidth=0)
+        style.configure('Monitor.TNotebook.Tab', background=COLORS['button'], foreground=COLORS['text'],
+                        padding=(12, 4), font=('Microsoft YaHei UI', -12))
+        style.map('Monitor.TNotebook.Tab', background=[('selected', COLORS['card'])],
+                  foreground=[('selected', COLORS['green'])])
+        self.control_tabs = ttk.Notebook(lower_panel, style='Monitor.TNotebook', height=220)
+        self.control_tabs.pack(fill='both', expand=True)
+        route_page = self.frame(self.control_tabs, card=True, border=False)
+        parameter_page = self.frame(self.control_tabs, card=True, border=False)
+        map_page = self.frame(self.control_tabs, card=True, border=False)
+        for page, title in ((route_page, '采集设定'), (parameter_page, '参数设定'), (map_page, '地图连接')):
+            self.control_tabs.add(page, text=title)
+        route_page.grid_columnconfigure(0, minsize=400)
+        route_page.grid_columnconfigure(1, weight=1)
+        route_page.grid_rowconfigure(1, weight=1)
+        def group(parent, title):
+            return tk.LabelFrame(parent, text=title, bg=COLORS['card'], fg=COLORS['text'],
+                                 font=('Microsoft YaHei UI', -12), padx=6, pady=4,
+                                 bd=1, relief='solid', highlightthickness=0)
+        operations = group(route_page, '采集路线操作')
+        operations.grid(row=0, column=0, sticky='ew', padx=6, pady=(4, 0))
+        for column in range(4):
+            operations.grid_columnconfigure(column, weight=1, uniform='route-actions')
+        self.route_buttons = {}
+        for column, (action, text) in enumerate([('new', '新建路线'), ('copy', '另存路线'),
+                                                ('rename', '路线改名'), ('delete', '删除路线')]):
+            button = self.button(operations, text, lambda action=action: self.manage_route(action), small=True)
+            button.grid(row=0, column=column, sticky='ew', padx=2, pady=2)
+            self.route_buttons[action] = button
+        self.button(operations, '路线预览', self.show_route_overview, small=True).grid(
+            row=1, column=0, sticky='ew', padx=2, pady=2)
+        self.save_point_button = self.button(operations, '添加点位', self.save_point, primary=True, small=True)
+        self.save_point_button.grid(row=1, column=1, sticky='ew', padx=2, pady=2)
+        self.button(operations, '点位管理', self.edit_point_waits, small=True).grid(
+            row=1, column=2, sticky='ew', padx=2, pady=2)
+        self.clear_points_button = self.button(operations, '清空点位', self.clear_saved_points, small=True)
+        self.clear_points_button.grid(row=1, column=3, sticky='ew', padx=2, pady=2)
+        pointcard = group(route_page, '采集路线显示')
+        pointcard.grid(row=1, column=0, sticky='nsew', padx=6, pady=(4, 6))
+        self.route_display = pointcard
         routebar = self.frame(pointcard, card=True, border=False)
-        routebar.pack(fill='x', padx=8, pady=(6, 0))
-        self.label(routebar, '当前路线', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left', padx=(0, 6))
+        routebar.pack(fill='x')
         self.route_var = tk.StringVar(self.root, value=self.route_name)
         self.route_menu = self.dropdown(routebar, self.route_var, [self.route_name], width=16,
                                         command=self.switch_route, postcommand=self.refresh_route_menu)
         self.route_menu.pack(side='left')
-        self.route_buttons = {}
-        for action, text in [('new', '新建'), ('copy', '另存为'), ('rename', '改名'), ('delete', '删除')]:
-            button = self.button(routebar, text, lambda action=action: self.manage_route(action), small=True)
-            button.pack(side='left', padx=(5, 0))
-            self.route_buttons[action] = button
-        self.clear_points_button = self.button(routebar, '清空点位', self.clear_saved_points, small=True)
-        self.clear_points_button.pack(side='left', padx=(5, 0))
+        self.field(routebar, 'saved_count', '已保存 0 个点', color='green',
+                   font=('Microsoft YaHei UI', -11)).pack(side='right')
         self.refresh_route_menu()
-        pointrow = self.frame(pointcard, card=True, border=False)
-        pointrow.pack(fill='x')
-        pointhead = self.frame(pointrow, card=True, border=False)
-        pointhead.pack(side='left', padx=8, pady=6)
-        self.save_point_button = self.button(pointhead, '＋ 添加当前点位', self.save_point, primary=True, small=True)
-        self.save_point_button.pack(side='left')
-        pointinfo = self.frame(pointrow, card=True, border=False)
-        pointinfo.pack(side='left', fill='x', expand=True, padx=(0, 8), pady=5)
-        self.field(pointinfo, 'saved_count', '已保存 0 个点', color='green',
-                   font=('Microsoft YaHei UI', -12)).pack(anchor='w')
-        self.saved_summary = self.field(pointinfo, 'saved_summary', '点击按钮，将当前 XYZ 添加到当前路线',
+        self.saved_summary = self.field(pointcard, 'saved_summary', '点击添加点位记录当前坐标',
                                         color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1)
         self.saved_summary.pack(fill='x', pady=(3, 0))
-        sidebar = self.frame(lower_panel, card=True, width=300)
-        sidebar.grid(row=0, column=0, rowspan=2, sticky='nsew')
+        sidebar = self.frame(map_page, card=True)
+        sidebar.pack(fill='both', expand=True, padx=4, pady=4)
         self.build_sidebar(sidebar)
-        bottom = self.frame(lower_panel)
-        bottom.grid(row=1, column=1, sticky='new', padx=(10, 0), pady=(8, 0))
+        coordinates = self.frame(pointcard, card=True, border=False)
+        coordinates.pack(fill='x', pady=(4, 0))
+        for axis, color in zip('XYZ', ('red', 'green', 'blue')):
+            self.label(coordinates, axis, color=color, font=('Consolas', -12)).pack(side='left', padx=(0, 3))
+            self.label(coordinates, textvariable=self.fields[axis], font=('Consolas', -12)).pack(
+                side='left', padx=(0, 10))
+        bottom = group(route_page, '回放控制')
+        bottom.grid(row=0, column=1, rowspan=2, sticky='nsew', padx=(0, 6), pady=(4, 6))
         toolbar = self.frame(bottom)
         toolbar.pack(fill='x')
         self.label(toolbar, '起点方式', color='muted', font=('Microsoft YaHei UI', -12)).pack(
@@ -425,7 +452,7 @@ class CoordinateWindow:
         self.label(waitbar, '秒', color='muted', font=('Microsoft YaHei UI', -12)).pack(side='left')
         self.point_wait_button = self.button(waitbar, '逐点等待', self.edit_point_waits, small=True)
         self.point_wait_button.pack(side='left', padx=(8, 0))
-        recoverybar = self.frame(bottom)
+        recoverybar = self.frame(parameter_page, card=True, border=False)
         recoverybar.pack(fill='x', pady=(5, 0))
         self.label(recoverybar, '每轮脱困次数', color='muted',
                    font=('Microsoft YaHei UI', -12)).pack(side='left', padx=(0, 8))
@@ -442,7 +469,7 @@ class CoordinateWindow:
             selectcolor=COLORS['button'], font=('Microsoft YaHei UI', -12), bd=0,
             highlightthickness=0)
         self.recovery_jump_check.pack(side='left', padx=(12, 16))
-        navigationbar = self.frame(bottom)
+        navigationbar = self.frame(parameter_page, card=True, border=False)
         navigationbar.pack(fill='x', pady=(5, 0))
         self.navigation_var = tk.BooleanVar(self.root, value=True)
         self.navigation_check = tk.Checkbutton(navigationbar, text='自动寻路', variable=self.navigation_var,
@@ -462,7 +489,8 @@ class CoordinateWindow:
         self.clear_path_memory_button.pack(side='left')
         self.refresh_path_memory_info()
         self.playback_label = self.field(bottom, 'playback', self.playback_status['message'],
-                                         color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1)
+                                         color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1,
+                                         wraplength=420, justify='left')
         self.playback_label.pack(fill='x', pady=(6, 0))
         footer = self.frame(body)
         footer.grid(row=2, column=0, sticky='ew', pady=(5, 0))
