@@ -18,7 +18,8 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
             assert tabs.winfo_rooty() > window.canvas.winfo_rooty()+window.canvas.winfo_height()
             assert window.canvas.winfo_width() > root.winfo_width()*.9
             assert window.route_menu.winfo_ismapped()
-            assert window.special_gather_button.winfo_ismapped()
+            assert not hasattr(window, 'special_gather_button')
+            assert window.patrol_route_label in window.route_menu.cget('values')
             assert window.save_point_button.grid_info()['row'] == 1
             assert window.clear_points_button.grid_info()['column'] == 3
             for widget in (window.clear_points_button, window.loop_count_spin, window.point_wait_button):
@@ -26,7 +27,6 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
             tabs.select(1); root.update()
             assert window.recovery_jump_check.winfo_ismapped()
             assert not window.route_menu.winfo_ismapped()
-            assert not window.special_gather_button.winfo_ismapped()
             tabs.select(2); root.update()
             sidebar = window.sidebar_canvas.master
             assert sidebar.winfo_ismapped()
@@ -37,6 +37,14 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
             assert sidebar.winfo_ismapped() and tabs.winfo_rooty() == old_y
         assert window.special_press_var.get() == '3'
         assert window.scene_radius == 150
+        window.activate_route(window.patrol_route_label)
+        window.view.position = [1., 2., 3.]
+        window.render()
+        assert window.play_button.cget('state') == 'normal'
+        assert window.save_point_button.cget('state') == 'disabled'
+        assert window.clear_points_button.cget('state') == 'disabled'
+        assert window.route_buttons['delete'].cget('state') == 'disabled'
+        assert window.fields['saved_count'].get() == '内置巡查路线'
     finally:
         if window is not None: window.close()
         else: root.destroy()

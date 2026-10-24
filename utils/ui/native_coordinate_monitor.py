@@ -176,6 +176,7 @@ class CoordinateWindow:
         self.trail_export_dir = (data_dir / '道路数据' / '实走轨迹' if getattr(sys, 'frozen', False)
                                  else Path(__file__).resolve().parents[4] / 'outputs' / '道路数据' / '实走轨迹')
         self.routes = PointRoutes(point_path or data_dir / '点位' / '我的点位.json')
+        self.patrol_route_selected = False
         self.route_name = self.routes.selected_name()
         self.point_store = self.routes.store(self.route_name)
         self.saved_points, self.points_error = [], ''
@@ -385,12 +386,12 @@ class CoordinateWindow:
             button = self.button(operations, text, lambda action=action: self.manage_route(action), small=True)
             button.grid(row=0, column=column, sticky='ew', padx=2, pady=2)
             self.route_buttons[action] = button
-        self.button(operations, '路线预览', self.show_route_overview, small=True).grid(
-            row=1, column=0, sticky='ew', padx=2, pady=2)
+        self.route_preview_button = self.button(operations, '路线预览', self.show_route_overview, small=True)
+        self.route_preview_button.grid(row=1, column=0, sticky='ew', padx=2, pady=2)
         self.save_point_button = self.button(operations, '添加点位', self.save_point, primary=True, small=True)
         self.save_point_button.grid(row=1, column=1, sticky='ew', padx=2, pady=2)
-        self.button(operations, '点位管理', self.edit_point_waits, small=True).grid(
-            row=1, column=2, sticky='ew', padx=2, pady=2)
+        self.point_manage_button = self.button(operations, '点位管理', self.edit_point_waits, small=True)
+        self.point_manage_button.grid(row=1, column=2, sticky='ew', padx=2, pady=2)
         self.clear_points_button = self.button(operations, '清空点位', self.clear_saved_points, small=True)
         self.clear_points_button.grid(row=1, column=3, sticky='ew', padx=2, pady=2)
         pointcard = group(route_page, '采集路线显示')
@@ -492,9 +493,6 @@ class CoordinateWindow:
                                          color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1,
                                          wraplength=420, justify='left')
         self.playback_label.pack(fill='x', pady=(6, 0))
-        self.special_gather_button = self.button(bottom, '巡查采集萤石和橡木',
-            lambda: self.start_special_gather('both'), small=True)
-        self.special_gather_button.pack(anchor='w', pady=(8, 0))
         footer = self.frame(body)
         footer.grid(row=2, column=0, sticky='ew', pady=(5, 0))
         self.label(footer, '点位自动保存到当前路线；各条路线保存在程序旁的「点位」文件夹。', color='muted', font=('Microsoft YaHei UI', -10)).pack(side='left')
@@ -837,30 +835,35 @@ class CoordinateWindow:
         view, status = self.view, self.view.status
         live = view.position is not None and not view.paused
         playing = self.playback.active or bool(getattr(self, 'cooking', None) and self.cooking.active)
+        patrol = getattr(self, 'patrol_route_selected', False)
         configure_changed(self.route_menu, state='disabled' if playing else 'readonly')
         for action, button in self.route_buttons.items():
             enabled = not playing and (action not in ('copy', 'rename') or not self.points_error)
+            enabled = enabled and (not patrol or action == 'new')
             if action == 'delete':
                 enabled = enabled and self.point_store.path.exists()
             configure_changed(button, state='normal' if enabled else 'disabled')
-        configure_changed(self.start_menu, state='disabled' if playing else 'readonly')
+        configure_changed(self.start_menu, state='disabled' if playing or patrol else 'readonly')
         configure_changed(self.recovery_menu, state='disabled' if playing else 'readonly')
         configure_changed(self.recovery_jump_check, state='disabled' if playing else 'normal')
-        configure_changed(self.navigation_check, state='disabled' if playing else 'normal')
+        configure_changed(self.navigation_check, state='disabled' if playing or patrol else 'normal')
         if hasattr(self, 'path_memory_check'):
-            configure_changed(self.path_memory_check, state='disabled' if playing or not self.navigation_var.get() else 'normal')
-            configure_changed(self.clear_path_memory_button, state='disabled' if playing else 'normal')
+            configure_changed(self.path_memory_check, state='disabled' if playing or patrol or not self.navigation_var.get() else 'normal')
+            configure_changed(self.clear_path_memory_button, state='disabled' if playing or patrol else 'normal')
         configure_changed(self.repair_auto_check, state='disabled' if playing else 'normal')
         if hasattr(self, 'food_auto_check'):
             configure_changed(self.food_auto_check, state='disabled' if playing else 'normal')
         if hasattr(self,'food_fallback_menu'):
             configure_changed(self.food_fallback_menu,state='disabled' if playing else 'readonly')
-        configure_changed(self.collect_wait_spin, state='disabled' if playing else 'normal')
-        configure_changed(self.loop_count_spin, state='disabled' if playing else 'normal')
+        configure_changed(self.collect_wait_spin, state='disabled' if playing or patrol else 'normal')
+        configure_changed(self.loop_count_spin, state='disabled' if playing or patrol else 'normal')
+        for key in ('route_preview_button', 'point_manage_button'):
+            if hasattr(self, key):
+                configure_changed(getattr(self, key), state='disabled' if playing or patrol else 'normal')
         configure_changed(self.point_wait_button, state='normal' if self.saved_points and not playing and not self.points_error else 'disabled')
         configure_changed(self.clear_points_button, state='normal' if self.saved_points and not playing and not self.points_error else 'disabled')
-        configure_changed(self.save_point_button, state='normal' if live and not playing else 'disabled')
-        configure_changed(self.play_button, state='normal' if live and self.saved_points and not playing and not self.points_error else 'disabled')
+        configure_changed(self.save_point_button, state='normal' if live and not playing and not patrol else 'disabled')
+        configure_changed(self.play_button, state='normal' if live and (self.saved_points or patrol) and not playing and not self.points_error else 'disabled')
         configure_changed(self.stop_button, state='normal' if playing else 'disabled')
         cooking = getattr(self, 'cooking', None)
         cooking_dialog = getattr(self, 'cooking_dialog', None)
@@ -871,8 +874,10 @@ class CoordinateWindow:
         playback_color = COLORS['red' if self.playback_status['state'] in ('error', 'blocked', 'repair_paused', 'equip_paused', 'food_paused') else 'green' if playing else 'muted']
         configure_changed(self.playback_label, fg=playback_color)
         configure_changed(self.expanded_status, fg=playback_color)
-        self.fields['saved_count'].set(f'已保存 {len(self.saved_points)} 个点')
-        if self.points_error:
+        self.fields['saved_count'].set('内置巡查路线' if patrol else f'已保存 {len(self.saved_points)} 个点')
+        if patrol:
+            summary = '1→12号房门 · 先发现先采集 · 启动时核对当天场景'
+        elif self.points_error:
             summary = self.points_error
         elif self.saved_points:
             point = self.saved_points[-1]
@@ -1240,6 +1245,7 @@ class CoordinateWindow:
 
     def clear_saved_points(self):
         try:
+            self.require_saved_route()
             self.require_route_change()
             route = self.route_name
             data = self.point_store.load()
@@ -1266,6 +1272,7 @@ class CoordinateWindow:
 
     def save_point(self):
         try:
+            self.require_saved_route()
             if self.playback.active:
                 raise ValueError('请先停止回放，再添加新点位。')
             snapshot = self.view.point_snapshot(self.clock())
@@ -1283,7 +1290,21 @@ class CoordinateWindow:
         self.hint.configure(text=f'已添加到「{self.route_name}」：{self.saved_points[-1]["name"]}', fg=COLORS['green'])
 
     def refresh_route_menu(self):
-        self.route_menu.configure(values=self.routes.names())
+        names = self.routes.names()
+        label = '萤石和橡木（巡查）'
+        while any(name.casefold() == label.casefold() for name in names):
+            label += '·内置'
+        self.patrol_route_label = label
+        self.route_menu.configure(values=[*names, label])
+        if getattr(self, 'patrol_route_selected', False):
+            self.route_var.set(label)
+
+    def selected_route_label(self):
+        return self.patrol_route_label if getattr(self, 'patrol_route_selected', False) else self.route_name
+
+    def require_saved_route(self):
+        if getattr(self, 'patrol_route_selected', False):
+            raise ValueError('内置巡查路线由当天场景生成，请先选择普通路线再编辑。')
 
     def require_route_change(self):
         if self.playback.active:
@@ -1293,8 +1314,19 @@ class CoordinateWindow:
 
     def activate_route(self, name):
         self.require_route_change()
+        if name == getattr(self, 'patrol_route_label', None):
+            self.patrol_route_selected = True
+            self.route_var.set(name)
+            self.saved_points, self.points_error = [], ''
+            self.view.clear_trail()
+            self.refresh_path_memory_info()
+            self.playback_status = {'state': 'idle', 'message': '萤石和橡木 · 1→12号房门联合巡查 · 点击按顺序回放启动'}
+            self.render()
+            self.hint.configure(text='已选择内置巡查路线，启动时读取当天场景', fg=COLORS['green'])
+            return
         store = self.routes.store(name)
         data = store.load()  # Validate before replacing the current route/view.
+        self.patrol_route_selected = False
         self.point_store, self.route_name = store, name
         self.route_var.set(name)
         self.saved_points, self.points_error = data['points'], ''
@@ -1314,13 +1346,15 @@ class CoordinateWindow:
         try:
             self.activate_route(name)
         except (OSError, ValueError) as exc:
-            self.route_var.set(self.route_name)
+            self.route_var.set(self.selected_route_label())
             messagebox.showerror('无法切换路线', str(exc), parent=self.root)
 
     def manage_route(self, action):
         titles = {'new': '新建路线', 'copy': '路线另存为', 'rename': '路线改名', 'delete': '删除路线'}
         try:
             self.require_route_change()
+            if action != 'new':
+                self.require_saved_route()
             if action == 'delete':
                 if not messagebox.askyesno('删除路线', f'删除路线「{self.route_name}」？\n'
                                           '文件会移入「点位/路线回收站」，其他路线不受影响。', parent=self.root):
@@ -1342,7 +1376,7 @@ class CoordinateWindow:
                     name = self.routes.create(name, data)
             self.activate_route(name)
         except (OSError, ValueError) as exc:
-            self.route_var.set(self.route_name)
+            self.route_var.set(self.selected_route_label())
             messagebox.showerror(titles[action] + '失败', str(exc), parent=self.root)
 
     def food_fallback_mode(self):
@@ -1369,6 +1403,8 @@ class CoordinateWindow:
             messagebox.showerror('无法开始动态采集', str(exc), parent=self.root)
 
     def start_playback(self):
+        if getattr(self, 'patrol_route_selected', False):
+            return self.start_special_gather('both')
         try:
             self.view.point_snapshot(self.clock())
             data = self.point_store.load()
@@ -1401,6 +1437,9 @@ class CoordinateWindow:
     def refresh_path_memory_info(self):
         if not hasattr(self, 'path_memory_label'):
             return
+        if getattr(self, 'patrol_route_selected', False):
+            configure_changed(self.path_memory_label, text='0 段')
+            return
         try:
             count = RoutePathMemory(self.point_store.path, self.point_store.load()).count
         except (OSError, ValueError):
@@ -1409,6 +1448,7 @@ class CoordinateWindow:
 
     def clear_path_memory(self):
         try:
+            self.require_saved_route()
             self.require_route_change()
             if not messagebox.askyesno('清除路线记忆', f'清除「{self.route_name}」已记住的走法？采集点位会保留。', parent=self.root):
                 return
@@ -1420,6 +1460,7 @@ class CoordinateWindow:
 
     def edit_point_waits(self):
         try:
+            self.require_saved_route()
             if self.playback.active:
                 raise ValueError('请先停止回放，再设置点位等待时间。')
             if self.wait_editor is not None and self.wait_editor.root.winfo_exists():
