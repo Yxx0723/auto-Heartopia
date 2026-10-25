@@ -200,7 +200,8 @@ class CoordinateWindow:
         # None means the explicit "all" mode; an empty set hides every object category.
         self.scene_categories = None
         self.scene_filters_expanded = False
-        self.scene_worker = SceneMapWorker(self.resources / 'profile.json', factory=scene_factory) if scene_factory else None
+        self.scene_worker = SceneMapWorker(self.resources / 'profile.json', factory=scene_factory,
+                                          diagnostics_path=diagnostics_dir / '日志' / '场景读取.jsonl') if scene_factory else None
         self.zoom = 1.
         self.scene_radius = policy.COORD_SCENE_RADIUS
         self.map_view = 'nearby'

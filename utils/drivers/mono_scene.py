@@ -2,6 +2,7 @@
 import math
 import hashlib
 import struct
+import time
 from utils.core import thresholds as policy
 from utils.core.scene_read import SceneReadIssue, RecoveryBudget, read_collection
 from utils.core.scene_map import box_geometry, compose_transform
@@ -502,12 +503,13 @@ class MemorySceneMap:
             return self.meta.ref(transform, '_hierarchy')
         return self.meta.ref(owner, '_hierarchy')
 
-    def refresh_live_objects(self, observations, registry, world, *, active=None):
+    def refresh_live_objects(self, observations, registry, world, *, active=None, stats=None, check=lambda: None):
         """Late recheck after collision reads; never retain a vanished moving icon."""
         meta = self.meta
         active = set(meta.dictionary(registry) if active is None else active)
         result = []
         for hierarchy, owner, item in observations:
+            check()
             if hierarchy not in active:
                 continue
             if item['category'] in ('insect', 'butterfly', 'bird', 'animal', 'fluorite', 'roaming_oak'):
@@ -518,6 +520,8 @@ class MemorySceneMap:
                         continue
                     item = {**item, 'position': world(hierarchy)[0]}
                 except (OSError, ValueError):
+                    if stats is not None:
+                        stats['unknown'] += 1
                     continue
             result.append(item)
         return result
@@ -540,6 +544,8 @@ class MemorySceneMap:
                                     'extra_seconds': self.read_budget.spent}
 
     def _snapshot(self):
+        scan_started = time.monotonic()
+        self.read_budget.check()
         sample = self.memory.snapshot()
         local_hierarchy = self.local_hierarchy(sample)
         meta = self.meta
@@ -569,12 +575,16 @@ class MemorySceneMap:
 
         meta.stage = 'entities'
         objects, groups, models, observations = [], [], [], []
+        discovery_unknown = 0
         for hierarchy in entries:
+            self.read_budget.check()
+            discovered = False
             try:
                 owner = meta.ref(hierarchy, '_hierarchyObject')
                 if not owner:
                     continue
                 info = meta.obj(owner)
+                discovered = True
                 owners[owner] = hierarchy
                 if info['name'] == 'PhysicGroup':
                     groups.append(owner)
@@ -608,6 +618,9 @@ class MemorySceneMap:
                     observations.append((hierarchy, owner, obj))
             except ValueError:
                 skipped += 1
+                if not discovered:
+                    discovery_unknown += 1
+        entity_unknown = skipped
         try:
             barriers = self.barrier_owners()
             barrier_state = 'ready'
@@ -615,14 +628,18 @@ class MemorySceneMap:
             barriers, barrier_state = {}, 'unavailable'
         meta.stage = 'managed_collisions'
         colliders, visited, streams, triggers, inactive, unsupported = [], set(), set(), 0, 0, 0
+        managed_unknown = 0
         for group in groups:
+            self.read_budget.check()
             for collider in meta.dictionary(meta.ref(group, '_colliders')):
                 stream = meta.ref(collider, '_stream')
                 if stream:
                     streams.add(stream)
         for stream in streams:
+            self.read_budget.check()
             for collision in meta.dictionary(meta.ref(stream, '_collisions')):
                 for collider in meta.array_refs(meta.ref(collision, 'colliders')):
+                    self.read_budget.check()
                     if not collider or collider in visited:
                         continue
                     visited.add(collider)
@@ -666,6 +683,10 @@ class MemorySceneMap:
                         colliders.append(geometry)
                     except ValueError:
                         skipped += 1
+                        managed_unknown += 1
+        managed_observed_to = time.monotonic()
+        self.read_budget.check()
+        native_observed_from = time.monotonic()
         world_stats, world_state = {}, 'unavailable'
         try:
             if self.native is None:
@@ -678,6 +699,8 @@ class MemorySceneMap:
             # Streaming replacement invalidates this read; never retain an old
             # world's obstacles. The worker retries with a fresh snapshot.
             self.native = None
+        native_observed_to = time.monotonic()
+        self.read_budget.check()
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
             raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
@@ -714,11 +737,28 @@ class MemorySceneMap:
         transforms.clear()
         meta.stage = 'registry_end'
         active = self.read_registry(registry, hierarchy_class, local_hierarchy, self.read_budget)
-        objects = self.refresh_live_objects(observations, registry, world, active=active)
+        live_stats = {'unknown': 0}
+        objects = self.refresh_live_objects(observations, registry, world, active=active,
+                                            stats=live_stats, check=self.read_budget.check)
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
             raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
-        return {'terrain_state': 'ready' if terrain else 'unavailable',
+        self.read_budget.check()
+        root_verified_at = time.monotonic()
+        managed_complete = not (discovery_unknown or managed_unknown)
+        quality = {'navigation_eligible': managed_complete and world_state == 'ready',
+                   'root_verified_at': root_verified_at,
+                   'parts': {
+                       'entities': {'state': 'partial' if entity_unknown or live_stats['unknown'] else 'complete',
+                                    'observed_from': scan_started, 'observed_to': root_verified_at},
+                       'managed_collisions': {'state': 'complete' if managed_complete else 'partial',
+                                              'observed_from': scan_started, 'observed_to': managed_observed_to},
+                       'native_collisions': {'state': 'complete' if world_state == 'ready' else 'unavailable',
+                                             'observed_from': native_observed_from, 'observed_to': native_observed_to}},
+                   'unknown_entities': entity_unknown + live_stats['unknown'],
+                   'discovery_unknown': discovery_unknown,
+                   'managed_unknown': managed_unknown}
+        return {'quality': quality, 'terrain_state': 'ready' if terrain else 'unavailable',
                 'terrain_revision': 'main-terrain-v1' if terrain else None,
                 'schema': 'memory-scene-map-v1', 'state': 'ready', 'read_only': True,
                 'scope': 'loaded-scene-partial', 'objects': objects, 'colliders': colliders, 'models': models,

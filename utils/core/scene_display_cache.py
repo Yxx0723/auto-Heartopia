@@ -51,7 +51,14 @@ class SceneDisplayCache:
 
     def update(self, scene, now):
         context, position = freeze(scene.get('cache_context')), scene.get('position')
-        if scene.get('state') != 'ready' or scene.get('world_state') != 'ready' \
+        quality = scene.get('quality')
+        # Partial observation is not a confirmed absence. Until a display
+        # retention policy is approved, publish fresh items without history.
+        parts = quality.get('parts') if isinstance(quality, dict) else None
+        entity_part = parts.get('entities') if isinstance(parts, dict) else None
+        entities_partial = 'quality' in scene and (not isinstance(entity_part, dict)
+                                                   or entity_part.get('state') != 'complete')
+        if entities_partial or scene.get('state') != 'ready' or scene.get('world_state') != 'ready' \
                 or not context or not valid_position(position):
             self.reset()
             return scene

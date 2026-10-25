@@ -1,4 +1,5 @@
 """Read-only scene error semantics; unknown failures retain legacy safeguards."""
+import math
 import time
 
 from utils.core import thresholds as policy
@@ -65,3 +66,27 @@ def read_collection(resolve, read, guard, budget, *, stage):
             if attempt:
                 budget.spent += max(0., budget.clock()-started)
     raise last
+
+
+def navigation_quality_valid(scene, now):
+    """Additional production gate; old fixtures keep their existing semantics."""
+    if 'quality' not in scene:
+        return True
+    quality = scene['quality']
+    if not isinstance(quality, dict) or quality.get('navigation_eligible') is not True:
+        return False
+    def timestamp(value):
+        return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= now
+    root_at = quality.get('root_verified_at')
+    parts = quality.get('parts')
+    if not timestamp(root_at) or not isinstance(parts, dict):
+        return False
+    for name in ('managed_collisions', 'native_collisions'):
+        part = parts.get(name)
+        if not isinstance(part, dict) or part.get('state') != 'complete':
+            return False
+        start, end = part.get('observed_from'), part.get('observed_to')
+        if not timestamp(start) or not timestamp(end) or not start <= end <= root_at \
+                or now-start > policy.COORD_NAV_SCENE_MAX_AGE:
+            return False
+    return True

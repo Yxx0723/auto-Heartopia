@@ -391,6 +391,9 @@ COORD_SCENE_MIN_IDLE_SECONDS = .05
 COORD_SCENE_COLLECTION_ATTEMPTS = 2
 COORD_SCENE_READ_EXTRA_ATTEMPTS = 8
 COORD_SCENE_READ_EXTRA_SECONDS = .1
+# Same-scope transient recovery only; engineering backoff/log budgets.
+COORD_SCENE_TRANSIENT_RETRY_SECONDS = .1
+COORD_SCENE_DIAGNOSTIC_SECONDS = 5.
 # Display-only expansion requested on 2026-10-15. Navigation still consumes
 # fresh snapshots; historical fixed geometry never becomes an obstacle source.
 COORD_SCENE_RADIUS = 150.

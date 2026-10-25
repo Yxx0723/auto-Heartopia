@@ -171,3 +171,196 @@ def test_root_change_in_registry_guard_rejects_even_successful_collection():
     with pytest.raises(SceneReadIssue) as caught:
         reader.read_registry(77, 99, 1, RecoveryBudget())
     assert caught.value.kind == 'scope_changed' and not caught.value.scope_verified
+
+
+
+def test_verified_transient_failure_retains_reader_but_invalidates_navigation():
+    from utils.core.scene_read import SceneReadIssue
+    reader = Mock()
+    worker = SceneMapWorker('profile', factory=lambda *a: reader)
+    worker.set_pid(7)
+    reader.snapshot.return_value = {'state': 'ready', 'world_state': 'ready', 'objects': [], 'colliders': []}
+    worker.poll_once()
+    assert worker.navigation_snapshot(7)
+    reader.snapshot.side_effect = SceneReadIssue('changing', kind='mutation', stage='registry_end',
+                                                retryable=True, scope_verified=True)
+    worker.poll_once()
+    reader.close.assert_not_called()
+    assert worker.navigation_snapshot(7) is None
+    assert worker.retry_delay == pytest.approx(.1)
+    assert worker.take_latest()['objects'] == []  # No unapproved old-icon retention.
+    reader.snapshot.side_effect = None
+    worker.poll_once()
+    assert worker.navigation_snapshot(7) and worker.transient_failures == 0
+
+
+@pytest.mark.parametrize('verified', [False, True])
+def test_unverified_or_scope_changed_failures_keep_close_protection(verified):
+    from utils.core.scene_read import SceneReadIssue
+    reader = Mock()
+    reader.snapshot.side_effect = SceneReadIssue('changed', kind='scope_changed' if verified else 'mutation',
+                                                retryable=True, scope_verified=verified)
+    worker = SceneMapWorker('profile', factory=lambda *a: reader)
+    worker.set_pid(7)
+    worker.poll_once()
+    reader.close.assert_called_once()
+    assert worker.navigation_snapshot(7) is None
+
+
+def quality_scene(observed, *, eligible=True, managed='complete', native='complete'):
+    return {'state': 'ready', 'world_state': 'ready', 'objects': [], 'colliders': [],
+            'quality': {'navigation_eligible': eligible, 'root_verified_at': observed,
+                        'parts': {'entities': {'state': 'complete'},
+                                  'managed_collisions': {'state': managed, 'observed_from': observed, 'observed_to': observed},
+                                  'native_collisions': {'state': native, 'observed_from': observed, 'observed_to': observed}}}}
+
+
+@pytest.mark.parametrize('fault', ['partial', 'ineligible', 'old', 'future', 'missing_part', 'nan'])
+def test_navigation_quality_gate_rejects_partial_stale_or_malformed_snapshots(fault):
+    now = [10.]
+    scene = quality_scene(10.)
+    if fault == 'partial': scene['quality']['parts']['managed_collisions']['state'] = 'partial'
+    elif fault == 'ineligible': scene['quality']['navigation_eligible'] = False
+    elif fault == 'old': scene = quality_scene(0.)
+    elif fault == 'future': scene = quality_scene(11.)
+    elif fault == 'missing_part': del scene['quality']['parts']['native_collisions']
+    else: scene['quality']['parts']['native_collisions']['observed_from'] = float('nan')
+    reader = Mock()
+    reader.snapshot.return_value = scene
+    worker = SceneMapWorker('profile', factory=lambda *a: reader, clock=lambda: now[0])
+    worker.set_pid(7)
+    worker.poll_once()
+    assert worker.take_latest()['state'] == 'ready'
+    assert worker.navigation_snapshot(7) is None
+
+
+def test_republishing_old_geometry_never_refreshes_its_observation_time():
+    now = [0.]
+    reader = Mock()
+    reader.snapshot.return_value = quality_scene(0.)
+    worker = SceneMapWorker('profile', factory=lambda *a: reader, clock=lambda: now[0])
+    worker.set_pid(7)
+    worker.poll_once()
+    assert worker.navigation_snapshot(7)
+    now[0] = 7.
+    worker.poll_once()
+    assert worker.latest_at == 7.
+    assert worker.navigation_snapshot(7) is None
+
+
+def minimal_scene_reader():
+    from utils.drivers.mono_scene import MemorySceneMap
+    reader = MemorySceneMap.__new__(MemorySceneMap)
+    reader.memory = Mock(pid=7, base=1, profile={})
+    reader.memory.snapshot.return_value = {'position': [1., 2., 3.], 'paths': [{'trace': [{'field': '_hierarchy', 'pointer': 1}]}]}
+    reader.meta = Mock(domain=1)
+    reader.meta.obj.return_value = {'address': 99}
+    reader.meta.static_ref.return_value = 77
+    reader.meta.dictionary.return_value = []
+    reader.native = Mock(scene_key=('town',))
+    reader.native.snapshot.return_value = ([], {})
+    reader.native.main_terrain_loaded.return_value = False
+    reader.global_minerals = Mock()
+    reader.global_minerals.snapshot.return_value = []
+    reader.house_entrances = Mock(cache={'context': 'town'})
+    reader.house_entrances.snapshot.return_value = []
+    return reader
+
+
+def test_real_snapshot_produces_usable_quality_and_observation_bounds():
+    from utils.core.scene_read import navigation_quality_valid
+    import time
+    reader = minimal_scene_reader()
+    scene = reader.snapshot()
+    assert scene['quality']['navigation_eligible']
+    assert navigation_quality_valid(scene, time.monotonic())
+    assert scene['quality']['parts']['managed_collisions']['state'] == 'complete'
+
+
+def test_real_native_failure_still_publishes_entities_but_never_usable_navigation():
+    reader = minimal_scene_reader()
+    reader.native.snapshot.side_effect = ValueError('pool changed')
+    scene = reader.snapshot()
+    assert scene['state'] == 'ready' and scene['world_state'] == 'unavailable'
+    assert not scene['quality']['navigation_eligible']
+
+
+def test_worker_transient_backoff_is_bounded_and_does_not_leak_diagnostics(tmp_path):
+    from utils.core.scene_read import SceneReadIssue
+    reader = Mock()
+    reader.snapshot.side_effect = SceneReadIssue('pointer 0xDEADBEEF', kind='mutation',
+                                                stage='registry_start', retryable=True, scope_verified=True)
+    path = tmp_path/'scene.jsonl'
+    worker = SceneMapWorker('profile', factory=lambda *a: reader, diagnostics_path=path)
+    worker.set_pid(7)
+    for i in range(9): worker.poll_once()
+    assert worker.retry_delay == 2. and worker.transient_failures == 9
+    worker.close()
+    text = path.read_text(encoding='utf-8')
+    assert 'registry_start' in text and 'DEADBEEF' not in text
+
+
+
+def test_unknown_owner_cannot_hide_a_missing_physics_group_from_quality():
+    reader = minimal_scene_reader()
+    reader.meta.dictionary.return_value = [2]
+    reader.meta.ref.return_value = 22
+    def obj(at):
+        if at == 22: raise ValueError('unreadable owner')
+        return {'address': 99}
+    reader.meta.obj.side_effect = obj
+    scene = reader.snapshot()
+    assert scene['quality']['discovery_unknown'] == 1
+    assert scene['quality']['parts']['managed_collisions']['state'] == 'partial'
+    assert not scene['quality']['navigation_eligible']
+
+
+def test_cancelled_real_snapshot_does_not_start_a_memory_scan():
+    from utils.core.scene_read import SceneReadIssue
+    reader = minimal_scene_reader()
+    reader.cancelled = lambda: True
+    with pytest.raises(SceneReadIssue) as caught:
+        reader.snapshot()
+    assert caught.value.kind == 'cancelled'
+    reader.memory.snapshot.assert_not_called()
+
+
+def test_partial_entities_are_not_used_as_confirmed_absence_or_old_icon_retention():
+    from utils.core.scene_display_cache import SceneDisplayCache
+    cache = SceneDisplayCache()
+    tree = {'category': 'tree', 'map_static': True, 'map_id': ('plant', 1), 'position': [140, 0, 0]}
+    base = {'state': 'ready', 'world_state': 'ready', 'cache_context': ('town', 1),
+            'position': [0, 0, 0], 'objects': [tree], 'colliders': []}
+    cache.update(base, 0.)
+    assert cache.count == 1
+    partial = {**base, 'objects': [], 'quality': {'parts': {'entities': {'state': 'partial'}}}}
+    display = cache.update(partial, 1.)
+    assert display['objects'] == [] and cache.count == 0
+
+
+def test_late_transient_error_does_not_pollute_new_pid_backoff():
+    from utils.core.scene_read import SceneReadIssue
+    reader = Mock()
+    worker = SceneMapWorker('profile', factory=lambda *a: reader)
+    worker.set_pid(7)
+    def snapshot():
+        worker.set_pid(8)
+        raise SceneReadIssue('changing', kind='mutation', retryable=True, scope_verified=True)
+    reader.snapshot.side_effect = snapshot
+    worker.poll_once()
+    assert worker.transient_failures == 0 and worker.retry_delay == 2.
+    assert worker.take_latest() is None and worker.navigation_snapshot(8) is None
+
+
+
+@pytest.mark.parametrize('quality', [None, {}, {'parts': None}, {'parts': {'entities': None}}])
+def test_malformed_quality_is_rejected_without_killing_worker_or_logging(tmp_path, quality):
+    reader = Mock()
+    reader.snapshot.return_value = {'state': 'ready', 'world_state': 'ready', 'objects': [],
+                                   'colliders': [], 'quality': quality}
+    worker = SceneMapWorker('profile', factory=lambda *a: reader, diagnostics_path=tmp_path/'scene.jsonl')
+    worker.set_pid(7)
+    worker.poll_once()
+    assert worker.navigation_snapshot(7) is None
+    assert worker.take_latest()['objects'] == []
+    worker.close()
