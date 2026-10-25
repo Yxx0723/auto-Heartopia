@@ -386,6 +386,11 @@ COORD_SCENE_MAX_BYTES = 4194304
 # these are engineering scheduling budgets, not measured capture latency.
 COORD_SCENE_REFRESH_SECONDS = .2
 COORD_SCENE_MIN_IDLE_SECONDS = .05
+# Engineering recovery limits, not measured game timings. Attempts include the
+# first read; extra work is shared per snapshot and checked before new retries.
+COORD_SCENE_COLLECTION_ATTEMPTS = 2
+COORD_SCENE_READ_EXTRA_ATTEMPTS = 8
+COORD_SCENE_READ_EXTRA_SECONDS = .1
 # Display-only expansion requested on 2026-10-15. Navigation still consumes
 # fresh snapshots; historical fixed geometry never becomes an obstacle source.
 COORD_SCENE_RADIUS = 150.

@@ -1,4 +1,7 @@
 """Read-only scene error semantics; unknown failures retain legacy safeguards."""
+import time
+
+from utils.core import thresholds as policy
 
 
 class SceneReadIssue(ValueError):
@@ -14,3 +17,51 @@ def issue_summary(error):
         return {key: getattr(error, key) for key in ('kind', 'stage', 'retryable', 'scope_verified')}
     return {'kind': 'io_error' if isinstance(error, OSError) else 'unknown',
             'stage': 'snapshot', 'retryable': False, 'scope_verified': False}
+
+
+class RecoveryBudget:
+    """Shared extra-work budget, not a hard timeout for an OS read call."""
+    def __init__(self, *, clock=time.monotonic, cancelled=lambda: False,
+                 max_retries=policy.COORD_SCENE_READ_EXTRA_ATTEMPTS,
+                 max_seconds=policy.COORD_SCENE_READ_EXTRA_SECONDS):
+        self.clock, self.cancelled = clock, cancelled
+        self.max_retries, self.max_seconds = max_retries, max_seconds
+        self.retries, self.spent = 0, 0.
+
+    def check(self):
+        if self.cancelled():
+            raise SceneReadIssue('场景读取已取消', kind='cancelled', stage='control')
+
+    def reserve(self):
+        self.check()
+        if self.retries >= self.max_retries or self.spent >= self.max_seconds:
+            return False
+        self.retries += 1
+        return True
+
+
+def read_collection(resolve, read, guard, budget, *, stage):
+    """Retry only a verified mutation, re-resolving the owner field each time."""
+    last = None
+    for attempt in range(policy.COORD_SCENE_COLLECTION_ATTEMPTS):
+        budget.check()
+        if attempt and not budget.reserve():
+            break
+        started = budget.clock()
+        try:
+            guard()
+            result = read(resolve())
+            budget.check()
+            guard()
+            return result
+        except SceneReadIssue as exc:
+            if exc.kind != 'mutation' or not exc.retryable:
+                raise
+            budget.check()
+            guard()  # Failure is retryable only while the trusted scope agrees.
+            last = SceneReadIssue(str(exc), kind='mutation', stage=stage,
+                                  retryable=True, scope_verified=True)
+        finally:
+            if attempt:
+                budget.spent += max(0., budget.clock()-started)
+    raise last

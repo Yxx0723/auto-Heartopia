@@ -3,7 +3,7 @@ import math
 import hashlib
 import struct
 from utils.core import thresholds as policy
-from utils.core.scene_read import SceneReadIssue
+from utils.core.scene_read import SceneReadIssue, RecoveryBudget, read_collection
 from utils.core.scene_map import box_geometry, compose_transform
 from utils.core.terrain_map import verified_terrain_walls
 from utils.drivers.coordinate_memory import ReadOnlyPosition
@@ -502,10 +502,10 @@ class MemorySceneMap:
             return self.meta.ref(transform, '_hierarchy')
         return self.meta.ref(owner, '_hierarchy')
 
-    def refresh_live_objects(self, observations, registry, world):
+    def refresh_live_objects(self, observations, registry, world, *, active=None):
         """Late recheck after collision reads; never retain a vanished moving icon."""
         meta = self.meta
-        active = set(meta.dictionary(registry))
+        active = set(meta.dictionary(registry) if active is None else active)
         result = []
         for hierarchy, owner, item in observations:
             if hierarchy not in active:
@@ -522,14 +522,31 @@ class MemorySceneMap:
             result.append(item)
         return result
 
+    def read_registry(self, registry, hierarchy_class, local_hierarchy, budget):
+        meta = self.meta
+        def guard():
+            current = self.memory.snapshot()
+            if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
+                raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
+        return read_collection(lambda: meta.static_ref(hierarchy_class, 'ActiveHierarchies'),
+                               meta.dictionary, guard, budget, stage=meta.stage)
+
     def snapshot(self):
+        self.read_budget = RecoveryBudget(cancelled=getattr(self, 'cancelled', lambda: False))
+        try:
+            return self._snapshot()
+        finally:
+            self.last_read_stats = {'retries': self.read_budget.retries,
+                                    'extra_seconds': self.read_budget.spent}
+
+    def _snapshot(self):
         sample = self.memory.snapshot()
         local_hierarchy = self.local_hierarchy(sample)
         meta = self.meta
         hierarchy_class = meta.obj(local_hierarchy)['address']
         registry = meta.static_ref(hierarchy_class, 'ActiveHierarchies')
         meta.stage = 'registry_start'
-        entries = meta.dictionary(registry)
+        entries = self.read_registry(registry, hierarchy_class, local_hierarchy, self.read_budget)
         transforms, owners, skipped = {}, {}, 0
 
         def world(address, seen=()):
@@ -663,7 +680,7 @@ class MemorySceneMap:
             self.native = None
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
-            raise ValueError('场景已切换，正在重新读取地图')
+            raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
         meta.stage = 'optional_definitions'
         global_resources, global_state = [], 'unavailable'
         try:
@@ -696,10 +713,11 @@ class MemorySceneMap:
         # Slow geometry work must not publish the object list from its beginning.
         transforms.clear()
         meta.stage = 'registry_end'
-        objects = self.refresh_live_objects(observations, registry, world)
+        active = self.read_registry(registry, hierarchy_class, local_hierarchy, self.read_budget)
+        objects = self.refresh_live_objects(observations, registry, world, active=active)
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
-            raise ValueError('场景已切换，正在重新读取地图')
+            raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
         return {'terrain_state': 'ready' if terrain else 'unavailable',
                 'terrain_revision': 'main-terrain-v1' if terrain else None,
                 'schema': 'memory-scene-map-v1', 'state': 'ready', 'read_only': True,
