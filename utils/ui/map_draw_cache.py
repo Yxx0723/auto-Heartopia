@@ -391,7 +391,7 @@ class MapDrawCache:
                 item = self.canvas.create_polygon(*coords, fill='#bfdac0', stipple='gray25',
                                                   outline='#9ab69b', width=1, tags=tags)
             else:
-                item = self.canvas.create_line(*coords, *projected[0], fill='#edaa6d', width=2, tags=tags)
+                item = self.canvas.create_line(*coords, *projected[0], fill='#858585', width=2, tags=tags)
             entry.commands.append((item, ()))
             self.register(entry, item, tags)
 
