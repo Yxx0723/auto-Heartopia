@@ -373,7 +373,9 @@ class CoordinateWindow:
         route_page = self.frame(self.control_tabs, card=True, border=False)
         parameter_page = self.frame(self.control_tabs, card=True, border=False)
         map_page = self.frame(self.control_tabs, card=True, border=False)
-        for page, title in ((route_page, '采集设定'), (parameter_page, '参数设定'), (map_page, '地图连接')):
+        cooking_page = self.frame(self.control_tabs, card=True, border=False)
+        for page, title in ((route_page, '采集设定'), (parameter_page, '参数设定'),
+                            (map_page, '地图连接'), (cooking_page, '烹饪')):
             self.control_tabs.add(page, text=title)
         route_page.grid_columnconfigure(0, weight=1)
         def group(parent, title):
