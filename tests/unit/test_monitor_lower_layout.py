@@ -13,7 +13,7 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
         window = CoordinateWindow(root, FakeMonitor(), tmp_path, point_path=tmp_path/'points.json')
         tabs = window.control_tabs
         assert [tabs.tab(tab, 'text') for tab in tabs.tabs()] == ['采集设定', '参数设定', '地图连接']
-        for geometry in ['980x700', '900x620']:
+        for geometry in ['490x760', '460x740']:
             root.geometry(geometry); tabs.select(0); root.update()
             assert tabs.winfo_rooty() > window.canvas.winfo_rooty()+window.canvas.winfo_height()
             assert window.canvas.winfo_width() > root.winfo_width()*.9
@@ -22,8 +22,18 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
             assert window.patrol_route_label in window.route_menu.cget('values')
             assert window.save_point_button.grid_info()['row'] == 1
             assert window.clear_points_button.grid_info()['column'] == 3
-            for widget in (window.clear_points_button, window.loop_count_spin, window.point_wait_button):
+            for widget in (window.clear_points_button, window.loop_count_spin, window.point_wait_button,
+                           window.play_button, window.stop_button):
                 assert widget.winfo_rootx()+widget.winfo_width() <= root.winfo_rootx()+root.winfo_width()
+                assert widget.winfo_rooty()+widget.winfo_height() <= root.winfo_rooty()+root.winfo_height()
+            assert window.canvas.winfo_height() >= 100
+            tab_y = tabs.winfo_rooty()
+            window.toggle_scene_filters(); root.update()
+            for widget in window.scene_filter_buttons.values():
+                assert widget.winfo_rootx()+widget.winfo_width() <= root.winfo_rootx()+root.winfo_width()
+                assert widget.winfo_rooty()+widget.winfo_height() <= root.winfo_rooty()+root.winfo_height()
+            assert tabs.winfo_rooty() == tab_y
+            window.toggle_scene_filters(); root.update()
             tabs.select(1); root.update()
             assert window.recovery_jump_check.winfo_ismapped()
             assert not window.route_menu.winfo_ismapped()

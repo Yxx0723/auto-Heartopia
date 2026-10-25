@@ -215,8 +215,8 @@ class CoordinateWindow:
         self.wait_editor = None
         root.title('心动小镇 · 坐标观测台（窗口版）')
         root.configure(bg=COLORS['bg'])
-        root.geometry('980x700+50+50')
-        root.minsize(900, 620)
+        root.geometry('490x760+50+0')
+        root.minsize(460, 740)
         icon = self.resources / 'monitor.ico'
         if icon.exists():
             root.iconbitmap(str(icon))
@@ -325,12 +325,17 @@ class CoordinateWindow:
         self.map_expand_button.pack(side='right', padx=1, pady=4)
         for text, action in reversed([('−', lambda: self.set_zoom(self.zoom / 1.5)),
                                       ('＋', lambda: self.set_zoom(self.zoom * 1.5)),
-                                      ('重置缩放', self.reset_map_view), ('路线全览', self.show_route_overview),
-                                      ('清空轨迹', self.clear_trail),
-                                      ('导出实走路段', self.export_walk_trail)]):
+                                      ('重置缩放', self.reset_map_view)]):
             button = self.button(plothead, text, action, small=True)
             button.configure(padx=4, font=('Microsoft YaHei UI', -11))
             button.pack(side='right', padx=1, pady=4)
+        map_actions = self.frame(plotcard, card=True, border=False)
+        map_actions.grid(row=1, column=0, sticky='ew')
+        for text, action in [('路线全览', self.show_route_overview), ('清空轨迹', self.clear_trail),
+                             ('导出实走路段', self.export_walk_trail)]:
+            button = self.button(map_actions, text, action, small=True)
+            button.configure(padx=5, font=('Microsoft YaHei UI', -11))
+            button.pack(side='left', padx=2, pady=(0, 3))
         self.canvas = tk.Canvas(plotcard, bg=COLORS['plot'], bd=0, highlightthickness=0, height=270)
         self.map_cache = MapDrawCache(self.canvas, MAP_WATER_AREAS, SCENE_RANKS, roads=REFERENCE_ROADS,
                                      water_islands=MAP_WATER_ISLANDS)
@@ -341,17 +346,18 @@ class CoordinateWindow:
         self.canvas.bind('<MouseWheel>', self.zoom_map)
         self.canvas.bind('<Motion>', self.map_motion)
         self.canvas.bind('<Leave>', self.map_leave)
-        self.scene_filters_frame = self.frame(self.canvas, card=True)
+        self.scene_filters_frame = self.frame(body, card=True)
         self.build_scene_filters(self.scene_filters_frame)
         self.root.bind('<Button-1>', self.dismiss_scene_filters, add='+')
         self.root.bind('<Escape>', self.escape_scene_filters, add='+')
         plotfoot = self.frame(plotcard, card=True)
         plotfoot.grid(row=3, column=0, sticky='ew')
-        self.field(plotfoot, 'points', '轨迹点 0', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left', padx=8, pady=5)
-        self.field(plotfoot, 'speed', '平面速度 — 单位/秒', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left', padx=8)
-        self.field(plotfoot, 'scale', '刻度 —', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='right', padx=8)
+        plotfoot.grid_columnconfigure(1, weight=1)
+        self.field(plotfoot, 'points', '轨迹点 0', color='muted', font=('Microsoft YaHei UI', -11)).grid(row=0, column=0, sticky='w', padx=8, pady=2)
+        self.field(plotfoot, 'speed', '平面速度 — 单位/秒', color='muted', font=('Microsoft YaHei UI', -11)).grid(row=0, column=1, sticky='e', padx=8)
+        self.field(plotfoot, 'scale', '刻度 —', color='muted', font=('Microsoft YaHei UI', -11)).grid(row=1, column=0, sticky='w', padx=8, pady=2)
         self.scene_filter_hint = self.label(plotfoot, color='muted', font=('Microsoft YaHei UI', -10))
-        self.scene_filter_hint.pack(side='right', padx=4)
+        self.scene_filter_hint.grid(row=1, column=1, sticky='e', padx=8)
         self.update_scene_filter_controls()
         lower_panel = tk.LabelFrame(body, text='分类显示', bg=COLORS['bg'], fg=COLORS['text'],
                                     font=('Microsoft YaHei UI', -12), bd=1, relief='solid', padx=4, pady=3)
@@ -362,16 +368,14 @@ class CoordinateWindow:
                         padding=(12, 4), font=('Microsoft YaHei UI', -12))
         style.map('Monitor.TNotebook.Tab', background=[('selected', COLORS['card'])],
                   foreground=[('selected', COLORS['green'])])
-        self.control_tabs = ttk.Notebook(lower_panel, style='Monitor.TNotebook', height=220)
+        self.control_tabs = ttk.Notebook(lower_panel, style='Monitor.TNotebook', height=375)
         self.control_tabs.pack(fill='both', expand=True)
         route_page = self.frame(self.control_tabs, card=True, border=False)
         parameter_page = self.frame(self.control_tabs, card=True, border=False)
         map_page = self.frame(self.control_tabs, card=True, border=False)
         for page, title in ((route_page, '采集设定'), (parameter_page, '参数设定'), (map_page, '地图连接')):
             self.control_tabs.add(page, text=title)
-        route_page.grid_columnconfigure(0, minsize=400)
-        route_page.grid_columnconfigure(1, weight=1)
-        route_page.grid_rowconfigure(1, weight=1)
+        route_page.grid_columnconfigure(0, weight=1)
         def group(parent, title):
             return tk.LabelFrame(parent, text=title, bg=COLORS['card'], fg=COLORS['text'],
                                  font=('Microsoft YaHei UI', -12), padx=6, pady=4,
@@ -419,15 +423,15 @@ class CoordinateWindow:
             self.label(coordinates, textvariable=self.fields[axis], font=('Consolas', -12)).pack(
                 side='left', padx=(0, 10))
         bottom = group(route_page, '回放控制')
-        bottom.grid(row=0, column=1, rowspan=2, sticky='nsew', padx=(0, 6), pady=(4, 6))
+        bottom.grid(row=2, column=0, sticky='ew', padx=6, pady=(0, 6))
         toolbar = self.frame(bottom)
         toolbar.pack(fill='x')
-        self.label(toolbar, '起点方式', color='muted', font=('Microsoft YaHei UI', -12)).pack(
+        self.label(toolbar, '起点', color='muted', font=('Microsoft YaHei UI', -12)).pack(
             side='left', padx=(0, 6))
         self.start_mode_var = tk.StringVar(self.root, value='完整回放')
         self.start_menu = self.dropdown(toolbar, self.start_mode_var, ['完整回放', '最近点接入'], width=10)
         self.start_menu.pack(side='left')
-        self.play_button = self.button(toolbar, '▶ 按顺序回放', self.start_playback, primary=True, small=True)
+        self.play_button = self.button(toolbar, '▶ 回放', self.start_playback, primary=True, small=True)
         self.play_button.pack(side='left', padx=(4, 5))
         self.stop_button = self.button(toolbar, '■ 停止', self.stop_playback, small=True)
         self.stop_button.pack(side='left', padx=(0, 12))
@@ -491,13 +495,13 @@ class CoordinateWindow:
         self.refresh_path_memory_info()
         self.playback_label = self.field(bottom, 'playback', self.playback_status['message'],
                                          color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1,
-                                         wraplength=420, justify='left')
+                                         wraplength=360, justify='left')
         self.playback_label.pack(fill='x', pady=(6, 0))
         footer = self.frame(body)
         footer.grid(row=2, column=0, sticky='ew', pady=(5, 0))
-        self.label(footer, '点位自动保存到当前路线；各条路线保存在程序旁的「点位」文件夹。', color='muted', font=('Microsoft YaHei UI', -10)).pack(side='left')
+        self.label(footer, '路线自动保存至程序旁「点位」文件夹。', color='muted', font=('Microsoft YaHei UI', -10)).pack(anchor='w')
         self.hint = self.label(footer, '切换场景后请等待重新连接', color='muted', font=('Microsoft YaHei UI', -10))
-        self.hint.pack(side='right')
+        self.hint.pack(anchor='w')
         self.save_point_button.configure(state='disabled')
         self.play_button.configure(state='disabled')
         self.stop_button.configure(state='disabled')
@@ -697,28 +701,29 @@ class CoordinateWindow:
         self.scene_water_var = tk.BooleanVar(self.root, True)
         self.scene_roads_var = tk.BooleanVar(self.root, True)
         self.scene_barriers_var = tk.BooleanVar(self.root, True)
-        for column in range(7):
+        for column in range(4):
             parent.grid_columnconfigure(column, weight=1, uniform='category')
         self.scene_all_button = self.button(parent, '全部分类', lambda: self.set_scene_categories(True), small=True)
         self.scene_all_button.grid(row=0, column=0, sticky='nsew', padx=2, pady=2)
         self.scene_none_button = self.button(parent, '清空显示', lambda: self.set_scene_categories(False), small=True)
-        self.scene_none_button.grid(row=1, column=0, sticky='nsew', padx=2, pady=2)
+        self.scene_none_button.grid(row=0, column=1, sticky='nsew', padx=2, pady=2)
         for button in (self.scene_all_button, self.scene_none_button):
             button.configure(pady=2, font=('Microsoft YaHei UI', -11))
         self.scene_filter_buttons = {}
         for index, (category, (label, _)) in enumerate(SCENE_CATEGORIES.items()):
             button = self.button(parent, label, lambda category=category: self.toggle_scene_category(category), small=True)
             button.configure(padx=3, pady=2, font=('Microsoft YaHei UI', -11))
-            button.grid(row=index // 6, column=index % 6 + 1, sticky='nsew', padx=2, pady=2)
+            button.grid(row=index // 4 + 1, column=index % 4, sticky='nsew', padx=2, pady=2)
             self.scene_filter_buttons[category] = button
         self.global_minerals_button = self.button(parent, '岩石 / 矿石全览', self.show_mineral_overview, small=True)
-        self.global_minerals_button.grid(row=2, column=0, columnspan=7, sticky='ew', padx=2, pady=2)
+        self.global_minerals_button.grid(row=5, column=0, columnspan=4, sticky='ew', padx=2, pady=2)
 
     def toggle_scene_filters(self):
         self.scene_filters_expanded = not self.scene_filters_expanded
         if self.scene_filters_expanded:
             self.map_leave()
-            self.scene_filters_frame.place(x=6, y=6, relwidth=1., width=-12)
+            # Parent the flyout above the body so a short map cannot clip its rows.
+            self.scene_filters_frame.place(in_=self.plotcard, x=6, y=74, relwidth=1., width=-12)
             self.scene_filters_frame.lift()
         else:
             self.scene_filters_frame.place_forget()
