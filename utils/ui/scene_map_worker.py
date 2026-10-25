@@ -3,6 +3,7 @@ import queue
 import threading
 import time
 from utils.core import thresholds as policy
+from utils.core.scene_read import issue_summary
 from utils.core.scene_display_cache import SceneDisplayCache
 from utils.drivers.mono_scene import MemorySceneMap
 
@@ -78,7 +79,8 @@ class SceneMapWorker:
         except (OSError, ValueError) as exc:
             self.close_reader()
             result = {'state': 'error', 'objects': [], 'colliders': [],
-                      'message': '场景正在更新，稍后自动重试', 'diagnostic': str(exc)}
+                      'message': '场景正在更新，稍后自动重试', 'diagnostic': str(exc),
+                      'issue': issue_summary(exc)}
         now = self.clock()
         display = history.update(result, now)
         with self.lock:

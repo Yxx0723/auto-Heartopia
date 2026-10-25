@@ -3,6 +3,7 @@ import math
 import hashlib
 import struct
 from utils.core import thresholds as policy
+from utils.core.scene_read import SceneReadIssue
 from utils.core.scene_map import box_geometry, compose_transform
 from utils.core.terrain_map import verified_terrain_walls
 from utils.drivers.coordinate_memory import ReadOnlyPosition
@@ -41,6 +42,7 @@ _RENDER_TARGET = ('RenderPhysicTarget', _BAKE_NAMESPACE + '.Collider')
 class SceneMetadata:
     def __init__(self, read, domain):
         self.read, self.domain, self.cache = read, domain, {}
+        self.stage = 'metadata'
 
     def data(self, address, size):
         if not 0x10000 <= address < 0x7fffffffffff or not 0 < size <= policy.COORD_SCENE_MAX_BYTES:
@@ -53,7 +55,7 @@ class SceneMetadata:
     def pointer(self, address):
         value = struct.unpack('<Q', self.data(address, 8))[0]
         if value and not 0x10000 <= value < 0x7fffffffffff:
-            raise ValueError('场景引用无效')
+            raise SceneReadIssue('场景引用无效', kind='invalid_reference', stage=self.stage)
         return value
 
     def integer(self, address):
@@ -176,7 +178,7 @@ class SceneMetadata:
             raise ValueError('场景集合数量无效')
         if count == free:
             if stamp() != before:
-                raise ValueError('场景集合在读取时发生变化')
+                raise SceneReadIssue('场景集合在读取时发生变化', kind='mutation', stage=self.stage, retryable=True)
             return []
         array, length = self.array(entries, policy.COORD_SCENE_MAX_CAPACITY)
         element = self.cls(array['element'])
@@ -196,7 +198,7 @@ class SceneMetadata:
                 if address:
                     result.append(address)
         if occupied != count-free or stamp() != before:
-            raise ValueError('场景集合在读取时发生变化')
+            raise SceneReadIssue('场景集合在读取时发生变化', kind='mutation', stage=self.stage, retryable=True)
         return result
 
     def list_refs(self, obj):
@@ -526,6 +528,7 @@ class MemorySceneMap:
         meta = self.meta
         hierarchy_class = meta.obj(local_hierarchy)['address']
         registry = meta.static_ref(hierarchy_class, 'ActiveHierarchies')
+        meta.stage = 'registry_start'
         entries = meta.dictionary(registry)
         transforms, owners, skipped = {}, {}, 0
 
@@ -547,6 +550,7 @@ class MemorySceneMap:
             transforms[address] = result
             return result
 
+        meta.stage = 'entities'
         objects, groups, models, observations = [], [], [], []
         for hierarchy in entries:
             try:
@@ -592,6 +596,7 @@ class MemorySceneMap:
             barrier_state = 'ready'
         except ValueError:
             barriers, barrier_state = {}, 'unavailable'
+        meta.stage = 'managed_collisions'
         colliders, visited, streams, triggers, inactive, unsupported = [], set(), set(), 0, 0, 0
         for group in groups:
             for collider in meta.dictionary(meta.ref(group, '_colliders')):
@@ -659,6 +664,7 @@ class MemorySceneMap:
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
             raise ValueError('场景已切换，正在重新读取地图')
+        meta.stage = 'optional_definitions'
         global_resources, global_state = [], 'unavailable'
         try:
             if getattr(self, 'global_minerals', None) is None:
@@ -689,6 +695,7 @@ class MemorySceneMap:
         colliders.extend(terrain)
         # Slow geometry work must not publish the object list from its beginning.
         transforms.clear()
+        meta.stage = 'registry_end'
         objects = self.refresh_live_objects(observations, registry, world)
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
