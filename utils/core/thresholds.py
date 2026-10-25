@@ -46,9 +46,8 @@ COORD_SPECIAL_INTERACTION_RADIUS = 1.25
 # needs finer steering than normal 0.3-unit waypoints to enter the 1.25 envelope.
 COORD_SPECIAL_APPROACH_PRECISION = .05
 # A press is only worth judging once the read-only sample can reflect it. The
-# scene worker normally repolls every 2 s; a forced refresh still costs a game
-# frame plus that poll, so the settle window covers one refreshed sample and a
-# second one before the press is called ineffective.
+# full scene scan can outlive its target refresh period. Keep the collection
+# settle budget independent from display cadence and game-state propagation.
 COORD_SPECIAL_STATE_SETTLE_SECONDS = 1.8
 COORD_SPECIAL_STATE_POLL_SECONDS = .35
 # Presses that change nothing are guesses, not gathering: stop and ask the
@@ -380,7 +379,10 @@ COORD_NAV_WIDE_SEARCH_RADIUS = 60.
 COORD_NAV_WIDE_HORIZON = 48.
 COORD_NAV_WIDE_MAX_NODES = 16000
 COORD_SCENE_MAX_BYTES = 4194304
-COORD_SCENE_REFRESH_SECONDS = 2.
+# Target full-scene start-to-start cadence. Actual reads may take longer;
+# these are engineering scheduling budgets, not measured capture latency.
+COORD_SCENE_REFRESH_SECONDS = .2
+COORD_SCENE_MIN_IDLE_SECONDS = .05
 # Display-only expansion requested on 2026-10-15. Navigation still consumes
 # fresh snapshots; historical fixed geometry never becomes an obstacle source.
 COORD_SCENE_RADIUS = 150.

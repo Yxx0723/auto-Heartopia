@@ -500,6 +500,26 @@ class MemorySceneMap:
             return self.meta.ref(transform, '_hierarchy')
         return self.meta.ref(owner, '_hierarchy')
 
+    def refresh_live_objects(self, observations, registry, world):
+        """Late recheck after collision reads; never retain a vanished moving icon."""
+        meta = self.meta
+        active = set(meta.dictionary(registry))
+        result = []
+        for hierarchy, owner, item in observations:
+            if hierarchy not in active:
+                continue
+            if item['category'] in ('insect', 'butterfly', 'bird', 'animal', 'fluorite', 'roaming_oak'):
+                try:
+                    if meta.ref(hierarchy, '_hierarchyObject') != owner:
+                        continue
+                    if self.object_category(owner, meta.obj(owner)) != item['category']:
+                        continue
+                    item = {**item, 'position': world(hierarchy)[0]}
+                except (OSError, ValueError):
+                    continue
+            result.append(item)
+        return result
+
     def snapshot(self):
         sample = self.memory.snapshot()
         local_hierarchy = self.local_hierarchy(sample)
@@ -527,7 +547,7 @@ class MemorySceneMap:
             transforms[address] = result
             return result
 
-        objects, groups, models = [], [], []
+        objects, groups, models, observations = [], [], [], []
         for hierarchy in entries:
             try:
                 owner = meta.ref(hierarchy, '_hierarchyObject')
@@ -564,6 +584,7 @@ class MemorySceneMap:
                     elif obj['category'] in ('rock', 'ore'):
                         obj.update(map_static=True, map_id=('mineral', hierarchy, owner))
                     objects.append(obj)
+                    observations.append((hierarchy, owner, obj))
             except ValueError:
                 skipped += 1
         try:
@@ -666,6 +687,12 @@ class MemorySceneMap:
             except ValueError:
                 pass  # A changing scene must not receive the previous world's terrain.
         colliders.extend(terrain)
+        # Slow geometry work must not publish the object list from its beginning.
+        transforms.clear()
+        objects = self.refresh_live_objects(observations, registry, world)
+        current = self.memory.snapshot()
+        if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
+            raise ValueError('场景已切换，正在重新读取地图')
         return {'terrain_state': 'ready' if terrain else 'unavailable',
                 'terrain_revision': 'main-terrain-v1' if terrain else None,
                 'schema': 'memory-scene-map-v1', 'state': 'ready', 'read_only': True,

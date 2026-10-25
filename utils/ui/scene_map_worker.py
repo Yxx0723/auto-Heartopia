@@ -69,7 +69,7 @@ class SceneMapWorker:
         if pid != self.reader_pid:
             self.close_reader()
         if pid is None:
-            return
+            return False
         try:
             if self.reader is None:
                 self.reader = self.factory(pid, self.profile)
@@ -87,13 +87,19 @@ class SceneMapWorker:
                 self.take_latest()
                 # A clear request during this read must not republish old history.
                 self.results.put_nowait(display if self.history is history else result)
+                return result.get('state') == 'ready'
+        return False
 
     def run(self):
         try:
             while not self.stop.is_set():
                 self.wake.clear()
-                self.poll_once()
-                self.wake.wait(policy.COORD_SCENE_REFRESH_SECONDS)
+                started = self.clock()
+                ready = self.poll_once()
+                elapsed = max(0., self.clock()-started)
+                delay = max(policy.COORD_SCENE_MIN_IDLE_SECONDS,
+                            policy.COORD_SCENE_REFRESH_SECONDS-elapsed) if ready else policy.COORD_MONITOR_RETRY_SECONDS
+                self.wake.wait(delay)
         finally:
             self.close_reader()
 
@@ -101,6 +107,6 @@ class SceneMapWorker:
         self.stop.set()
         self.wake.set()
         if self.thread:
-            self.thread.join(timeout=policy.COORD_SCENE_REFRESH_SECONDS)
+            self.thread.join(timeout=policy.COORD_MONITOR_RETRY_SECONDS)
         else:
             self.close_reader()
