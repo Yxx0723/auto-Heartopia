@@ -35,53 +35,30 @@ def draw_grid(canvas, viewport, step):
 
 
 def chrome_bounds(viewport, step):
-    """Occupied screen areas shared by map decorations and point label layout."""
+    """Reserve only the remaining wide-map resource legend."""
     w, h = viewport.width, viewport.height
-    boxes = [(10, 10, 132, 35), (w-68, 2, w-2, 67),
-             (10, h-35, max(128, step*viewport.scale+82), h-8)]
-    if w >= 570:
-        boxes.append((w-327, h-35, w-12, h-8))
-    return boxes
+    return [(w-327, h-35, w-12, h-8)] if w >= 570 else []
 
 
 def draw_chrome(canvas, viewport, step, route_view=False, reference_roads=True, heading_known=False, resource_view=False):
+    """Draw the wide-map legend; mode badge, compass and scale bar are removed."""
     w, h = viewport.width, viewport.height
-    panel, edge, muted = MAP_STYLE['panel'], MAP_STYLE['edge'], MAP_STYLE['muted']
-    canvas.create_rectangle(10, 10, 132, 35, fill=panel, outline=edge, tags='map-chrome')
-    canvas.create_text(20, 22, text=('矿点全览' if resource_view else '路线全览' if route_view else '附近地图')+' · 角色居中',
-                       fill='#d7e5cd', font=('Microsoft YaHei UI', -10), anchor='w', tags='map-chrome')
-    # These are world axes, not an assumed geographic north or camera heading.
-    x, z = w - 37, 37
-    canvas.create_oval(x-22, z-22, x+22, z+22, fill=panel, outline=edge, tags='map-chrome')
-    canvas.create_line(x, z+10, x, z-12, fill='#b8d0b3', width=2, arrow='last',
-                       arrowshape=(5, 6, 3), tags='map-chrome')
-    canvas.create_line(x-10, z, x+12, z, fill='#759780', arrow='last',
-                       arrowshape=(4, 5, 2), tags='map-chrome')
-    canvas.create_text(x, z-28, text='+Z', fill=muted, font=('Consolas', -9), tags='map-chrome')
-    canvas.create_text(x+26, z, text='+X', fill=muted, font=('Consolas', -9), tags='map-chrome')
-    # A true scale bar derived from world-to-screen projection.
-    pixels = step * viewport.scale
-    x, z = 19, h - 19
-    canvas.create_rectangle(12, h-35, max(128, pixels+82), h-8,
-                            fill=panel, outline='', tags='map-chrome')
-    canvas.create_line(x, z, x+pixels, z, fill='#cbdabf', width=3, tags='map-scale')
-    for end in (x, x+pixels):
-        canvas.create_line(end, z-4, end, z+3, fill='#cbdabf', width=1, tags='map-scale')
-    canvas.create_text(x+pixels+8, z, text=f'{step:g} 单位', fill=muted,
-                       font=('Microsoft YaHei UI', -10), anchor='w', tags='map-scale')
-    if w >= 570:
-        labels = [('角色', MAP_STYLE['player']), ('点位', MAP_STYLE['route']),
-                  ('寻路', MAP_STYLE['navigation']), ('水域', MAP_STYLE['shore']),
-                  ('道路参考', MAP_STYLE['road'])]
-        if not reference_roads:
-            labels.pop()
-        x = w - 318
-        canvas.create_rectangle(x-9, h-35, w-12, h-8, fill=panel, outline='', tags='map-chrome')
-        for label, color in labels:
-            canvas.create_line(x, z, x+8, z, fill=color, width=3, tags='map-chrome')
-            canvas.create_text(x+13, z, text=label, fill=muted,
-                               font=('Microsoft YaHei UI', -9), anchor='w', tags='map-chrome')
-            x += 57
+    if w < 570:
+        return
+    panel, muted = MAP_STYLE['panel'], MAP_STYLE['muted']
+    z = h - 19
+    labels = [('角色', MAP_STYLE['player']), ('点位', MAP_STYLE['route']),
+              ('寻路', MAP_STYLE['navigation']), ('水域', MAP_STYLE['shore']),
+              ('道路参考', MAP_STYLE['road'])]
+    if not reference_roads:
+        labels.pop()
+    x = w - 318
+    canvas.create_rectangle(x-9, h-35, w-12, h-8, fill=panel, outline='', tags='map-chrome')
+    for label, color in labels:
+        canvas.create_line(x, z, x+8, z, fill=color, width=3, tags='map-chrome')
+        canvas.create_text(x+13, z, text=label, fill=muted,
+                           font=('Microsoft YaHei UI', -9), anchor='w', tags='map-chrome')
+        x += 57
 
 
 def draw_waypoint_labels(canvas, viewport, points, labels):

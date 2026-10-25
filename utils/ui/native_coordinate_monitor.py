@@ -351,7 +351,7 @@ class CoordinateWindow:
         self.root.bind('<Button-1>', self.dismiss_scene_filters, add='+')
         self.root.bind('<Escape>', self.escape_scene_filters, add='+')
         plotfoot = self.frame(plotcard, card=True)
-        plotfoot.grid(row=3, column=0, sticky='ew')
+        # Keep internal measurements, but do not display the map information bar.
         plotfoot.grid_columnconfigure(1, weight=1)
         self.field(plotfoot, 'points', '轨迹点 0', color='muted', font=('Microsoft YaHei UI', -11)).grid(row=0, column=0, sticky='w', padx=8, pady=2)
         self.field(plotfoot, 'speed', '平面速度 — 单位/秒', color='muted', font=('Microsoft YaHei UI', -11)).grid(row=0, column=1, sticky='e', padx=8)

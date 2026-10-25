@@ -27,6 +27,9 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
                 assert widget.winfo_rootx()+widget.winfo_width() <= root.winfo_rootx()+root.winfo_width()
                 assert widget.winfo_rooty()+widget.winfo_height() <= root.winfo_rooty()+root.winfo_height()
             assert window.canvas.winfo_height() >= 100
+            assert not window.scene_filter_hint.winfo_ismapped()
+            assert not window.canvas.find_withtag('map-scale')
+            assert not window.canvas.find_withtag('map-chrome')
             tab_y = tabs.winfo_rooty()
             window.toggle_scene_filters(); root.update()
             for widget in window.scene_filter_buttons.values():
