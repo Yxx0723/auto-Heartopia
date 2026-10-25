@@ -816,6 +816,7 @@ class CoordinateWindow:
     def tick(self):
         if self.closed:
             return
+        frame_started = self.clock()
         status = self.worker.take_latest()
         now = self.clock()
         if status is not None:
@@ -834,7 +835,10 @@ class CoordinateWindow:
             if playback.get('state') in ('reached', 'finished', 'stopped', 'error', 'partial'):
                 self.refresh_path_memory_info()
         self.render()
-        self.timer = self.root.after(int(policy.COORD_MONITOR_REFRESH_SECONDS * 1000), self.tick)
+        # One pending callback only; a slow frame never queues catch-up frames.
+        elapsed = max(0., self.clock()-frame_started)
+        delay = max(1, math.ceil((policy.COORD_UI_FRAME_SECONDS-elapsed)*1000))
+        self.timer = self.root.after(delay, self.tick)
 
     def render(self):
         if self.interaction_pending():

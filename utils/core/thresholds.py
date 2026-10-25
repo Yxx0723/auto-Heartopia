@@ -86,6 +86,9 @@ COORD_PLAYBACK_EXTRA_SECONDS = 60.
 # retry at most every 2 s, mark a stalled browser feed after 1.5 s. A bounded
 # 1,800 point trail avoids growing browser memory during long sessions.
 COORD_MONITOR_REFRESH_SECONDS = .1
+# UI target requested at 60 Hz; Tk millisecond timers and render cost limit actual rate.
+# Separate from coordinate sampling and full-scene reads. No synthetic positions.
+COORD_UI_FRAME_SECONDS = 1. / 60.
 COORD_MONITOR_RETRY_SECONDS = 2.
 COORD_MONITOR_STALE_SECONDS = 1.5
 COORD_MONITOR_TRAIL_POINTS = 1800
