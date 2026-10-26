@@ -91,6 +91,16 @@ def test_start_far_away_never_sends_input():
     assert not game.events and game.closed
 
 
+def test_attached_reader_cannot_start_on_foot_route():
+    game = Game()
+    def attached_read():
+        raise ValueError('请先下车再进行步行回放')
+    game.read_for_playback = attached_read
+    with pytest.raises(ValueError, match='下车'):
+        run(game)
+    assert not game.events and game.closed
+
+
 @pytest.mark.parametrize('stop_at', [.1, 2.5])
 def test_stop_during_calibration_or_following_releases_keys(stop_at):
     game = Game()

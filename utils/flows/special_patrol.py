@@ -35,9 +35,12 @@ class _Reader:
         self.reader, self.watch = reader, watch
 
     def read(self):
-        position = self.reader.read()
+        position = getattr(self.reader, 'read_for_playback', self.reader.read)()
         self.watch(position)
         return position
+
+    def read_for_playback(self):
+        return self.read()
 
     def __getattr__(self, name):
         return getattr(self.reader, name)
@@ -280,7 +283,7 @@ def drive_special_patrol(data, size, reader_factory, device, window, controls, r
                 controls.pause()
             clock.sleep(.01)
         inventory_reader = reader_factory()
-        position = tuple(inventory_reader.read())
+        position = tuple(getattr(inventory_reader, 'read_for_playback', inventory_reader.read)())
         if cfg.get('checkpoint_kind')=='house-public-side':
             # Old task snapshots may contain shifted public-side points. Re-read
             # configured entrances rather than silently retaining that policy.

@@ -178,7 +178,7 @@ class _Follower:
         started = self.clock.monotonic()
         if not force and self.position_at is not None and started - self.position_at < policy.COORD_SAMPLE_SECONDS:
             return self.position
-        position = self.reader.read()
+        position = getattr(self.reader, 'read_for_playback', self.reader.read)()
         now = self.clock.monotonic()
         if not valid_position(position):
             raise ValueError('角色坐标无效，已停止回放')

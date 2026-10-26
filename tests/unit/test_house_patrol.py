@@ -52,6 +52,16 @@ def test_no_loaded_target_builds_house_plan_in_numeric_order_not_nearest():
     assert d['special_patrol']['checkpoints'][0] == [10., 0., 0.]
 
 
+def test_attached_reader_cannot_start_on_foot_patrol():
+    game = Game()
+    def attached_read():
+        raise ValueError('请先下车再进行步行回放')
+    game.read_for_playback = attached_read
+    with pytest.raises(ValueError, match='下车'):
+        run(scene(), game=game)
+    assert not game.events and game.closed
+
+
 @pytest.mark.parametrize('fault', ['missing', 'duplicate', 'source', 'context'])
 def test_incomplete_or_unscoped_house_data_never_invents_coordinates(fault):
     s = scene()

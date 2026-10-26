@@ -177,6 +177,12 @@ class ReadOnlyPosition:
     def read(self):
         return self.snapshot()['position']
 
+    def read_for_playback(self):
+        sample = self.snapshot()
+        if sample.get('attached_to_parent'):
+            raise ValueError('角色正附着载具或座位，坐标读取正常；请先下车再开始步行回放')
+        return sample['position']
+
     def movement_basis(self):
         """Version-pinned read-only local camera direction; never sends input."""
         if self.locator is None:
