@@ -77,6 +77,56 @@ class NativeWorldCollisions:
             raise ValueError('原生碰撞向量范围不符')
         return list(struct.unpack('<' + 'f'*count, meta.data(obj + field['offset'], count*4)))
 
+    def quality_enabled(self, loader):
+        """The pinned quality loader has an explicit inherited current flag."""
+        meta = self.meta
+        info = meta.obj(loader, ('QualityHighColliderLoader', 'SceneLoader'))
+        parent = meta.cls(info['parent'])
+        if (parent['name'], parent['namespace']) != ('ColliderQualityLoader', 'SceneLoader'):
+            raise ValueError('画质碰撞层继承关系不符')
+        field = meta.field(info['address'], 'current', 2)
+        if field['offset'] >= info['size']:
+            raise ValueError('画质碰撞层启用字段越界')
+        value = meta.data(loader + field['offset'], 1)[0]
+        if value not in (0, 1):
+            raise ValueError('画质碰撞层启用状态无效')
+        return bool(value)
+
+    def inactive_quality_state(self, layer, loader, config):
+        """Prove a disabled quality layer contains no loaded box geometry.
+
+        Its loaded dictionary may hold pending records with null obj values;
+        a record count alone is not evidence of loaded collision grids.
+        Returned references/stamps are ephemeral guards, never persisted IDs.
+        """
+        meta = self.meta
+        if self.quality_enabled(loader) or meta.ref(loader, 'data'):
+            raise ValueError('画质碰撞层状态正在切换')
+        data, parent, pool = meta.ref(config, 'data'), meta.ref(config, 'parent'), meta.ref(loader, '_colliderPool')
+        meta.obj(data, ('SceneColliderLoaderData', ''))
+        meta.obj(pool, ('SceneColliderPool', 'SceneLoader'))
+        pool_root = meta.ref(pool, '_root')
+        if not parent or meta.ref(loader, '_root') != parent or pool_root not in (0, parent):
+            raise ValueError('原生碰撞池归属不符')
+        loaded = meta.ref(layer, 'loaded')
+        stamp = meta.container_stamp(loaded, True)
+        records = tuple(meta.dictionary(loaded))
+        for record in records:
+            meta.obj(record, ('LoadRecord', ''))
+            if meta.ref(record, 'obj'):
+                raise ValueError('停用画质碰撞层仍有加载网格')
+        pool_list = meta.ref(pool, '_instBoxCols')
+        if not pool_root and pool_list:
+            raise ValueError('未初始化画质碰撞池仍有箱体列表')
+        pool_stamp = meta.container_stamp(pool_list) if pool_list else None
+        slots = tuple(meta.list_refs(pool_list)) if pool_list else ()
+        if any(slots):
+            raise ValueError('停用画质碰撞层仍有碰撞箱体')
+        if (meta.container_stamp(loaded, True) != stamp or tuple(meta.dictionary(loaded)) != records
+                or (pool_list and meta.container_stamp(pool_list) != pool_stamp)):
+            raise ValueError('停用画质碰撞层集合正在变化')
+        return data, parent, pool, pool_root, loaded, stamp, records, pool_list, pool_stamp, slots
+
     def snapshot(self):
         meta = self.meta
         meta.validate_root()
@@ -89,12 +139,14 @@ class NativeWorldCollisions:
             raise ValueError('原生场景原点正在变化')
         layers_at = meta.ref(root, 'layers')
         layers = meta.array_refs(layers_at, ('LoadLayer', ''))
-        configs = set(meta.array_refs(meta.ref(root, 'configs'), ('SceneLoaderConfig', '')))
+        configs_at = meta.ref(root, 'configs')
+        configs = set(meta.array_refs(configs_at, ('SceneLoaderConfig', '')))
         if not 0 < len(layers) <= 32:
             raise ValueError('原生场景图层范围无效')
         result, guards, cache, visited = [], [], {}, set()
+        inactive_quality, active_quality = [], []
         stats = {'world_boxes': 0, 'world_fences': 0, 'world_inactive': 0,
-                 'world_triggers': 0, 'world_unmatched': 0}
+                 'world_triggers': 0, 'world_unmatched': 0, 'world_inactive_quality_layers': 0}
         for layer in layers:
             meta.obj(layer, ('LoadLayer', ''))
             loader = meta.ref(layer, 'loader')
@@ -104,8 +156,18 @@ class NativeWorldCollisions:
             if (info['name'], info['namespace']) not in (
                     ('SceneColliderLoader', 'SceneLoader'), ('QualityHighColliderLoader', 'SceneLoader')):
                 continue
-            config, data, pool = meta.ref(layer, 'config'), meta.ref(loader, 'data'), meta.ref(loader, '_colliderPool')
-            if config not in configs or meta.ref(config, 'data') != data:
+            config = meta.ref(layer, 'config')
+            if config not in configs:
+                raise ValueError('原生碰撞图层归属已变化')
+            if info['name'] == 'QualityHighColliderLoader':
+                if not self.quality_enabled(loader):
+                    state = self.inactive_quality_state(layer, loader, config)
+                    inactive_quality.append((layer, loader, config, state))
+                    stats['world_inactive_quality_layers'] += 1
+                    continue
+                active_quality.append(loader)
+            data, pool = meta.ref(loader, 'data'), meta.ref(loader, '_colliderPool')
+            if meta.ref(config, 'data') != data:
                 raise ValueError('原生碰撞图层归属已变化')
             meta.obj(data, ('SceneColliderLoaderData', ''))
             meta.obj(pool, ('SceneColliderPool', 'SceneLoader'))
@@ -195,8 +257,16 @@ class NativeWorldCollisions:
                     or meta.ref(data, 'allGrids') != grids_at
                     or set(meta.array_refs(grids_at, ('GridBoxColData', ''))) != all_grids):
                 raise ValueError('原生碰撞图层正在切换')
+        for layer, loader, config, state in inactive_quality:
+            if (meta.ref(layer, 'loader') != loader or meta.ref(layer, 'config') != config
+                    or self.inactive_quality_state(layer, loader, config) != state):
+                raise ValueError('停用画质碰撞层正在切换')
+        if any(not self.quality_enabled(loader) for loader in active_quality):
+            raise ValueError('画质碰撞层启用状态正在切换')
         if (meta.static_ref(self.root_class, 'instance') != root or meta.ref(root, 'layers') != layers_at
                 or meta.array_refs(layers_at, ('LoadLayer', '')) != layers
+                or meta.ref(root, 'configs') != configs_at
+                or set(meta.array_refs(configs_at, ('SceneLoaderConfig', ''))) != configs
                 or self.vector(root, 'worldOrigin', 3) != origin):
             raise ValueError('原生场景正在切换')
         meta.validate_root()

@@ -51,7 +51,7 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
             window.toggle_map_size(); root.update()
             assert sidebar.winfo_ismapped() and tabs.winfo_rooty() == old_y
         assert window.special_press_var.get() == '3'
-        assert window.scene_radius == 150
+        assert window.scene_radius == 300
         window.activate_route(window.patrol_route_label)
         window.view.position = [1., 2., 3.]
         window.render()

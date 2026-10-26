@@ -270,3 +270,94 @@ def test_nonuniform_scale_and_negative_axis_preserve_the_original_rotation():
     geometry = world_box(source, live)
     assert geometry['height'] == pytest.approx([1.5, 2.5])
     assert 'category' not in geometry
+
+
+
+def add_disabled_quality_layer(h):
+    parent = h.classes['SceneColliderLoader']
+    mid = h.cls('ColliderQualityLoader', 'SceneLoader', [('qualityEnable', 56, 29), ('current', 64, 2)], size=72, parent=parent)
+    h.cls('QualityHighColliderLoader', 'SceneLoader', size=72, parent=mid)
+    loader, layer, config, pool = h.obj('QualityHighColliderLoader'), h.obj('LoadLayer'), h.obj('SceneLoaderConfig'), h.obj('SceneColliderPool')
+    record = h.obj('LoadRecord')  # Placeholder request, not a loaded grid.
+    loaded = h.dictionary([record])
+    for at, off, value in [(layer,16,config),(layer,24,loaded),(layer,40,loader),
+                           (config,16,0x20000000),(config,24,h.data),
+                           (loader,32,pool),(loader,40,0x20000000),(pool,32,0x20000000)]:
+        h.q(at+off,value)
+    h.q(h.root+64,h.refs('LoadLayer',[h.layer,layer]))
+    h.q(h.root+32,h.refs('SceneLoaderConfig',[h.config,config]))
+    return loader,layer,config,pool,record
+
+
+def test_verified_disabled_quality_placeholder_does_not_discard_normal_walls():
+    h, reader = runtime()
+    add_disabled_quality_layer(h)
+    boxes, stats = reader.snapshot()
+    assert len(boxes)==1 and stats['world_inactive_quality_layers']==1
+    assert not ObstacleMap({'colliders':boxes},(0,0,0),water_areas=()).clear((0,0),(0,6))
+
+
+@pytest.mark.parametrize('fault',['enabled','invalid_flag','loaded_grid','populated_pool','data_present','pool_owner'])
+def test_quality_layer_is_never_skipped_without_all_inactivity_proofs(fault):
+    h, reader = runtime()
+    loader,layer,config,pool,record=add_disabled_quality_layer(h)
+    if fault=='enabled':h.write(loader+64,b'\x01')
+    elif fault=='invalid_flag':h.write(loader+64,b'\x02')
+    elif fault=='loaded_grid':h.q(record+24,h.grid)
+    elif fault=='populated_pool':h.q(pool+16,h.pool_list)
+    elif fault=='data_present':h.q(loader+24,h.data)
+    else:h.q(pool+32,0x20000008)
+    with pytest.raises(ValueError):reader.snapshot()
+
+
+def test_disabled_quality_state_is_rechecked_before_publication():
+    h, reader = runtime()
+    loader,*_=add_disabled_quality_layer(h)
+    original=reader.inactive_quality_state
+    calls=[0]
+    def state(*args):
+        calls[0]+=1
+        if calls[0]==2:h.write(loader+64,b'\x01')
+        return original(*args)
+    reader.inactive_quality_state=state
+    with pytest.raises(ValueError):reader.snapshot()
+    assert reader.geometry_cache=={}
+
+
+def test_enabled_quality_loader_still_reads_its_real_boxes():
+    h, reader=runtime()
+    mid=h.cls('ColliderQualityLoader','SceneLoader',[('current',64,2)],size=72,parent=h.classes['SceneColliderLoader'])
+    h.cls('QualityHighColliderLoader','SceneLoader',size=72,parent=mid)
+    loader=h.obj('QualityHighColliderLoader')
+    h.q(loader+24,h.data);h.q(loader+32,h.pool);h.q(loader+40,0x20000000);h.write(loader+64,b'\x01')
+    h.q(h.layer+40,loader)
+    assert len(reader.snapshot()[0])==1
+
+
+
+def test_disabled_quality_allows_an_initialized_but_empty_pool_list():
+    h, reader=runtime()
+    loader,layer,config,pool,record=add_disabled_quality_layer(h)
+    empty=h.obj('List`1');h.q(empty+16,h.refs('XDCollider',[]));h.q(pool+16,empty)
+    assert len(reader.snapshot()[0])==1
+
+
+def test_root_config_membership_is_rechecked_even_when_layers_stay_the_same():
+    h, reader=runtime()
+    read=h.read
+    def mutate(at,size):
+        raw=read(at,size)
+        if at==h.live and size==184:h.q(h.root+32,h.refs('SceneLoaderConfig',[]))
+        return raw
+    reader.meta.read=mutate
+    with pytest.raises(ValueError):reader.snapshot()
+    assert reader.geometry_cache=={}
+
+
+
+def test_disabled_quality_uninitialized_empty_pool_has_no_root_yet():
+    h, reader=runtime()
+    loader,layer,config,pool,record=add_disabled_quality_layer(h)
+    h.q(pool+32,0)
+    boxes,stats=reader.snapshot()
+    assert len(boxes)==1 and stats['world_inactive_quality_layers']==1
