@@ -109,11 +109,13 @@ def geometry_key(collider):
 
 
 def _water_crossing(center, axis, length, polygon, water_areas):
-    count = max(2, int(math.ceil(length / CENTERLINE_SAMPLE_SPACING)))
-    step = length / count
+    inset = min(.05, length * .025)
+    usable_length = length - 2 * inset
+    count = max(2, int(math.ceil(usable_length / CENTERLINE_SAMPLE_SPACING)))
+    step = usable_length / count
     samples = []
     for index in range(count + 1):
-        offset = -length / 2 + index * step
+        offset = -length / 2 + inset + index * step
         point = (center[0] + axis[0] * offset, center[1] + axis[1] * offset)
         if not _inside(point, polygon):
             return ()
@@ -133,8 +135,8 @@ def _water_crossing(center, axis, length, polygon, water_areas):
                 runs.append((start, index - 1))
                 start = None
         if any((last - first) * step >= MIN_WATER_CROSSING
-               and first * step >= MIN_DRY_LANDING
-               and (count - last) * step >= MIN_DRY_LANDING
+               and inset + first * step >= MIN_DRY_LANDING
+               and inset + (count - last) * step >= MIN_DRY_LANDING
                for first, last in runs):
             crossed.append(water_index)
     return tuple(crossed)
@@ -205,6 +207,17 @@ def segment_uses_bridge(deck, water_index, start, end, water_polygon, water_clea
         if _point_polygon_distance(point, water_polygon) > water_clearance + 1e-6:
             continue
         touched = True
-        if not _inside(point, polygon) or _boundary_distance(point, polygon) + 1e-6 < agent_clearance:
+        dx, dz = point[0] - deck['center'][0], point[1] - deck['center'][1]
+        along = dx * deck['axis'][0] + dz * deck['axis'][1]
+        across = -dx * deck['axis'][1] + dz * deck['axis'][0]
+        if abs(across) + agent_clearance > deck['width'] / 2 + 1e-6:
+            return False
+        in_deck = _inside(point, polygon) or _point_polygon_distance(point, polygon) <= 1e-6
+        in_water = _inside(point, water_polygon) or _point_polygon_distance(point, water_polygon) <= 1e-6
+        in_dry_landing_buffer = not in_water and \
+            abs(along) <= deck['length'] / 2 + water_clearance + 1e-6
+        if not in_deck and not in_dry_landing_buffer:
+            return False
+        if abs(along) > deck['length'] / 2 + water_clearance + 1e-6:
             return False
     return touched
