@@ -11,6 +11,7 @@ import time
 
 from utils.core import thresholds as policy
 from utils.core.approach_risk import ApproachRisks, local_geometry
+from utils.core.bridge_navigation import detect_bridge_decks, geometry_key, segment_uses_bridge
 from utils.core.coordinate_route import direction_keys, distance, key_vector, valid_position
 from utils.core.navigation_water import NAVIGATION_WATER_AREAS as WATER_AREAS
 
@@ -76,7 +77,8 @@ def scene_geometry_signature(scene):
                 or any(not isinstance(p, (list, tuple)) or len(p) != 2
                        or not all(type(v) in (int, float) and math.isfinite(v) for v in p) for p in polygon):
             continue
-        result.add((tuple(heights), tuple(tuple(p) for p in polygon)))
+        result.add((tuple(heights), tuple(tuple(p) for p in polygon),
+                    box.get('category'), box.get('source')))
     return frozenset(result)
 
 
@@ -88,9 +90,15 @@ class ObstacleMap:
         self.search_radius = policy.COORD_NAV_SEARCH_RADIUS if search_radius is None else search_radius
         self.radius = self.search_radius + policy.COORD_NAV_LEG_LENGTH
         self.polygons, self.bins = [], {}
+        water_areas = tuple(water_areas)
+        self.bridge_decks = detect_bridge_decks(scene, position, water_areas)
+        self.bridge_geometry_keys = {deck['key'] for deck in self.bridge_decks}
+        self.water_polygon_ids = {}
         self.approachable, self.terminal_padding, self.goal = set(), {}, None
         candidates = []
         for box in scene.get('colliders', []):
+            if geometry_key(box) in self.bridge_geometry_keys:
+                continue  # The recognized deck is a support surface, not a body obstacle.
             heights = box.get('height')
             if not isinstance(heights, (list, tuple)) or len(heights) != 2 \
                     or not all(type(v) in (float, int) and math.isfinite(v) for v in heights):
@@ -99,12 +107,14 @@ class ObstacleMap:
             if heights[1] <= position[1] + policy.COORD_NAV_GROUND_CLEARANCE \
                     or heights[0] >= position[1] + policy.COORD_NAV_BODY_HEIGHT:
                 continue
-            candidates.append((box.get('polygon'), policy.COORD_NAV_CLEARANCE, box.get('category') != 'mountain'))
-        candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False) for polygon in water_areas)
-        candidates.extend((polygon, policy.COORD_PATROL_HOME_MARGIN, False)
+            candidates.append((box.get('polygon'), policy.COORD_NAV_CLEARANCE,
+                               box.get('category') != 'mountain', None))
+        candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False, water_index)
+                          for water_index, polygon in enumerate(water_areas))
+        candidates.extend((polygon, policy.COORD_PATROL_HOME_MARGIN, False, None)
                           for polygon in scene.get('navigation_exclusions', ()))
-        candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False) for polygon in probes)
-        for polygon, clearance, approachable in candidates:
+        candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False, None) for polygon in probes)
+        for polygon, clearance, approachable, water_index in candidates:
             if not isinstance(polygon, (list, tuple)) or len(polygon) < 3 \
                     or any(not isinstance(p, (list, tuple)) or len(p) != 2
                            or not all(type(v) in (float, int) and math.isfinite(v) for v in p) for p in polygon):
@@ -118,6 +128,8 @@ class ObstacleMap:
                 continue
             index = len(self.polygons)
             self.polygons.append((polygon, clearance))
+            if water_index is not None:
+                self.water_polygon_ids[index] = water_index
             if approachable:
                 self.approachable.add(index)
             # Clip indexing to the local search area, even for a very large box.
@@ -156,6 +168,12 @@ class ObstacleMap:
                 clearance = self.terminal_padding[index]
             separation = polygon_distance(a, b, polygon)
             if separation > clearance:
+                continue
+            water_index = self.water_polygon_ids.get(index)
+            if water_index is not None and any(
+                    segment_uses_bridge(deck, water_index, a, b, polygon, clearance,
+                                        policy.COORD_NAV_CLEARANCE)
+                    for deck in self.bridge_decks):
                 continue
             # A player already inside the padding may step outward. Never
             # permit crossing the actual polygon or moving deeper into padding.
