@@ -1,4 +1,4 @@
-"""Full inland-water display reference from the calibrated in-game map.
+"""Approximate display-only water reference for the in-game map.
 
 Traced across the whole main island; no rectangular river clipping.
 Origin (511, 452), 1.55 map pixels per world unit. Shorelines remain
@@ -376,3 +376,41 @@ MAP_WATER_ISLANDS = (
     ((-6.45, -64.52), (-5.81, -63.87), (-3.87, -64.52), (-4.52, -65.16)),
     ((-10.32, -60.65), (-9.68, -60.0), (-9.03, -61.29), (-5.81, -60.65), (-5.16, -61.29), (-5.16, -63.23), (-5.81, -63.87), (-7.1, -63.23), (-7.74, -64.52), (-9.03, -64.52)),
 )
+
+# East Sea, traced from the public full-map reference at
+# https://www.taptap.cn/moment/562594436463200970 and approximately aligned to
+# the existing world-coordinate map using its town-center and water references.
+# Display only: this public image does not establish collision or traversability.
+MAP_EAST_SEA_AREAS = (
+    (
+        (98.3, 133.8), (106.1, 120.8), (113.0, 111.5), (130.4, 111.5), (146.1, 109.2),
+        (164.3, 108.5), (180.0, 106.2), (195.7, 100.0), (201.7, 93.1), (198.3, 83.1),
+        (189.6, 76.9), (180.9, 74.6), (172.2, 71.5), (163.5, 64.6), (157.4, 55.4),
+        (160.0, 46.2), (167.8, 38.5), (175.7, 30.8), (178.3, 19.2), (182.6, 6.2),
+        (187.8, -4.6), (191.3, -15.4), (187.0, -26.9), (177.4, -38.5), (167.8, -48.5),
+        (160.9, -59.2), (160.0, -72.3), (162.6, -84.6), (156.5, -97.7), (145.2, -106.2),
+        (313.0, -106.2), (313.0, 148.5), (98.3, 148.5),
+    ),
+)
+
+# Land visible inside the East Sea display polygon; these masks keep islands
+# ground-colored without affecting navigation.
+MAP_EAST_SEA_ISLANDS = (
+    (
+        (207.8, 115.4), (217.4, 120.8), (227.8, 117.7), (234.8, 110.0), (240.9, 98.5),
+        (247.8, 85.4), (256.5, 69.2), (265.2, 54.6), (267.8, 48.5), (258.3, 46.9),
+        (243.5, 50.0), (228.7, 52.3), (215.7, 56.2), (205.2, 60.8), (200.0, 66.9),
+        (198.3, 76.2), (202.6, 86.2), (207.8, 98.5),
+    ),
+    (
+        (157.4, 37.7), (165.2, 40.8), (173.9, 36.2), (180.0, 27.7), (175.7, 21.5),
+        (165.2, 20.0), (158.3, 25.4),
+    ),
+    (
+        (269.6, -76.2), (276.5, -73.1), (285.2, -75.4), (291.3, -82.3), (287.8, -89.2),
+        (279.1, -90.0), (271.3, -85.4),
+    ),
+)
+
+MAP_DISPLAY_WATER_AREAS = MAP_WATER_AREAS + MAP_EAST_SEA_AREAS
+MAP_DISPLAY_WATER_ISLANDS = MAP_WATER_ISLANDS + MAP_EAST_SEA_ISLANDS
