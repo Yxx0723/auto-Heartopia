@@ -4,7 +4,7 @@ import math
 
 MAP_STYLE = {'ground': '#17251f', 'grid': '#25392e', 'grid_major': '#31473a',
              'edge': '#354b3e', 'panel': '#132019', 'muted': '#8aab96',
-             'water': '#183e4b', 'shore': '#47929a', 'shore_outer': '#254f52',
+             'water': '#1e5b91', 'shore': '#58a8d6', 'shore_outer': '#244c68',
              'collision': '#4b6050', 'road': '#8a8163', 'route': '#a1c8ee',
              'route_line': '#728fa6',
              'navigation': '#74e3d1', 'trail': '#689b7c', 'player': '#d0ef9b',
