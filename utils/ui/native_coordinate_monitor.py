@@ -32,7 +32,7 @@ from utils.ui.map_presentation import (MAP_STYLE, draw_grid, draw_chrome, draw_p
                                       draw_waypoint_labels, draw_target_indicator)
 from utils.ui.map_labels import layout_waypoints, HoverTarget, MapHover, target_indicator
 from utils.drivers.mono_scene import MemorySceneMap
-from utils.core.map_water_reference import MAP_DISPLAY_WATER_AREAS, MAP_DISPLAY_WATER_ISLANDS
+from utils.core.map_water_reference import MAP_WATER_AREAS, MAP_WATER_ISLANDS
 from utils.core.map_reference_roads import REFERENCE_ROADS
 
 
@@ -338,8 +338,8 @@ class CoordinateWindow:
             button.configure(padx=5, font=('Microsoft YaHei UI', -11))
             button.pack(side='left', padx=2, pady=(0, 3))
         self.canvas = tk.Canvas(plotcard, bg=COLORS['plot'], bd=0, highlightthickness=0, height=270)
-        self.map_cache = MapDrawCache(self.canvas, MAP_DISPLAY_WATER_AREAS, SCENE_RANKS, roads=REFERENCE_ROADS,
-                                     water_islands=MAP_DISPLAY_WATER_ISLANDS)
+        self.map_cache = MapDrawCache(self.canvas, MAP_WATER_AREAS, SCENE_RANKS, roads=REFERENCE_ROADS,
+                                     water_islands=MAP_WATER_ISLANDS)
         self.map_hover, self.map_hover_job = MapHover(self.canvas), None
         self.map_pointer = None
         self.canvas.grid(row=2, column=0, sticky='nsew')
