@@ -396,7 +396,7 @@ COORD_SCENE_TRANSIENT_RETRY_SECONDS = .1
 COORD_SCENE_DIAGNOSTIC_SECONDS = 5.
 # Display-only expansion requested on 2026-10-15. Navigation still consumes
 # fresh snapshots; historical fixed geometry never becomes an obstacle source.
-COORD_SCENE_RADIUS = 150.
+COORD_SCENE_RADIUS = 300.
 # Display-only horizontal detail radius, requested by the user; not a measured
 # game loading distance, collision tolerance or conversion to physical metres.
 COORD_MAP_DETAIL_RADIUS = 20.
