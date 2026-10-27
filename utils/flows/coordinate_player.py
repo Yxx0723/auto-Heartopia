@@ -8,6 +8,7 @@ from utils.core.coordinate_points import (choose_start_index, ordered_waypoints,
                                           validate_loop_count)
 from utils.core.coordinate_navigation import NavigationWait, ObstacleMap
 from utils.core.direction_evidence import CalibrationBudget, DirectionEvidence
+from utils.core.navigation_progress import NavigationProgress
 from utils.core.special_approach import in_interaction_range, interaction_standpoint
 from utils.core.harvest_evidence import HarvestEvidence
 from utils.core import special_verdict
@@ -136,6 +137,8 @@ class _Follower:
         self.skipped_cycles = set()
         self.approach_tag, self.approach_attempts = None, 0
         self.direction_unsafe_until = float('-inf')
+        self.travel_progress = NavigationProgress()
+        self.travelling = False
 
     def approach_attempt(self, index):
         tag = self.cycle,index
@@ -168,8 +171,13 @@ class _Follower:
             raise _Paused()
         now = self.clock.monotonic()
         if self.last_tick is not None and not self.navigation_waiting:
-            self.active_time += max(0., now - self.last_tick)
+            elapsed = max(0., now - self.last_tick)
+            self.active_time += elapsed
+            if self.travelling and self.navigator and self.waypoints is not None:
+                self.travel_progress.account(elapsed)
         self.last_tick = now
+        if self.travelling and self.travel_progress.exhausted:
+            raise _SkipPoint('本点有效寻路与脱困时间达到预算，暂时跳过并记录未完成')
         if self.active_time > self.budget:
             raise ValueError('回放超过时限，已停止，请缩短路线后重试')
 
@@ -421,6 +429,7 @@ class _Follower:
         self.release()
         before = self.read(force=True)
         self.recovery.begin(before)
+        self.travel_progress.begin_probe(before)
         if self.waypoints is not None:
             # Manual points can be far apart. Quantized WASD steering may take
             # a valid approach outside the original start-to-point corridor.
@@ -431,7 +440,10 @@ class _Follower:
                     waypoint=index + 1, waypoint_count=total, recovery_phase='start',
                     recovery_attempt=self.recovery.attempts, recovery_limit=self.recovery_attempts,
                     recovery_failures=self.recovery.failures)
-        if self.jump_on_recovery:
+        # Escalate an unresolved episode instead of jumping at the same wall
+        # on every replan. Legacy non-navigation playback keeps its policy.
+        if self.jump_on_recovery and (not self.navigator or not self.continuous_recovery
+                                      or self.recovery.attempts == 1):
             self.report('recovering', f'点位 {index + 1}/{total} · 连续失败 {self.recovery.failures}/{self.recovery_attempts}'
                         ' · 大跳：长按空格 '
                         f'{policy.COORD_RECOVERY_JUMP_SECONDS:g} 秒 · F6暂停 · F9停止',
@@ -1053,6 +1065,7 @@ class _Follower:
         while index < len(points):
             try:
                 self.guard()
+                self.travelling = False
                 special_near = False
                 if 'special_resource' in points[index]:
                     try:
@@ -1172,6 +1185,9 @@ class _Follower:
                     anchor = None
                     best, progress_at = math.inf, self.clock.monotonic()
                 position = self.read()
+                if self.navigator and self.waypoints is not None:
+                    self.travel_progress.bind((self.cycle, index), position,
+                                              points[index]['position'], self.calibration_speed)
                 if segment_start is None:
                     segment_start = position
                 held_keys = set(self.keys)
@@ -1267,6 +1283,7 @@ class _Follower:
                             self.active_time, self.last_tick = 0., self.clock.monotonic()
                             self.last_report = self.last_collect_report = float('-inf')
                     continue
+                self.travelling = True
                 if self.navigator:
                     planning_at = self.clock.monotonic()
                     self.navigation_waiting = True
@@ -1321,9 +1338,11 @@ class _Follower:
                     # A valid detour may initially move away from the saved
                     # target. Only progress toward the active steering leg counts.
                     remaining = distance(position, target)
-                if remaining < best - policy.COORD_STUCK_DISTANCE:
+                physically_stalled = bool(self.navigator and self.waypoints is not None
+                                           and self.travel_progress.stalled(position))
+                if remaining < best - policy.COORD_STUCK_DISTANCE and not physically_stalled:
                     best, progress_at = remaining, now
-                elif now - progress_at >= policy.COORD_STUCK_SECONDS:
+                elif physically_stalled or now - progress_at >= policy.COORD_STUCK_SECONDS:
                     if self.waypoints is None:
                         raise ValueError('角色未向目标前进，可能遇到障碍，已停止')
                     attempted_keys = sorted(self.keys)
@@ -1339,7 +1358,11 @@ class _Follower:
                                 waypoint=index+1, waypoint_count=len(points), position=list(position),
                                 target=list(points[index]['position']), steering_target=list(target),
                                 input_keys=attempted_keys, incident_kind='movement_stall',
-                                stalled_seconds=now-progress_at,
+                                stalled_seconds=max(now-progress_at,
+                                    self.travel_progress.elapsed-self.travel_progress.motion_at
+                                    if physically_stalled else 0.),
+                                physical_stall=physically_stalled,
+                                point_drive_seconds=self.travel_progress.elapsed,
                                 collision_context=context)
                     if self.navigator:
                         self.approach_attempt(index)
@@ -1481,10 +1504,13 @@ class _Follower:
                     self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
             except _SkipPoint as exc:
                 self.release()
+                self.travelling = False
                 self.skipped_count += 1
                 self.skipped_cycles.add(self.cycle)
                 self.report('skipped', f'点位 {index+1}/{len(points)} 暂时跳过：{exc}',
-                            waypoint=index+1, skipped_count=self.skipped_count, incident_kind='point_skipped')
+                            waypoint=index+1, skipped_count=self.skipped_count, incident_kind='point_skipped',
+                            skip_reason=str(exc), point_drive_seconds=self.travel_progress.elapsed,
+                            point_drive_budget=self.travel_progress.budget)
                 index += 1
                 self.collection, self.special_progress = None, None
                 self.recovery.reset()

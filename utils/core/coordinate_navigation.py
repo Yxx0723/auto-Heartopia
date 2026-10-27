@@ -413,7 +413,14 @@ class LocalNavigator:
             norm = math.hypot(*vector)
             unit = (vector[0] / norm, vector[1] / norm)
             end = tuple(a + b * travel for a, b in zip(start, unit))
-            return obstacles.clear(start, end, escape=True), sum(a * b for a, b in zip(delta, unit)) - obstacles.risk_cost(start,end)
+            # A short quantized WASD pulse can aim back into a rejected entry
+            # even when the ideal path bends away. Project only the risk query;
+            # physical clearance still checks the actual pulse distance.
+            risk_end = tuple(a+b*max(travel, policy.COORD_APPROACH_FOCUS_DISTANCE
+                                    + policy.COORD_APPROACH_REPEAT_LATERAL) for a,b in zip(start,unit))
+            repeated = self.risks.repeats_failed_entry(start, risk_end, position[1])
+            return (obstacles.clear(start, end, escape=True) and not repeated,
+                    sum(a * b for a, b in zip(delta, unit)) - obstacles.risk_cost(start,end))
 
         preferred_vector = key_vector(preferred,basis)
         norm = math.hypot(*preferred_vector)
@@ -533,7 +540,11 @@ class LocalNavigator:
     def _refresh_obstacles(self, position, target):
         scene = self.scene_provider()
         if not scene or scene.get('state') != 'ready':
-            self.risks.clear()
+            # A missing sample is not a world switch. Keep short-lived evidence
+            # unavailable to steering until the ready snapshot is revalidated.
+            self.risks.expire(self.clock())
+            if scene and scene.get('cache_context') is not None and 'terrain_revision' in scene:
+                self.risks.bind(repr((scene['cache_context'], scene['terrain_revision'])))
             self.invalidate()
             raise NavigationWait('等待最新场景数据，稍后自动寻路', reason='scene')
         now = self.clock()
@@ -646,4 +657,8 @@ class LocalNavigator:
                     self.obstacles.travel_cost((a[0],a[2]),(b[0],b[2])) for a,b in zip(prefix,prefix[1:]))+1e-8:
                 break
             selected = point
+        if self.risks.repeats_failed_entry(current, (selected[0], selected[2]), position[1]):
+            self.invalidate()
+            self.retry_at = now + policy.COORD_NAV_RETRY_SECONDS
+            raise NavigationWait('新路径仍从重复失败方向接近，退开后更换入口', reason='no_path')
         return selected
