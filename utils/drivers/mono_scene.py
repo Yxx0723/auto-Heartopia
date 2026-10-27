@@ -679,7 +679,10 @@ class MemorySceneMap:
                             unsupported += 1
                             continue
                         geometry = box_geometry(vector('Position', 3), vector('Rotation', 4),
-                                                vector('Center', 3), vector('Size', 3), world(hierarchy))
+                                                vector('Center', 3), vector('Size', 3), world(hierarchy),
+                                                allow_planar=True)
+                        if geometry.get('surface_kind') == 'zero-y-box-plane':
+                            geometry['source'] = 'verified-managed-planar-box'
                         if meta.data(collider + enabled, 1) != b'\x01' or meta.ref(collider, '_group') != owner:
                             continue
                         category = self.collider_barrier(collider, owner, hierarchy, barriers)

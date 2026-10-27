@@ -50,8 +50,11 @@ def hull(points):
     return [list(p) for p in half(points) + half(reversed(points))]
 
 
-def box_geometry(position, rotation, center, size, parent=None):
-    if not all(valid_position(v) for v in (position, center, size)) or any(v <= 0 for v in size):
+def box_geometry(position, rotation, center, size, parent=None, *, allow_planar=False):
+    if not all(valid_position(v) for v in (position, center, size)):
+        raise ValueError('Invalid scene box')
+    planar = allow_planar and size[1] == 0 and size[0] > 0 and size[2] > 0
+    if not planar and any(v <= 0 for v in size):
         raise ValueError('Invalid scene box')
     transform = compose_transform(parent or ([0, 0, 0], [0, 0, 0, 1], 1.),
                                   (position, rotation, 1.))
@@ -65,9 +68,16 @@ def box_geometry(position, rotation, center, size, parent=None):
                 if not valid_position(world):
                     raise ValueError('Invalid world box')
                 corners.append(world)
-    return {'display_box': {'schema': 'oriented-box-v1', 'corners': corners},
-            'polygon': hull((v[0], v[2]) for v in corners),
-            'height': [min(v[1] for v in corners), max(v[1] for v in corners)]}
+    polygon = hull((v[0], v[2]) for v in corners)
+    if planar and len(polygon) < 3:
+        raise ValueError('Planar scene box has no supported XZ footprint')
+    result = {'display_box': {'schema': 'oriented-box-v1', 'corners': corners},
+              'polygon': polygon, 'height': [min(v[1] for v in corners), max(v[1] for v in corners)]}
+    if planar:
+        # Preserve the actual surface, including zero thickness; never inflate
+        # it into an artificial wall or treat this as a grounded-state proof.
+        result['surface_kind'] = 'zero-y-box-plane'
+    return result
 
 
 def barrier_strokes(polygon):

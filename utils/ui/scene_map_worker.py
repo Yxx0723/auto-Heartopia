@@ -122,6 +122,9 @@ class SceneMapWorker:
                 'duration_seconds': max(0., now-started), 'recovery': read_stats,
                 'issue': result.get('issue'), 'transient_failures': self.transient_failures,
                 'retry_delay': self.retry_delay,
+                'navigation_eligible': quality.get('navigation_eligible') if isinstance(quality, dict) else None,
+                'discovery_unknown': quality.get('discovery_unknown') if isinstance(quality, dict) else None,
+                'managed_unknown': quality.get('managed_unknown') if isinstance(quality, dict) else None,
                 'parts': {key: value.get('state') if isinstance(value, dict) else 'unavailable'
                           for key, value in parts.items()}}, ensure_ascii=False)})
         return result.get('state') == 'ready'
