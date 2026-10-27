@@ -14,6 +14,7 @@ from utils.core.approach_risk import ApproachRisks, local_geometry
 from utils.core.bridge_navigation import detect_bridge_decks, geometry_key, segment_uses_bridge
 from utils.core.coordinate_route import direction_keys, distance, key_vector, valid_position
 from utils.core.navigation_water import NAVIGATION_WATER_AREAS as WATER_AREAS
+from utils.core.navigation_reference import ReferenceRisks
 
 
 class NavigationWait(Exception):
@@ -64,6 +65,9 @@ def polygon_distance(a, b, polygon):
 def scene_geometry_signature(scene):
     """Ignore timestamps, object labels and collider order when geometry agrees."""
     result = set()
+    reference = scene.get('navigation_reference')
+    if reference:
+        result.add(('navigation-reference', reference['revision']))
     for polygon in scene.get('navigation_exclusions', ()):
         if isinstance(polygon, (list, tuple)) and len(polygon) >= 3 and all(
                 isinstance(p, (list, tuple)) and len(p) == 2 and all(
@@ -92,6 +96,8 @@ class ObstacleMap:
         self.polygons, self.bins = [], {}
         water_areas = tuple(water_areas)
         self.bridge_decks = detect_bridge_decks(scene, position, water_areas)
+        self.reference_risks = ReferenceRisks(scene.get('navigation_reference'), self.height,
+                                              position, self.radius, self.bridge_decks)
         self.bridge_geometry_keys = {deck['key'] for deck in self.bridge_decks}
         self.water_polygon_ids = {}
         self.approachable, self.terminal_padding, self.goal = set(), {}, None
@@ -188,7 +194,8 @@ class ObstacleMap:
         return max(abs(position[0] - self.origin[0]), abs(position[2] - self.origin[2])) + radius <= self.radius
 
     def risk_cost(self, start, end):
-        return self.risks.cost(start, end, self.height) if self.risks is not None else 0.
+        return (self.risks.cost(start, end, self.height) if self.risks is not None else 0.) \
+            + self.reference_risks.cost(start, end)
 
     def travel_cost(self, start, end):
         return math.dist(start,end) + self.risk_cost(start,end)
@@ -301,6 +308,7 @@ class LocalNavigator:
         self.scene_provider, self.clock, self.water_areas = scene_provider, clock, water_areas
         self.scene, self.obstacles, self.goal = None, None, None
         self.scene_signature = None
+        self.reference_revision = None
         self.path, self.probes = [], []
         self.retry_at = 0.
         self.path_memory = path_memory
@@ -529,6 +537,10 @@ class LocalNavigator:
             self.invalidate()
             raise NavigationWait('等待最新场景数据，稍后自动寻路', reason='scene')
         now = self.clock()
+        reference_revision = (scene.get('navigation_reference') or {}).get('revision')
+        if reference_revision != self.reference_revision:
+            # A still-clear old path may now be much riskier than a detour.
+            self.path, self.obstacles, self.retry_at = [], None, 0.
         self.risks.bind(repr((scene.get('cache_context'),scene.get('terrain_revision'))))
         self.risks.expire(now)
         if self.risk_revision != self.risks.revision:
@@ -539,7 +551,9 @@ class LocalNavigator:
         if len(probes) != len(self.probes):
             self.obstacles = None
         self.probes = probes
-        signature = scene_geometry_signature(scene) if scene is not self.scene else self.scene_signature
+        signature = scene_geometry_signature(scene) if scene is not self.scene \
+            or reference_revision != self.reference_revision else self.scene_signature
+        self.reference_revision = reference_revision
         changed = signature != self.scene_signature
         self.scene, self.scene_signature = scene, signature
         if changed or self.obstacles is None \
@@ -615,7 +629,9 @@ class LocalNavigator:
                 raise NavigationWait('暂未找到可通行路径，正在重新寻路')
             self.retry_at = 0.
             self.last_decision = {'kind':'alternative_approach' if self.risks.count else 'normal_plan',
-                                  'risk_count':self.risks.count, 'risk_revision':self.risks.revision}
+                                  'risk_count':self.risks.count, 'risk_revision':self.risks.revision,
+                                  'reference_revision': self.reference_revision,
+                                  'reference_triangles': len(self.obstacles.reference_risks.entries)}
         # Follow a checked chord through temporary legs; the saved collection
         # destination and its precise arrival radius are unchanged.
         selected = self.path[0]

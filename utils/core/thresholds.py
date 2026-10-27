@@ -509,3 +509,15 @@ COOKING_TARGET_DRIFT_PIXELS = 4.
 
 # Engineering bound for typed default recipe material-slot traversal.
 COOKING_MAX_MATERIAL_SLOTS = 8
+
+# Local extracted geometry: engineering budgets/costs, NOT measured game abilities.
+# Source meshes remain advisory. No slope/step/climbing limit is inferred here.
+COORD_REFERENCE_MAX_BYTES = 4 * 1024 * 1024
+COORD_REFERENCE_MAX_VERTICES = 16000
+COORD_REFERENCE_MAX_FACES = 16000
+COORD_REFERENCE_BIN_SIZE = 4.
+COORD_REFERENCE_WATER_HEIGHT_BAND = 1.2
+COORD_REFERENCE_WATER_WEIGHT = 6.
+COORD_REFERENCE_WALL_WEIGHT = 8.
+COORD_REFERENCE_BRIDGE_WEIGHT = 4.
+COORD_REFERENCE_COST_CACHE_LIMIT = 4096

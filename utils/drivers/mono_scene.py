@@ -7,6 +7,7 @@ from utils.core import thresholds as policy
 from utils.core.scene_read import SceneReadIssue, RecoveryBudget, read_collection
 from utils.core.scene_map import box_geometry, compose_transform
 from utils.core.terrain_map import verified_terrain_walls
+from utils.core.navigation_reference import default_reference_path, load_reference
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.native_world_collisions import NativeWorldCollisions
 from utils.drivers.global_minerals import GlobalMineralReader
@@ -275,6 +276,11 @@ class MemorySceneMap:
         self.meta = SceneMetadata(self.memory._read, self.memory.locator.domain)
         self.native = None
         self.global_minerals = None
+        # Optional local source geometry is parsed once on this background
+        # reader's opening, not for each UI refresh / steering edge. Each
+        # publication below still requires a freshly verified main-map gate.
+        self.navigation_reference = load_reference(default_reference_path(),
+            self.memory.profile.get('game_assembly_sha256'), True)
 
     def close(self):
         self.memory.close()
@@ -759,6 +765,7 @@ class MemorySceneMap:
                    'discovery_unknown': discovery_unknown,
                    'managed_unknown': managed_unknown}
         return {'quality': quality, 'terrain_state': 'ready' if terrain else 'unavailable',
+                'navigation_reference': getattr(self, 'navigation_reference', None) if terrain else None,
                 'terrain_revision': 'main-terrain-v1' if terrain else None,
                 'schema': 'memory-scene-map-v1', 'state': 'ready', 'read_only': True,
                 'scope': 'loaded-scene-partial', 'objects': objects, 'colliders': colliders, 'models': models,
