@@ -37,9 +37,11 @@ class PointPlayback:
     def __init__(self, profile, runner=None, window_factory=PointGameWindow, controls_factory=PlaybackControls,
                  reader_factory=ReadOnlyPosition, device_factory=TimelineInput, clock=PreciseClock,
                  scene_provider=None, navigator_factory=LocalNavigator, diagnostics_path=None, repair_factory=None,
-                 tool_factory=None, food_factory=None, wall_clock=None, scene_refresh=None, input_busy=None, input_gate=None):
+                 tool_factory=None, food_factory=None, wall_clock=None, scene_refresh=None, input_busy=None, input_gate=None,
+                 guidance_runner=None):
         self.profile = Path(profile)
         self.runner = runner
+        self.guidance_runner = guidance_runner
         self.window_factory, self.controls_factory = window_factory, controls_factory
         self.reader_factory, self.device_factory, self.clock = reader_factory, device_factory, clock
         self.scene_provider, self.navigator_factory = scene_provider, navigator_factory
@@ -177,6 +179,76 @@ class PointPlayback:
             self.update('error', str(exc))
             if self.history:
                 self.history.close()
+
+    def start_guidance(self, pid):
+        if self.closed or self.active or self.input_busy():
+            raise ValueError('已有任务正在运行，请先停止。')
+        if type(pid) is not int or pid <= 0:
+            raise ValueError('没有可用的游戏进程，请重新连接。')
+        if self.scene_provider is None:
+            raise ValueError('场景碰撞检查尚未连接，不能开始游戏引导跟随。')
+        if not callable(self.guidance_runner):
+            raise ValueError('游戏引导入口未装配，请从新版窗口程序启动。')
+        self.stop_event.clear()
+        self.path_memory = None
+        self.cycle, self.loop_count, self.total = 1, 1, 0
+        self.special_outcome = self.patrol_result = None
+        self.incomplete_count = 0
+        self.navigation_path = []
+        self.history = (PlaybackHistory(self.history_root, {'engine': 'native_guidance', 'points': []},
+                        '跟随游戏引导', {'manual_start': True, 'no_interaction': True})
+                        if self.history_root is not None else None)
+        self.update('playback_wait', '游戏引导跟随已就绪 · 切回游戏按 F6 开始 · F9停止',
+                    navigation_mode='native_guidance')
+        self.thread = threading.Thread(target=self._run_guidance, args=(pid,),
+                                       name='native-guidance-follow', daemon=True)
+        self.thread.start()
+
+
+    def _run_guidance(self, pid):
+        if self.input_gate is None:
+            return self._execute_guidance(pid)
+        try:
+            with self.input_gate.claim('游戏引导跟随'):
+                return self._execute_guidance(pid)
+        except ValueError as exc:
+            self.update('error', str(exc), navigation_mode='native_guidance')
+            if self.history:
+                self.history.close()
+
+
+    def _execute_guidance(self, pid):
+        controls, device = None, None
+        def report(state, message, **extra):
+            extra.pop('waypoint', None)  # Never highlight an unrelated saved point.
+            extra.update(waypoint_count=0, navigation_mode='native_guidance')
+            self.update(state, message, **extra)
+        try:
+            window = self.window_factory(pid)
+            size = window.size()
+            device = self.device_factory(window)
+            controls = self.controls_factory(window, size, self, self.stop_event.is_set)
+            controls.start()
+            navigator = self.navigator_factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic)
+            result = self.guidance_runner(size,
+                lambda: self._recording_reader(pid, window.hwnd), device, window, controls,
+                report, clock=self.clock, navigator=navigator)
+            message = result['reason']
+            if result['arrived']:
+                message += f' · 距追踪目标约 {result["target_distance"]:.1f} 单位'
+            report('finished' if result['arrived'] else 'stopped', message)
+        except Exception as exc:
+            report('error', f'游戏引导跟随停止：{exc}')
+        finally:
+            for cleanup in [device.release_all if device else None, controls.close if controls else None]:
+                if cleanup is not None:
+                    try:
+                        cleanup()
+                    except Exception as exc:
+                        report('error', f'游戏引导清理失败：{exc}')
+            if self.history:
+                self.history.close()
+
 
     def _execute(self, data, pid, start_mode, recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat):
         controls, device = None, None

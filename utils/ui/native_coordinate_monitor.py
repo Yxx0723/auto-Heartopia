@@ -168,7 +168,7 @@ class MonitorWorker:
 
 class CoordinateWindow:
     def __init__(self, root, monitor, resources, clock=time.monotonic, point_path=None, wall_clock=None,
-                 playback_runner=None, scene_factory=None, cooking_runner=None):
+                 playback_runner=None, scene_factory=None, cooking_runner=None, guidance_runner=None):
         self.root, self.resources, self.clock = root, Path(resources), clock
         self.wall_clock = wall_clock or (lambda: datetime.now().astimezone())
         data_dir = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) \
@@ -189,6 +189,7 @@ class CoordinateWindow:
         diagnostics_dir = Path(point_path).parent if point_path else data_dir
         self.input_gate = InputTaskGate()
         self.playback = PointPlayback(self.resources / 'profile.json', runner=playback_runner,
+                                      guidance_runner=guidance_runner,
                                       scene_provider=self.navigation_scene, scene_refresh=self.refresh_scene,
                                       diagnostics_path=diagnostics_dir / '日志' / '点位回放.jsonl', input_gate=self.input_gate)
         self.cooking = CookingControl(self.resources/'profile.json', data_dir/'烹饪记录',
@@ -427,6 +428,9 @@ class CoordinateWindow:
                 side='left', padx=(0, 10))
         bottom = group(route_page, '回放控制')
         bottom.grid(row=2, column=0, sticky='ew', padx=6, pady=(0, 6))
+        self.guidance_button = self.button(bottom, '跟随游戏引导 · F6开始 / F9停止',
+                                           self.start_guidance_follow, small=True)
+        self.guidance_button.pack(fill='x', pady=(0, 4))
         toolbar = self.frame(bottom)
         toolbar.pack(fill='x')
         self.label(toolbar, '起点', color='muted', font=('Microsoft YaHei UI', -12)).pack(
@@ -847,6 +851,8 @@ class CoordinateWindow:
         view, status = self.view, self.view.status
         live = view.position is not None and not view.paused
         playing = self.playback.active or bool(getattr(self, 'cooking', None) and self.cooking.active)
+        if hasattr(self, 'guidance_button'):
+            configure_changed(self.guidance_button, state='normal' if live and not playing else 'disabled')
         patrol = getattr(self, 'patrol_route_selected', False)
         configure_changed(self.route_menu, state='disabled' if playing else 'readonly')
         for action, button in self.route_buttons.items():
@@ -1414,6 +1420,13 @@ class CoordinateWindow:
         except (OSError, ValueError) as exc:
             messagebox.showerror('无法开始动态采集', str(exc), parent=self.root)
 
+    def start_guidance_follow(self):
+        try:
+            self.playback.start_guidance(self.view.status.get('pid'))
+        except (OSError, ValueError) as exc:
+            messagebox.showerror('无法跟随游戏引导', str(exc), parent=self.root)
+
+
     def start_playback(self):
         if getattr(self, 'patrol_route_selected', False):
             return self.start_special_gather('both')
@@ -1629,7 +1642,7 @@ class CoordinateWindow:
         self.root.destroy()
 
 
-def main(playback_runner=None, cooking_runner=None):
+def main(playback_runner=None, cooking_runner=None, guidance_runner=None):
     parser = argparse.ArgumentParser(description='心动小镇原生坐标监视窗口')
     parser.add_argument('--check-output', type=Path)
     parser.add_argument('--check-scene-output', type=Path)
@@ -1672,5 +1685,6 @@ def main(playback_runner=None, cooking_runner=None):
             monitor.close()
         return
     root = tk.Tk()
-    CoordinateWindow(root, monitor, resources, playback_runner=playback_runner, scene_factory=MemorySceneMap, cooking_runner=cooking_runner)
+    CoordinateWindow(root, monitor, resources, playback_runner=playback_runner, scene_factory=MemorySceneMap,
+                     cooking_runner=cooking_runner, guidance_runner=guidance_runner)
     root.mainloop()

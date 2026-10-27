@@ -196,6 +196,17 @@ class ReadOnlyPosition:
             self.movement_reader=None
             raise
 
+    def guidance(self):
+        """Read the current task's display path, without running a game API."""
+        from utils.drivers.native_guidance import NativeGuidanceReader
+        try:
+            if getattr(self, 'guidance_reader', None) is None:
+                self.guidance_reader = NativeGuidanceReader(self)
+            return self.guidance_reader.snapshot()
+        except (OSError, ValueError):
+            self.guidance_reader = None
+            raise
+
     def tools_snapshot(self):
         return self._tools_snapshot(held=False)
 
