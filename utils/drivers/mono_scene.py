@@ -681,7 +681,7 @@ class MemorySceneMap:
                         geometry = box_geometry(vector('Position', 3), vector('Rotation', 4),
                                                 vector('Center', 3), vector('Size', 3), world(hierarchy),
                                                 allow_planar=True)
-                        if geometry.get('surface_kind') == 'zero-y-box-plane':
+                        if geometry.get('surface_kind') in ('zero-x-box-plane', 'zero-y-box-plane', 'zero-z-box-plane'):
                             geometry['source'] = 'verified-managed-planar-box'
                         if meta.data(collider + enabled, 1) != b'\x01' or meta.ref(collider, '_group') != owner:
                             continue

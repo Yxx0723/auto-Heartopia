@@ -15,6 +15,7 @@ from utils.core.bridge_navigation import detect_bridge_decks, geometry_key, segm
 from utils.core.coordinate_route import direction_keys, distance, key_vector, valid_position
 from utils.core.navigation_water import NAVIGATION_WATER_AREAS as WATER_AREAS
 from utils.core.navigation_reference import ReferenceRisks
+from utils.core.scene_map import collider_footprint
 
 
 class NavigationWait(Exception):
@@ -74,12 +75,10 @@ def scene_geometry_signature(scene):
                     type(v) in (int, float) and math.isfinite(v) for v in p) for p in polygon):
             result.add(('navigation-exclusion', tuple(tuple(p) for p in polygon)))
     for box in scene.get('colliders', ()):
-        heights, polygon = box.get('height'), box.get('polygon')
+        heights, polygon = box.get('height'), collider_footprint(box)
         if not isinstance(heights, (list, tuple)) or len(heights) != 2 \
                 or not all(type(v) in (int, float) and math.isfinite(v) for v in heights) \
-                or not isinstance(polygon, (list, tuple)) or len(polygon) < 3 \
-                or any(not isinstance(p, (list, tuple)) or len(p) != 2
-                       or not all(type(v) in (int, float) and math.isfinite(v) for v in p) for p in polygon):
+                or polygon is None:
             continue
         result.add((tuple(heights), tuple(tuple(p) for p in polygon),
                     box.get('category'), box.get('source')))
@@ -113,15 +112,19 @@ class ObstacleMap:
             if heights[1] <= position[1] + policy.COORD_NAV_GROUND_CLEARANCE \
                     or heights[0] >= position[1] + policy.COORD_NAV_BODY_HEIGHT:
                 continue
-            candidates.append((box.get('polygon'), policy.COORD_NAV_CLEARANCE,
-                               box.get('category') != 'mountain', None))
-        candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False, water_index)
+            footprint = collider_footprint(box)
+            if footprint is None:
+                continue
+            segment = len(footprint) == 2
+            candidates.append((footprint, policy.COORD_NAV_CLEARANCE,
+                               box.get('category') != 'mountain' and not segment, None, segment))
+        candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False, water_index, False)
                           for water_index, polygon in enumerate(water_areas))
-        candidates.extend((polygon, policy.COORD_PATROL_HOME_MARGIN, False, None)
+        candidates.extend((polygon, policy.COORD_PATROL_HOME_MARGIN, False, None, False)
                           for polygon in scene.get('navigation_exclusions', ()))
-        candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False, None) for polygon in probes)
-        for polygon, clearance, approachable, water_index in candidates:
-            if not isinstance(polygon, (list, tuple)) or len(polygon) < 3 \
+        candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False, None, False) for polygon in probes)
+        for polygon, clearance, approachable, water_index, segment in candidates:
+            if not isinstance(polygon, (list, tuple)) or len(polygon) < (2 if segment else 3) \
                     or any(not isinstance(p, (list, tuple)) or len(p) != 2
                            or not all(type(v) in (float, int) and math.isfinite(v) for v in p) for p in polygon):
                 continue

@@ -78,7 +78,7 @@ def test_rotated_scaled_plane_retains_transform_and_height_without_filling_a_vol
     assert (min(xs),max(xs),min(zs),max(zs)) == pytest.approx((6,14,16,20))
 
 
-@pytest.mark.parametrize('size', [(-1,0,8),(6,-1,8),(0,0,8),(0,2,8),(6,math.nan,8)])
+@pytest.mark.parametrize('size', [(-1,0,8),(6,-1,8),(0,0,8),(0,0,0),(6,math.nan,8)])
 def test_other_invalid_shapes_stay_unknown_and_do_not_loosen_gate(size):
     with pytest.raises(ValueError):box_geometry((0,0,0),(0,0,0,1),(0,0,0),size,allow_planar=True)
     snapshot = plane_reader(size).snapshot()
@@ -89,11 +89,10 @@ def test_default_strict_box_api_still_rejects_planes():
     with pytest.raises(ValueError):box_geometry((0,0,0),(0,0,0,1),(0,0,0),(6,0,8))
 
 
-def test_vertical_plane_with_only_a_line_projection_remains_unknown():
-    # Exact axis-permuting rotation: a vertical plane needs dedicated narrow
-    # phase support, so never discard it and publish a complete scene.
-    with pytest.raises(ValueError, match='XZ footprint'):
-        box_geometry((0,0,0),(.5,.5,.5,.5),(0,0,0),(6,0,8),allow_planar=True)
+def test_vertical_plane_with_only_a_line_projection_is_retained_as_an_obstacle():
+    plane = box_geometry((0,0,0),(.5,.5,.5,.5),(0,0,0),(6,0,8),allow_planar=True)
+    assert plane['projection_kind'] == 'segment' and len(plane['polygon']) == 2
+    assert not ObstacleMap(scene(plane),(0,0,0),water_areas=()).clear((0,-2),(0,2))
 
 
 def test_opt_in_does_not_change_a_real_solid_wall_or_its_collision_constraint():

@@ -4,6 +4,7 @@ import math
 
 from utils.core import thresholds as policy
 from utils.core.coordinate_route import valid_position
+from utils.core.scene_map import collider_footprint
 
 
 def freeze(value):
@@ -16,9 +17,8 @@ def item_bounds(item, kind):
         if not valid_position(p):
             return None
         return p[0], p[0], p[2], p[2]
-    polygon = item.get('polygon', ())
-    if len(polygon) < 3 or any(len(p) != 2 or not all(
-            type(v) in (int, float) and math.isfinite(v) for v in p) for p in polygon):
+    polygon = collider_footprint(item)
+    if polygon is None:
         return None
     xs, zs = zip(*polygon)
     return min(xs), max(xs), min(zs), max(zs)

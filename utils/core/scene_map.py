@@ -53,7 +53,7 @@ def hull(points):
 def box_geometry(position, rotation, center, size, parent=None, *, allow_planar=False):
     if not all(valid_position(v) for v in (position, center, size)):
         raise ValueError('Invalid scene box')
-    planar = allow_planar and size[1] == 0 and size[0] > 0 and size[2] > 0
+    planar = allow_planar and sum(v == 0 for v in size) == 1 and all(v >= 0 for v in size)
     if not planar and any(v <= 0 for v in size):
         raise ValueError('Invalid scene box')
     transform = compose_transform(parent or ([0, 0, 0], [0, 0, 0, 1], 1.),
@@ -69,15 +69,43 @@ def box_geometry(position, rotation, center, size, parent=None, *, allow_planar=
                     raise ValueError('Invalid world box')
                 corners.append(world)
     polygon = hull((v[0], v[2]) for v in corners)
-    if planar and len(polygon) < 3:
-        raise ValueError('Planar scene box has no supported XZ footprint')
+    if planar:
+        axis = size.index(0)
+        normal = rotate([float(i == axis) for i in range(3)], q)
+        # Collapse only a world-vertical plane's numerical round-off. This is
+        # a dimensionless floating-point tolerance, not added wall thickness.
+        if abs(normal[1]) <= 64 * math.ulp(1.):
+            points = sorted(set((v[0], v[2]) for v in corners))
+            polygon = [list(v) for v in max(((a,b) for a in points for b in points),
+                                           key=lambda pair: math.dist(*pair))]
+        if len(polygon) < 2 or polygon[0] == polygon[-1]:
+            raise ValueError('Planar scene box has no supported XZ footprint')
     result = {'display_box': {'schema': 'oriented-box-v1', 'corners': corners},
               'polygon': polygon, 'height': [min(v[1] for v in corners), max(v[1] for v in corners)]}
     if planar:
         # Preserve the actual surface, including zero thickness; never inflate
         # it into an artificial wall or treat this as a grounded-state proof.
-        result['surface_kind'] = 'zero-y-box-plane'
+        result['surface_kind'] = f'zero-{"xyz"[axis]}-box-plane'
+        if len(polygon) == 2:
+            result['projection_kind'] = 'segment'
     return result
+
+
+def collider_footprint(box):
+    """Validated polygon or explicitly typed plane segment; never a bare line."""
+    if not isinstance(box, dict):
+        return None
+    polygon = box.get('polygon')
+    if not isinstance(polygon, (list, tuple)) or any(
+            not isinstance(p, (list, tuple)) or len(p) != 2 or not all(
+                type(v) in (int, float) and math.isfinite(v) for v in p) for p in polygon):
+        return None
+    if len(polygon) == 2:
+        if box.get('projection_kind') != 'segment' or box.get('surface_kind') not in (
+                'zero-x-box-plane', 'zero-y-box-plane', 'zero-z-box-plane') or polygon[0] == polygon[1]:
+            return None
+        return tuple(sorted(tuple(p) for p in polygon))
+    return tuple(tuple(p) for p in polygon) if len(polygon) >= 3 else None
 
 
 def barrier_strokes(polygon):

@@ -350,6 +350,13 @@ class MapDrawCache:
         entry.visible = visible
 
     def polygon(self, key, coords, rank, underlay=None, **options):
+        if len(coords) == 4:
+            layers = []
+            for layer in ([underlay] if underlay else []) + [options]:
+                line = {k: v for k, v in layer.items() if k in ('width', 'dash', 'tags', 'state')}
+                line['fill'] = layer.get('outline') or layer.get('fill') or '#858585'
+                layers.append(line)
+            return self.polyline(key, coords, rank, layers)
         if self.existing(key) is not None:
             return
         entry = self.new_entry(key, rank, None)
@@ -370,6 +377,10 @@ class MapDrawCache:
             self.register(entry, item, options.get('tags'))
 
     def collision_detail(self, key, box):
+        if box.get('projection_kind') == 'segment' and len(box.get('polygon', ())) == 2:
+            return self.polyline(key, tuple(v for point in box['polygon'] for v in point), -1,
+                                 [{'fill':'#858585', 'width':2,
+                                   'tags':('scene-collider', 'nearby-collision', 'collision-side')}])
         if self.existing(key) is not None:
             return
         faces = collision_faces(box)
@@ -397,6 +408,9 @@ class MapDrawCache:
 
     def barrier(self, key, coords, color, kind):
         """Retain each true collision footprint and its rail/post detail."""
+        if len(coords) == 4:
+            return self.polyline(key, coords, 0, [{'fill':color, 'width':1.5,
+                                                 'tags':('scene-barrier','scene-'+kind)}])
         if self.existing(key) is not None:
             return
         entry = self.new_entry(key, 0, None)
