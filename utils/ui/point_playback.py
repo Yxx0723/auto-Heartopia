@@ -198,7 +198,7 @@ class PointPlayback:
         self.history = (PlaybackHistory(self.history_root, {'engine': 'native_guidance', 'points': []},
                         '跟随游戏引导', {'manual_start': True, 'no_interaction': True})
                         if self.history_root is not None else None)
-        self.update('playback_wait', '游戏引导跟随已就绪 · 切回游戏按 F6 开始 · F9停止',
+        self.update('playback_wait', '正在缓存完整游戏引导路线 · 准备完成后按 F6 开始 · F9停止',
                     navigation_mode='native_guidance')
         self.thread = threading.Thread(target=self._run_guidance, args=(pid,),
                                        name='native-guidance-follow', daemon=True)

@@ -8,16 +8,22 @@ from utils.core import thresholds as policy
 from utils.core.coordinate_route import valid_position
 
 
-def validate_guidance(value, now):
+def validate_guidance_state(value, now):
     if not isinstance(value, dict) or value.get('state') != 'ready':
         raise ValueError('游戏地面引导尚未开启或正在更新')
     stamp = value.get('captured_at')
     if type(stamp) not in (int, float) or not math.isfinite(stamp) \
             or not -.05 <= now-stamp <= policy.COORD_GUIDANCE_MAX_AGE:
-        raise ValueError('游戏引导数据过期，请重新追踪目标')
-    context, target, path = value.get('context'), value.get('target'), value.get('path')
+        raise ValueError('引导状态快照暂未更新，正在重新读取')
+    context, target = value.get('context'), value.get('target')
     if not isinstance(context, str) or not 1 <= len(context) <= 256 or not valid_position(target):
         raise ValueError('游戏引导目标或场景身份无效')
+    return context, tuple(target)
+
+
+def validate_guidance(value, now):
+    context, target = validate_guidance_state(value, now)
+    stamp, path = value['captured_at'], value.get('path')
     if not isinstance(path, (list, tuple)) or not 2 <= len(path) <= policy.COORD_GUIDANCE_MAX_POINTS:
         raise ValueError('游戏引导路径为空或超出读取范围')
     points = []
@@ -32,6 +38,53 @@ def validate_guidance(value, now):
     result['revision'] = hashlib.sha256(json.dumps([context, target, points], separators=(',', ':'),
                                                  allow_nan=False).encode()).hexdigest()
     return result
+
+
+class GuidanceRouteCache:
+    """Task-local full route; only health observations have an age deadline."""
+    def __init__(self):
+        self.route = self.token = self.healthy_at = None
+        self.loaded_at = float('-inf')
+
+    def install(self, value, now):
+        route = validate_guidance(value, now)
+        changed = self.route is None or self.route['revision'] != route['revision']
+        self.route, self.token = route, value.get('path_token')
+        self.healthy_at, self.loaded_at = value['captured_at'], now
+        return changed
+
+    def confirm(self, value, now):
+        context, target = validate_guidance_state(value, now)
+        if self.route is None or context != self.route['context'] or math.dist(target,self.route['target']) > policy.COORD_REACH_RADIUS:
+            return False
+        if not self.token or value.get('path_token') != self.token:
+            return False
+        self.healthy_at = value['captured_at']
+        return True
+
+    def require_healthy(self, now):
+        if self.route is None or self.healthy_at is None or not -.05 <= now-self.healthy_at <= policy.COORD_GUIDANCE_MAX_AGE:
+            raise ValueError('引导状态暂未确认，正在重新读取')
+        return self.route
+
+
+class GuidanceRecovery:
+    """Independent consecutive stage outages plus a bounded mixed outage."""
+    def __init__(self):
+        self.since, self.first = {}, None
+
+    def passed(self, stage):
+        self.since.pop(stage, None)
+
+    def failed(self, stage, now):
+        if self.first is None:
+            self.first = now
+        self.since.setdefault(stage, now)
+        return now-self.since[stage] >= policy.COORD_GUIDANCE_RETRY_SECONDS or now-self.first >= policy.COORD_GUIDANCE_NO_READY_SECONDS
+
+    def ready(self):
+        self.since.clear()
+        self.first = None
 
 
 class GuidanceCursor:

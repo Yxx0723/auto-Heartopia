@@ -1,17 +1,20 @@
 """Worker/UI contracts; never activate a real game window."""
 from unittest.mock import Mock
+from types import SimpleNamespace
 import pytest
 
 from tests.unit.test_point_playback import FakeWindow, WaitingControls
 from utils.ui.point_playback import PointPlayback
 from utils.flows.native_guidance_follow import drive_guidance
+from tests.unit.test_native_guidance_follow import snapshot
 
 
-def test_stop_before_f6_does_not_open_reader_or_press_any_key():
+def test_stop_before_f6_closes_any_preparation_reader_without_pressing_keys():
     readers, devices, controls = [], [], []
     def reader(*a, **k):
-        readers.append(1)
-        raise AssertionError('reader before F6')
+        value = SimpleNamespace(guidance=lambda:snapshot(now=worker.clock.monotonic()),close=Mock())
+        readers.append(value)
+        return value
     def device(window):
         d = Mock();devices.append(d);return d
     def control(*args):
@@ -22,7 +25,8 @@ def test_stop_before_f6_does_not_open_reader_or_press_any_key():
                             scene_provider=lambda pid: {'state':'ready','colliders':[]})
     worker.start_guidance(77)
     worker.stop();worker.close()
-    assert not readers and not worker.active and controls[0].closed
+    assert not worker.active and controls[0].closed
+    for value in readers:value.close.assert_called_once()
     devices[0].execute.assert_not_called()
     devices[0].release_all.assert_called()
     assert worker.take_latest()['state'] == 'stopped'

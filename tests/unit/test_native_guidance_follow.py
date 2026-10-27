@@ -81,13 +81,16 @@ def test_follows_curve_stops_near_end_and_never_interacts():
     assert not game.keys and game.closed
 
 
-def test_reader_is_not_opened_before_f6_and_stop_releases_everything():
+def test_route_is_cached_before_f6_but_stop_never_presses_any_key():
     game = guide_game();game.running = False;game.stop_at = .2
-    reader = Mock(side_effect=AssertionError('reader before F6'))
+    game.guidance = Mock(wraps=game.guidance)
+    reader = Mock(return_value=game)
     result = drive_guidance(game.size(), reader, game, game, game, Mock(), clock=game,
                             navigator=LocalNavigator(lambda:scene(), water_areas=()))
     assert not result['arrived'] and not game.events
-    reader.assert_not_called()
+    reader.assert_called_once()
+    game.guidance.assert_called_once()
+    assert game.closed
 
 
 @pytest.mark.parametrize('fault', ['target', 'scene', 'inactive', 'stale', 'direction', 'collision'])

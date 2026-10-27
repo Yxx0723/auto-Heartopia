@@ -10,7 +10,7 @@ from utils.drivers.mono_scene import SceneMetadata
 
 
 class NativeGuidanceReader:
-    def __init__(self, memory, clock=time.monotonic):
+    def __init__(self, memory, clock=time.perf_counter):
         if memory.locator is None:
             raise ValueError('当前版本不支持只读游戏引导')
         self.memory, self.clock = memory, clock
@@ -89,7 +89,7 @@ class NativeGuidanceReader:
             raise ValueError('游戏引导模块归属已变化')
         return level, array, module
 
-    def _vectors(self, obj):
+    def _vectors(self, obj, *, full=True):
         m = self.meta
         info = m.obj(obj)
         if (info['name'], info['namespace']) != ('List`1', 'System.Collections.Generic'):
@@ -109,7 +109,10 @@ class NativeGuidanceReader:
         element = m.cls(array['element'])
         if (element['name'], element['namespace'], element['size']) != ('Vector3', 'UnityEngine', 28) or count > capacity:
             raise ValueError('游戏引导路径元素类型不符')
-        raw = m.data(items+32, count*12) if count else b''
+        if full:
+            raw = m.data(items+32, count*12) if count else b''
+        else:
+            raw = b''.join(m.data(items+32+i*12, 12) for i in sorted({0, count//2, count-1})) if count else b''
         if stamp() != before:
             raise ValueError('游戏引导路径正在更新')
         points = tuple(struct.iter_unpack('<3f', raw))
@@ -118,6 +121,17 @@ class NativeGuidanceReader:
         return before, points
 
     def snapshot(self):
+        return self._snapshot(full=True)
+
+    def status(self):
+        """Owned target, list headers and sampled payload; no full path copy.
+
+        This is not proof that every unsampled point is unchanged. The caller
+        must periodically audit the full payload even with an identical token.
+        """
+        return self._snapshot(full=False)
+
+    def _snapshot(self, *, full):
         m = self.meta
         owner = self._owner()
         module = owner[2]
@@ -138,13 +152,13 @@ class NativeGuidanceReader:
         paths = {}
         for name in ('realPathList', '_path'):
             obj = m.ref(module, name)
-            stamp, points = self._vectors(obj)
+            stamp, points = self._vectors(obj, full=full)
             paths[name] = (obj, stamp, points)
         chosen = paths['realPathList'][2] or paths['_path'][2]
         # Verify exactly the relevant collections/target, not changing frame
         # timers elsewhere in the module. No atomic-process-snapshot claim.
         for name, (obj, stamp, points) in paths.items():
-            if m.ref(module, name) != obj or self._vectors(obj) != (stamp, points):
+            if m.ref(module, name) != obj or self._vectors(obj, full=full) != (stamp, points):
                 raise ValueError('游戏引导路径正在更新')
         if state() != before or self._owner() != owner:
             raise ValueError('游戏追踪目标或场景已变化')
@@ -152,6 +166,13 @@ class NativeGuidanceReader:
             raise ValueError('游戏地面引导路径尚未生成')
         context = hashlib.sha256(json.dumps([self.memory.profile['game_assembly_sha256'],
             self.memory.pid, self.memory.locator.domain, owner[0], module]).encode()).hexdigest()
-        return {'state': 'ready', 'context': context, 'target': goal, 'path': chosen,
-                'target_gap_xz': math.hypot(chosen[-1][0]-goal[0], chosen[-1][2]-goal[2]),
-                'captured_at': self.clock()}
+        tokens = []
+        for name, (obj, stamp, points) in paths.items():
+            sampled = tuple(points[i] for i in sorted({0, len(points)//2, len(points)-1})) if full else points
+            tokens.append((name, obj, stamp, sampled))
+        result = {'state': 'ready', 'context': context, 'target': goal,
+                  'path_token': hashlib.sha256(json.dumps(tokens).encode()).hexdigest(),
+                  'captured_at': self.clock()}
+        if full:
+            result.update(path=chosen, target_gap_xz=math.hypot(chosen[-1][0]-goal[0], chosen[-1][2]-goal[2]))
+        return result

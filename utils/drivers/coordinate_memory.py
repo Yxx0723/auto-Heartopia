@@ -198,11 +198,18 @@ class ReadOnlyPosition:
 
     def guidance(self):
         """Read the current task's display path, without running a game API."""
+        return self._guidance_read('snapshot')
+
+    def guidance_status(self):
+        """Read lightweight ownership/target/list health for a cached route."""
+        return self._guidance_read('status')
+
+    def _guidance_read(self, method):
         from utils.drivers.native_guidance import NativeGuidanceReader
         try:
             if getattr(self, 'guidance_reader', None) is None:
                 self.guidance_reader = NativeGuidanceReader(self)
-            return self.guidance_reader.snapshot()
+            return getattr(self.guidance_reader, method)()
         except (OSError, ValueError):
             self.guidance_reader = None
             raise
