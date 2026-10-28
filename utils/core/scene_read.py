@@ -15,7 +15,10 @@ class SceneReadIssue(ValueError):
 def issue_summary(error):
     """Safe structured diagnostics, without pointer values or raw exception text."""
     if isinstance(error, SceneReadIssue):
-        return {key: getattr(error, key) for key in ('kind', 'stage', 'retryable', 'scope_verified')}
+        result = {key: getattr(error, key) for key in ('kind', 'stage', 'retryable', 'scope_verified')}
+        if hasattr(error, 'code'):
+            result['code'] = error.code
+        return result
     return {'kind': 'io_error' if isinstance(error, OSError) else 'unknown',
             'stage': 'snapshot', 'retryable': False, 'scope_verified': False}
 
@@ -41,14 +44,14 @@ class RecoveryBudget:
         return True
 
 
-def read_collection(resolve, read, guard, budget, *, stage):
+def read_collection(resolve, read, guard, budget, *, stage, charge_mutation_guard=False):
     """Retry only a verified mutation, re-resolving the owner field each time."""
     last = None
     for attempt in range(policy.COORD_SCENE_COLLECTION_ATTEMPTS):
         budget.check()
         if attempt and not budget.reserve():
             break
-        started = budget.clock()
+        started, spent_before = budget.clock(), budget.spent
         try:
             guard()
             result = read(resolve())
@@ -59,13 +62,80 @@ def read_collection(resolve, read, guard, budget, *, stage):
             if exc.kind != 'mutation' or not exc.retryable:
                 raise
             budget.check()
-            guard()  # Failure is retryable only while the trusted scope agrees.
+            # Linked reads perform their expensive proof only after mutation.
+            # Charge that proof before starting a new retry; do not double-count
+            # work already charged by a nested registry recovery.
+            proof_started, proof_spent = budget.clock(), budget.spent
+            try:
+                guard()  # Failure is retryable only while the trusted scope agrees.
+            finally:
+                if charge_mutation_guard and not attempt:
+                    budget.spent += max(0., budget.clock()-proof_started-(budget.spent-proof_spent))
             last = SceneReadIssue(str(exc), kind='mutation', stage=stage,
                                   retryable=True, scope_verified=True)
         finally:
             if attempt:
-                budget.spent += max(0., budget.clock()-started)
+                budget.spent += max(0., budget.clock()-started-(budget.spent-spent_before))
     raise last
+
+
+def contextual_issue(error, stage):
+    """Localize a failure without logging arbitrary exception text or pointers."""
+    if isinstance(error, SceneReadIssue) and error.kind in ('cancelled', 'scope_changed'):
+        return error
+    summary = issue_summary(error)
+    result = SceneReadIssue('场景子步骤读取未确认', kind=summary['kind'], stage=stage,
+                            retryable=summary['retryable'], scope_verified=summary['scope_verified'])
+    result.code = summary.get('code') or {
+        '场景集合类型不符': 'collection_type', '场景集合数量无效': 'collection_count',
+        '场景集合布局无效': 'collection_layout', '场景集合字段范围无效': 'collection_field_bounds',
+        '场景集合计数字段无效': 'collection_counter_layout', '场景集合过大': 'collection_capacity',
+        '场景对象归属已变化': 'object_domain', '场景引用无效': 'invalid_reference',
+        '场景数据正在变化': 'short_read', '场景数据范围无效': 'read_bounds',
+    }.get(str(error), summary['kind'])
+    return result
+
+
+def read_linked_collection(resolve, read, verify_scope, budget, *, stage):
+    """Re-resolve an owner link; only proven mutations invoke scope recovery.
+
+    Stable reads use the existing container stamp plus a post-read link check.
+    World/membership checks run on the exceptional path, not per array normally.
+    Recovery shares the existing per-snapshot attempts/time budget.
+    """
+    address, after_read, tainted = None, False, False
+    def link():
+        nonlocal tainted
+        try:
+            return resolve()
+        except SceneReadIssue as exc:
+            if exc.kind == 'mutation' and exc.retryable:
+                tainted = True
+            raise
+    def resolve_current():
+        nonlocal address, after_read
+        address, after_read = link(), False
+        return address
+    def read_current(at):
+        nonlocal after_read, tainted
+        try:
+            result = read(at)
+        except SceneReadIssue as exc:
+            if exc.kind == 'mutation' and exc.retryable:
+                tainted = True
+            raise
+        after_read = True
+        return result
+    def guard():
+        nonlocal after_read, tainted
+        if tainted:
+            verify_scope()
+        if after_read:
+            after_read = False
+            if link() != address:
+                tainted = True
+                raise SceneReadIssue('场景集合引用在读取时发生变化', kind='mutation', stage=stage, retryable=True)
+    return read_collection(resolve_current, read_current, guard, budget, stage=stage, charge_mutation_guard=True)
 
 
 def navigation_quality_valid(scene, now):

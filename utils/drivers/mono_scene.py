@@ -4,7 +4,8 @@ import hashlib
 import struct
 import time
 from utils.core import thresholds as policy
-from utils.core.scene_read import SceneReadIssue, RecoveryBudget, read_collection
+from utils.core.scene_read import (SceneReadIssue, RecoveryBudget, read_collection,
+                                  read_linked_collection, contextual_issue, issue_summary)
 from utils.core.scene_map import box_geometry, compose_transform
 from utils.core.terrain_map import verified_terrain_walls
 from utils.core.navigation_reference import default_reference_path, load_reference
@@ -561,14 +562,37 @@ class MemorySceneMap:
         self.read_budget = RecoveryBudget(cancelled=getattr(self, 'cancelled', lambda: False))
         self.phase_times, self.phase_name, self.phase_started = {}, 'registry', time.monotonic()
         self.meta.read_counts = {} if getattr(self, 'navigation_only', False) else None
+        self.meta.stage = 'registry_start'
+        self.read_failure = None
+        self.managed_details = []
         try:
             return self._snapshot()
+        except (OSError, ValueError) as exc:
+            stage = self.meta.stage if isinstance(self.meta.stage, str) else 'snapshot'
+            self.read_failure = issue_summary(contextual_issue(exc, stage))
+            raise
         finally:
             self._phase(None)
             self.last_read_stats = {'retries': self.read_budget.retries,
                                     'extra_seconds': self.read_budget.spent,
                                     'phases': dict(self.phase_times),
-                                    'managed_remote_reads': self.meta.read_counts}
+                                    'managed_remote_reads': self.meta.read_counts,
+                                    'failure': self.read_failure,
+                                    'managed_issues': self.managed_details}
+
+    def _managed_step(self, stage, operation):
+        self.meta.stage = stage
+        try:
+            return operation()
+        except (OSError, ValueError) as exc:
+            issue = contextual_issue(exc, stage)
+            if issue is exc:
+                raise
+            raise issue from exc
+
+    def _managed_collection(self, owner, field, read, verify_scope, stage):
+        return self._managed_step(stage, lambda: read_linked_collection(
+            lambda: self.meta.ref(owner, field), read, verify_scope, self.read_budget, stage=stage))
 
     def _phase(self, name):
         now = time.monotonic()
@@ -609,6 +633,7 @@ class MemorySceneMap:
         meta.stage = 'entities'
         self._phase('entities')
         objects, groups, models, observations = [], [], [], []
+        group_types = {}
         discovery_unknown = 0
         for hierarchy in entries:
             self.read_budget.check()
@@ -626,6 +651,7 @@ class MemorySceneMap:
                     continue
                 if info['name'] == 'PhysicGroup':
                     groups.append(owner)
+                    group_types[owner] = info['address']
                 elif info['name'] not in ('StaticLevelObjectWrap', 'LevelEntityComponent') and hierarchy != local_hierarchy:
                     # A hierarchy anchor is a display landmark, not proof of a
                     # building mesh, solid collider, or traversability.
@@ -669,20 +695,54 @@ class MemorySceneMap:
         self._phase('managed_collisions')
         colliders, visited, streams, triggers, inactive, unsupported = [], set(), set(), 0, 0, 0
         managed_unknown = 0
+        managed_details, stream_anchors = self.managed_details, {}
+
+        def changed():
+            raise SceneReadIssue('托管碰撞场景或归属已变化', kind='scope_changed', stage=meta.stage)
+
+        def verify_group(group):
+            self.read_budget.check()
+            current = self.memory.snapshot()
+            if self.local_hierarchy(current) != local_hierarchy \
+                    or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
+                changed()
+            hierarchy = owners[group]
+            active = self.read_registry(registry, hierarchy_class, local_hierarchy, self.read_budget)
+            if hierarchy not in active or meta.ref(hierarchy, '_hierarchyObject') != group \
+                    or meta.obj(group)['address'] != group_types[group]:
+                changed()
+
+        def verify_stream(stream):
+            group, anchor = stream_anchors[stream]
+            verify_group(group)
+            if anchor not in meta.dictionary(meta.ref(group, '_colliders')) \
+                    or meta.ref(anchor, '_stream') != stream:
+                changed()
+
+        def verify_collision(stream, collision):
+            verify_stream(stream)
+            if collision not in meta.dictionary(meta.ref(stream, '_collisions')):
+                changed()
+
         for group in groups:
             self.read_budget.check()
-            for collider in meta.dictionary(meta.ref(group, '_colliders')):
-                stream = meta.ref(collider, '_stream')
+            for collider in self._managed_collection(group, '_colliders', meta.dictionary,
+                    lambda g=group: verify_group(g), 'managed_group_colliders'):
+                stream = self._managed_step('managed_collider_stream', lambda c=collider: meta.ref(c, '_stream'))
                 if stream:
                     streams.add(stream)
+                    stream_anchors.setdefault(stream, (group, collider))
         for stream in streams:
             self.read_budget.check()
-            for collision in meta.dictionary(meta.ref(stream, '_collisions')):
-                for collider in meta.array_refs(meta.ref(collision, 'colliders')):
+            for collision in self._managed_collection(stream, '_collisions', meta.dictionary,
+                    lambda s=stream: verify_stream(s), 'managed_stream_collisions'):
+                for collider in self._managed_collection(collision, 'colliders', meta.array_refs,
+                        lambda s=stream,c=collision: verify_collision(s,c), 'managed_collision_array'):
                     self.read_budget.check()
                     if not collider or collider in visited:
                         continue
                     visited.add(collider)
+                    meta.stage = 'managed_shape_data'
                     try:
                         info = meta.obj(collider)
                         enabled = meta.field(info['address'], '_enabled')['offset']
@@ -724,12 +784,15 @@ class MemorySceneMap:
                             geometry['category'] = category
                             geometry['source'] = 'verified-solid-collider'
                         colliders.append(geometry)
-                    except ValueError:
+                    except ValueError as exc:
                         skipped += 1
                         managed_unknown += 1
+                        if len(managed_details) < 16:
+                            managed_details.append(issue_summary(contextual_issue(exc, 'managed_shape_data')))
         managed_observed_to = time.monotonic()
         self.read_budget.check()
         native_observed_from = time.monotonic()
+        meta.stage = 'native_collisions'
         self._phase('native_collisions')
         world_stats, world_state = {}, 'unavailable'
         try:
@@ -744,6 +807,7 @@ class MemorySceneMap:
             # world's obstacles. The worker retries with a fresh snapshot.
             self.native = None
         native_observed_to = time.monotonic()
+        meta.stage = 'scope_validation'
         self._phase('scope_validation')
         self.read_budget.check()
         current = self.memory.snapshot()
@@ -804,7 +868,8 @@ class MemorySceneMap:
                                              'observed_from': native_observed_from, 'observed_to': native_observed_to}},
                    'unknown_entities': entity_unknown + live_stats['unknown'],
                    'discovery_unknown': discovery_unknown,
-                   'managed_unknown': managed_unknown}
+                   'managed_unknown': managed_unknown,
+                   'managed_issues': managed_details}
         return {'quality': quality, 'navigation_only': getattr(self, 'navigation_only', False),
                 'terrain_state': 'ready' if terrain else 'unavailable',
                 'navigation_reference': getattr(self, 'navigation_reference', None) if terrain else None,
