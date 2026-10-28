@@ -104,13 +104,38 @@ def read_linked_collection(resolve, read, verify_scope, budget, *, stage):
     Recovery shares the existing per-snapshot attempts/time budget.
     """
     address, after_read, tainted = None, False, False
+    def reference_failure(exc):
+        issue = contextual_issue(exc, stage)
+        return issue.kind == 'invalid_reference' or getattr(issue, 'code', None) in ('short_read', 'read_bounds')
+    def witness():
+        budget.check()
+        if budget.retries >= budget.max_retries or budget.spent >= budget.max_seconds:
+            return None
+        started, spent_before = budget.clock(), budget.spent
+        try:
+            value = resolve()
+            budget.check()
+            return value if type(value) is int and value > 0 else None
+        finally:
+            budget.spent += max(0., budget.clock()-started-(budget.spent-spent_before))
     def link():
         nonlocal tainted
         try:
             return resolve()
-        except SceneReadIssue as exc:
-            if exc.kind == 'mutation' and exc.retryable:
+        except (OSError, ValueError) as exc:
+            if isinstance(exc, SceneReadIssue) and exc.kind == 'mutation' and exc.retryable:
                 tainted = True
+            elif reference_failure(exc):
+                try:
+                    replacement = witness()
+                except (OSError, ValueError) as proof:
+                    if isinstance(proof, SceneReadIssue) and proof.kind in ('cancelled', 'scope_changed'):
+                        raise
+                    raise exc
+                if replacement is not None:
+                    tainted = True
+                    raise SceneReadIssue('场景集合引用从无效变为有效，等待归属核对', kind='mutation',
+                                         stage=stage, retryable=True) from exc
             raise
     def resolve_current():
         nonlocal address, after_read
@@ -120,9 +145,25 @@ def read_linked_collection(resolve, read, verify_scope, budget, *, stage):
         nonlocal after_read, tainted
         try:
             result = read(at)
-        except SceneReadIssue as exc:
-            if exc.kind == 'mutation' and exc.retryable:
+        except (OSError, ValueError) as exc:
+            if isinstance(exc, SceneReadIssue) and exc.kind == 'mutation' and exc.retryable:
                 tainted = True
+            elif reference_failure(exc):
+                # An old array can become unreadable after its owner publishes
+                # a replacement. Error kind alone is NOT mutation evidence.
+                # Require a different non-null link, then read_collection's
+                # exceptional guard proves world AND membership before retry.
+                budget.check()
+                try:
+                    replacement = witness()
+                except (OSError, ValueError) as proof:
+                    if isinstance(proof, SceneReadIssue) and proof.kind in ('cancelled', 'scope_changed'):
+                        raise
+                    raise exc
+                if at and replacement and replacement != at:
+                    tainted = True
+                    raise SceneReadIssue('场景集合引用在失败读取期间发生变化', kind='mutation',
+                                         stage=stage, retryable=True) from exc
             raise
         after_read = True
         return result

@@ -22,6 +22,7 @@ class SceneMapWorker:
         self.reader, self.thread = None, None
         self.history = SceneDisplayCache()
         self.transient_failures = 0
+        self.fresh_failures = 0
         self.retry_delay = policy.COORD_MONITOR_RETRY_SECONDS
         self.diagnostics = PlaybackDiagnostics(diagnostics_path) if diagnostics_path is not None else None
         self.last_diagnostic_at = None
@@ -43,6 +44,7 @@ class SceneMapWorker:
                 return False
             self.pid, self.generation = pid, self.generation + 1
             self.transient_failures = 0
+            self.fresh_failures = 0
             self.retry_delay = policy.COORD_MONITOR_RETRY_SECONDS
             self.latest_scene, self.latest_at = None, None
             self.history = SceneDisplayCache()
@@ -93,7 +95,7 @@ class SceneMapWorker:
             self.close_reader()
         if pid is None:
             return False
-        started, read_stats, transient = self.clock(), {}, False
+        started, read_stats, transient, fresh_retry = self.clock(), {}, False, False
         try:
             if self.reader is None:
                 self.reader = self.factory(pid, self.profile)
@@ -104,6 +106,15 @@ class SceneMapWorker:
         except (OSError, ValueError) as exc:
             issue = issue_summary(exc)
             transient = issue['kind'] == 'mutation' and issue['retryable'] and issue['scope_verified']
+            # A known navigation-only reference failure still discards the
+            # reader and its snapshot. Reopen from scratch sooner; this is NOT
+            # permission to retain data or promote the error to a mutation.
+            fresh_retry = (isinstance(self.reader, MemorySceneMap)
+                and getattr(self.reader, 'navigation_only', False) is True
+                and issue['stage'] in ('managed_group_colliders', 'managed_collider_stream',
+                    'managed_stream_collisions', 'managed_collision_array', 'managed_shape_data')
+                and (issue['kind'] == 'invalid_reference'
+                     or issue.get('code') in ('short_read', 'read_bounds')))
             if isinstance(self.reader, MemorySceneMap):
                 read_stats = self.reader.last_read_stats
             if not transient:
@@ -121,9 +132,11 @@ class SceneMapWorker:
             if generation != self.generation or self.stop.is_set():
                 return False
             self.transient_failures = min(self.transient_failures+1, 1000000) if transient else 0
+            self.fresh_failures = min(self.fresh_failures+1, 1000000) if fresh_retry else 0
+            recovery_failures = self.transient_failures if transient else self.fresh_failures
             self.retry_delay = (min(policy.COORD_MONITOR_RETRY_SECONDS,
-                policy.COORD_SCENE_TRANSIENT_RETRY_SECONDS * 2**min(self.transient_failures-1, 5))
-                if transient else policy.COORD_MONITOR_RETRY_SECONDS)
+                policy.COORD_SCENE_TRANSIENT_RETRY_SECONDS * 2**min(recovery_failures-1, 5))
+                if transient or fresh_retry else policy.COORD_MONITOR_RETRY_SECONDS)
             self.latest_scene, self.latest_at = result, now
             self.supply.publish(result, now, max(0., now-started))
             supply_metrics = self.supply.metrics(now)
@@ -142,6 +155,7 @@ class SceneMapWorker:
                 'publication_seconds': max(0., now-read_finished),
                 'supply': supply_metrics,
                 'issue': result.get('issue'), 'transient_failures': self.transient_failures,
+                'fresh_restart_failures': self.fresh_failures, 'fresh_restart': fresh_retry,
                 'retry_delay': self.retry_delay,
                 'navigation_eligible': quality.get('navigation_eligible') if isinstance(quality, dict) else None,
                 'navigation_usable_now': navigation_usable,
