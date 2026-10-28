@@ -176,6 +176,9 @@ class SceneMapWorker:
         self.pause_navigation_metrics()
         self.stop.set()
         self.wake.set()
+        interrupt = getattr(self.reader, 'interrupt', None)
+        if callable(interrupt):
+            interrupt()
         if self.thread:
             self.thread.join(timeout=policy.COORD_MONITOR_RETRY_SECONDS)
         else:

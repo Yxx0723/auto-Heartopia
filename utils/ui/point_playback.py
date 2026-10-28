@@ -16,6 +16,8 @@ from utils.drivers.route_path_memory import RoutePathMemory
 from utils.drivers.playback_history import PlaybackHistory, RecordingPosition, GuidanceRecordingPosition
 from utils.core.guidance_navigation import GuidanceNavigator
 from utils.ui.scene_map_worker import SceneMapWorker
+from utils.drivers.mono_scene import NavigationSceneMap
+from utils.drivers.navigation_process import NavigationProcessScene
 from utils.core.food_policy import FALLBACK_MODES
 from utils.drivers.point_game_window import PointGameWindow
 from utils.drivers.timeline_hotkeys import PlaybackControls
@@ -245,7 +247,9 @@ class PointPlayback:
             controls.start()
             provider = lambda:self.scene_provider(pid)
             if self.guidance_scene_factory is not None:
-                navigation_worker = SceneMapWorker(self.profile, factory=self.guidance_scene_factory,
+                factory = (NavigationProcessScene if self.guidance_scene_factory is NavigationSceneMap
+                           else self.guidance_scene_factory)
+                navigation_worker = SceneMapWorker(self.profile, factory=factory,
                     diagnostics_path=self.history_root.parent/'日志'/'引导碰撞读取.jsonl' if self.history_root else None)
                 navigation_worker.set_pid(pid)
                 navigation_worker.start()
