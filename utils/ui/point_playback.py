@@ -13,7 +13,9 @@ from utils.core.special_patrol import validate_patrol
 from utils.core import thresholds as policy
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.route_path_memory import RoutePathMemory
-from utils.drivers.playback_history import PlaybackHistory, RecordingPosition
+from utils.drivers.playback_history import PlaybackHistory, RecordingPosition, GuidanceRecordingPosition
+from utils.core.guidance_navigation import GuidanceNavigator
+from utils.ui.scene_map_worker import SceneMapWorker
 from utils.core.food_policy import FALLBACK_MODES
 from utils.drivers.point_game_window import PointGameWindow
 from utils.drivers.timeline_hotkeys import PlaybackControls
@@ -38,10 +40,11 @@ class PointPlayback:
                  reader_factory=ReadOnlyPosition, device_factory=TimelineInput, clock=PreciseClock,
                  scene_provider=None, navigator_factory=LocalNavigator, diagnostics_path=None, repair_factory=None,
                  tool_factory=None, food_factory=None, wall_clock=None, scene_refresh=None, input_busy=None, input_gate=None,
-                 guidance_runner=None):
+                 guidance_runner=None, guidance_scene_factory=None):
         self.profile = Path(profile)
         self.runner = runner
         self.guidance_runner = guidance_runner
+        self.guidance_scene_factory = guidance_scene_factory
         self.window_factory, self.controls_factory = window_factory, controls_factory
         self.reader_factory, self.device_factory, self.clock = reader_factory, device_factory, clock
         self.scene_provider, self.navigator_factory = scene_provider, navigator_factory
@@ -219,6 +222,7 @@ class PointPlayback:
 
     def _execute_guidance(self, pid):
         controls, device = None, None
+        navigation_worker = None
         def report(state, message, **extra):
             extra.pop('waypoint', None)  # Never highlight an unrelated saved point.
             extra.update(waypoint_count=0, navigation_mode='native_guidance')
@@ -229,9 +233,17 @@ class PointPlayback:
             device = self.device_factory(window)
             controls = self.controls_factory(window, size, self, self.stop_event.is_set)
             controls.start()
-            navigator = self.navigator_factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic)
+            provider = lambda:self.scene_provider(pid)
+            if self.guidance_scene_factory is not None:
+                navigation_worker = SceneMapWorker(self.profile, factory=self.guidance_scene_factory,
+                    diagnostics_path=self.history_root.parent/'日志'/'引导碰撞读取.jsonl' if self.history_root else None)
+                navigation_worker.set_pid(pid)
+                navigation_worker.start()
+                provider = lambda:navigation_worker.navigation_snapshot(pid)
+            factory = GuidanceNavigator if self.navigator_factory is LocalNavigator else self.navigator_factory
+            navigator = factory(provider, clock=self.clock.monotonic)
             result = self.guidance_runner(size,
-                lambda: self._recording_reader(pid, window.hwnd), device, window, controls,
+                lambda: self._recording_reader(pid, window.hwnd, guidance=True), device, window, controls,
                 report, clock=self.clock, navigator=navigator)
             message = result['reason']
             if result['arrived']:
@@ -248,6 +260,9 @@ class PointPlayback:
                         report('error', f'游戏引导清理失败：{exc}')
             if self.history:
                 self.history.close()
+
+            if navigation_worker:
+                navigation_worker.close()
 
 
     def _execute(self, data, pid, start_mode, recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat):
@@ -321,9 +336,10 @@ class PointPlayback:
             if self.history:
                 self.history.close()
 
-    def _recording_reader(self, pid, hwnd):
+    def _recording_reader(self, pid, hwnd, guidance=False):
         reader = self.reader_factory(pid, self.profile, hwnd=hwnd)
-        return RecordingPosition(reader, self.history, self.clock.monotonic) if self.history else reader
+        wrapper = GuidanceRecordingPosition if guidance else RecordingPosition
+        return wrapper(reader, self.history, self.clock.monotonic) if self.history else reader
 
     def stop(self):
         self.stop_event.set()

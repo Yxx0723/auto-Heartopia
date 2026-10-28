@@ -31,7 +31,7 @@ from utils.ui.collision_display import collision_faces
 from utils.ui.map_presentation import (MAP_STYLE, draw_grid, draw_chrome, draw_player, chrome_bounds,
                                       draw_waypoint_labels, draw_target_indicator)
 from utils.ui.map_labels import layout_waypoints, HoverTarget, MapHover, target_indicator
-from utils.drivers.mono_scene import MemorySceneMap
+from utils.drivers.mono_scene import MemorySceneMap, NavigationSceneMap
 from utils.core.map_water_reference import MAP_WATER_AREAS, MAP_WATER_ISLANDS
 from utils.core.map_reference_roads import REFERENCE_ROADS
 
@@ -190,6 +190,7 @@ class CoordinateWindow:
         self.input_gate = InputTaskGate()
         self.playback = PointPlayback(self.resources / 'profile.json', runner=playback_runner,
                                       guidance_runner=guidance_runner,
+                                      guidance_scene_factory=NavigationSceneMap if scene_factory is MemorySceneMap else None,
                                       scene_provider=self.navigation_scene, scene_refresh=self.refresh_scene,
                                       diagnostics_path=diagnostics_dir / '日志' / '点位回放.jsonl', input_gate=self.input_gate)
         self.cooking = CookingControl(self.resources/'profile.json', data_dir/'烹饪记录',

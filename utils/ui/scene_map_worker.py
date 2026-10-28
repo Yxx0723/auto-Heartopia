@@ -123,6 +123,10 @@ class SceneMapWorker:
                 'issue': result.get('issue'), 'transient_failures': self.transient_failures,
                 'retry_delay': self.retry_delay,
                 'navigation_eligible': quality.get('navigation_eligible') if isinstance(quality, dict) else None,
+                'navigation_usable_now': navigation_quality_valid(result,now) if quality else False,
+                'navigation_only': result.get('navigation_only',False),
+                'part_ages': {key:max(0.,now-value['observed_from']) for key,value in parts.items()
+                              if isinstance(value,dict) and type(value.get('observed_from')) in (int,float)},
                 'discovery_unknown': quality.get('discovery_unknown') if isinstance(quality, dict) else None,
                 'managed_unknown': quality.get('managed_unknown') if isinstance(quality, dict) else None,
                 'parts': {key: value.get('state') if isinstance(value, dict) else 'unavailable'

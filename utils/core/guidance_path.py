@@ -117,12 +117,14 @@ class GuidanceCursor:
             raise ValueError('人物已偏离引导路线，请重新追踪后再开始')
         return arc, index
 
-    def aim(self, position):
+    def aim(self, position, *, lookahead=None):
+        if lookahead is not None and (type(lookahead) not in (int,float) or not math.isfinite(lookahead) or lookahead<=0):
+            raise ValueError('引导前瞻距离无效')
         begin = max(0, bisect.bisect_right(self.lengths, max(0., self.arc-3.))-1)
         end = min(len(self.path)-1, bisect.bisect_left(self.lengths, self.arc+8.)+1)
         arc, index = self._nearest(position, begin, end)
         self.arc = max(self.arc, arc)
-        at = min(self.lengths[-1], self.arc+policy.COORD_GUIDANCE_LOOKAHEAD)
+        at = min(self.lengths[-1], self.arc+(policy.COORD_GUIDANCE_LOOKAHEAD if lookahead is None else lookahead))
         j = min(len(self.path)-2, max(0, bisect.bisect_right(self.lengths, at)-1))
         a, b = self.path[j:j+2]
         span = self.lengths[j+1]-self.lengths[j]

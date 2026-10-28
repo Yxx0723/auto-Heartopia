@@ -5,6 +5,7 @@ from utils.core import thresholds as policy
 from utils.core.guidance_path import (GuidanceCursor, GuidanceRouteCache, GuidanceRecovery,
                                       validate_guidance_state)
 from utils.core.coordinate_navigation import NavigationWait
+from utils.core.guidance_navigation import GuidanceNavigator
 from utils.drivers.windows_input import PreciseClock
 from utils.flows.coordinate_player import (_Follower, _Paused, _Stopped, _SkipPoint, _RecoveryLimit)
 
@@ -52,7 +53,11 @@ class GuidanceFollower(_Follower):
 
     def pause_guidance(self, message):
         self.release()
-        self.controls.pause()
+        pause = getattr(self.controls, 'pause_with_reason', None)
+        if callable(pause):
+            pause(message+' · F6确认后继续 · F9停止')
+        else:
+            self.controls.pause()
         self.report('paused', message+' · F6确认后继续 · F9停止', navigation_path=[])
         raise _Paused()
 
@@ -107,6 +112,7 @@ class GuidanceFollower(_Follower):
         if now-self.last_report >= .5:
             self.report('navigating', f'{exc} · 正在自动重试 · 按键已释放 · F9停止',
                         navigation_path=[], wait_stage=stage,
+                        navigation_wait_reason=getattr(exc,'reason',stage),
                         wait_seconds=now-self.waiting.since[stage], guidance_metrics=dict(self.read_stats))
             self.last_report = now
         self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
@@ -135,13 +141,37 @@ class GuidanceFollower(_Follower):
                         return {'arrived': True, 'target_distance': aim['target_distance'],
                                 'reason': '已到游戏引导线末端附近，未执行交互'}
                     stage = 'scene'
-                    self.release()
+                    if not isinstance(self.navigator, GuidanceNavigator):
+                        self.release()
                     planned_revision = self.cursor.revision
                     started = self.clock.monotonic()
                     self.navigation_waiting = True
                     try:
-                        target = self.navigator.next_target(position, aim['position'], check=self.guard,
-                                                            before_plan=self.release)
+                        try:
+                            target = self.navigator.next_target(position, aim['position'], check=self.guard,
+                                                                before_plan=self.release)
+                        except NavigationWait as original:
+                            if original.reason != 'no_path' or not isinstance(self.navigator, GuidanceNavigator):
+                                raise
+                            # A very close display point may lie in collision
+                            # padding. Try bounded forward positions on the same
+                            # route, through the SAME checked planner, never a
+                            # blind straight-line fallback.
+                            for factor in (2,4):
+                                later = self.cursor.aim(position,lookahead=policy.COORD_GUIDANCE_LOOKAHEAD*factor)
+                                if abs(later['height_hint']-position[1])>policy.COORD_GUIDANCE_HEIGHT_HINT_BAND:
+                                    continue
+                                try:
+                                    target = self.navigator.next_target(position,later['position'],check=self.guard,
+                                                                        before_plan=self.release)
+                                except NavigationWait as retry:
+                                    if retry.reason != 'no_path':raise
+                                    continue
+                                self.report('guidance_rejoin','局部引导点暂不可达，已规划接入前方路线',
+                                            guidance_rejoin=True, target=list(later['position']))
+                                break
+                            else:
+                                raise original
                     finally:
                         self.navigation_waiting = False
                         self.last_tick = self.clock.monotonic()
@@ -168,6 +198,15 @@ class GuidanceFollower(_Follower):
                     self.cache.require_healthy(self.clock.monotonic())
                     self.waiting.ready()
                 except (OSError, ValueError, TypeError, NavigationWait) as exc:
+                    self.release()
+                    if isinstance(exc,NavigationWait) and exc.reason != 'scene':
+                        stage = 'path'
+                        if self.clock.monotonic()-self.last_report>=.5:
+                            self.report('navigation_issue',str(exc),navigation_wait_reason=exc.reason,
+                                        incident_kind='navigation_wait',local_target=list(aim['position']),
+                                        navigation_evidence=self.navigator.explain(position,aim['position'])
+                                            if isinstance(self.navigator,GuidanceNavigator) else None,
+                                        navigator_stats=dict(self.navigator.stats))
                     self.wait_for_input_data(stage, exc)
                     continue
                 self.travelling = True

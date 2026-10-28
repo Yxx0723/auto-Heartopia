@@ -592,6 +592,10 @@ class MemorySceneMap:
                 info = meta.obj(owner)
                 discovered = True
                 owners[owner] = hierarchy
+                if getattr(self, 'navigation_only', False) and info['name'] != 'PhysicGroup':
+                    # Discover every owner first; only resource classification
+                    # and display transforms are omitted, never collider streams.
+                    continue
                 if info['name'] == 'PhysicGroup':
                     groups.append(owner)
                 elif info['name'] not in ('StaticLevelObjectWrap', 'LevelEntityComponent') and hierarchy != local_hierarchy:
@@ -767,7 +771,8 @@ class MemorySceneMap:
                    'unknown_entities': entity_unknown + live_stats['unknown'],
                    'discovery_unknown': discovery_unknown,
                    'managed_unknown': managed_unknown}
-        return {'quality': quality, 'terrain_state': 'ready' if terrain else 'unavailable',
+        return {'quality': quality, 'navigation_only': getattr(self, 'navigation_only', False),
+                'terrain_state': 'ready' if terrain else 'unavailable',
                 'navigation_reference': getattr(self, 'navigation_reference', None) if terrain else None,
                 'terrain_revision': 'main-terrain-v1' if terrain else None,
                 'schema': 'memory-scene-map-v1', 'state': 'ready', 'read_only': True,
@@ -786,3 +791,11 @@ class MemorySceneMap:
                     'handrails': sum(c.get('category') == 'handrail' for c in colliders),
                     'triggers_filtered': triggers, 'inactive_filtered': inactive,
                     'unsupported_colliders': unsupported, 'skipped': skipped}}
+
+class NavigationSceneMap(MemorySceneMap):
+    """Guidance-only reader: same collision/scope checks, no resource markers.
+
+    Each instance owns its metadata and process handle; never shared with the
+    full map reader. Optional world/terrain verification remains unchanged.
+    """
+    navigation_only = True

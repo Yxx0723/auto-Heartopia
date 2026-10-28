@@ -236,3 +236,11 @@ class RecordingPosition:
 
     def __getattr__(self, name):
         return getattr(self.reader, name)
+
+class GuidanceRecordingPosition(RecordingPosition):
+    """Record the semantic playback read without bypassing attached checks."""
+    def read_for_playback(self):
+        method = getattr(self.reader, 'read_for_playback', self.reader.read)
+        position = method()
+        self.history.sample(position, self.monotonic())
+        return position
