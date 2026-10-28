@@ -226,12 +226,22 @@ class PointPlayback:
         def report(state, message, **extra):
             extra.pop('waypoint', None)  # Never highlight an unrelated saved point.
             extra.update(waypoint_count=0, navigation_mode='native_guidance')
+            if navigation_worker is not None:
+                pause_metrics = getattr(navigation_worker, 'pause_navigation_metrics', None)
+                metrics = getattr(navigation_worker, 'navigation_metrics', None)
+                if state in ('paused', 'finished', 'stopped', 'error') and callable(pause_metrics):
+                    pause_metrics()
+                if callable(metrics):
+                    extra['navigation_supply'] = metrics(pid)
             self.update(state, message, **extra)
+        class Feedback:
+            def update(self, state, message, **extra):
+                report(state, message, **extra)
         try:
             window = self.window_factory(pid)
             size = window.size()
             device = self.device_factory(window)
-            controls = self.controls_factory(window, size, self, self.stop_event.is_set)
+            controls = self.controls_factory(window, size, Feedback(), self.stop_event.is_set)
             controls.start()
             provider = lambda:self.scene_provider(pid)
             if self.guidance_scene_factory is not None:

@@ -45,10 +45,14 @@ class SceneMetadata:
     def __init__(self, read, domain):
         self.read, self.domain, self.cache = read, domain, {}
         self.stage = 'metadata'
+        self.read_counts = None
+        self.batch_object_headers = False
 
     def data(self, address, size):
         if not 0x10000 <= address < 0x7fffffffffff or not 0 < size <= policy.COORD_SCENE_MAX_BYTES:
             raise ValueError('场景数据范围无效')
+        if self.read_counts is not None:
+            self.read_counts[self.stage] = self.read_counts.get(self.stage, 0) + 1
         value = self.read(address, size)
         if value is None or len(value) != size:
             raise ValueError('场景数据正在变化')
@@ -112,9 +116,21 @@ class SceneMetadata:
 
     def obj(self, address):
         vtable = self.pointer(address)
-        if self.pointer(vtable + 16) != self.domain:
+        if not self.batch_object_headers:
+            if self.pointer(vtable + 16) != self.domain:
+                raise ValueError('场景对象归属已变化')
+            return self.cls(self.pointer(vtable))
+        # Read the same type/domain witness together, every time. Never cache
+        # object identity or mutable payload across queries or scans.
+        raw = self.data(vtable, 24)
+        klass, domain = struct.unpack_from('<Q', raw)[0], struct.unpack_from('<Q', raw, 16)[0]
+        if domain and not 0x10000 <= domain < 0x7fffffffffff:
+            raise SceneReadIssue('场景引用无效', kind='invalid_reference', stage=self.stage)
+        if domain != self.domain:
             raise ValueError('场景对象归属已变化')
-        return self.cls(self.pointer(vtable))
+        if klass and not 0x10000 <= klass < 0x7fffffffffff:
+            raise SceneReadIssue('场景引用无效', kind='invalid_reference', stage=self.stage)
+        return self.cls(klass)
 
     def field(self, klass, name):
         seen = set()
@@ -543,11 +559,22 @@ class MemorySceneMap:
 
     def snapshot(self):
         self.read_budget = RecoveryBudget(cancelled=getattr(self, 'cancelled', lambda: False))
+        self.phase_times, self.phase_name, self.phase_started = {}, 'registry', time.monotonic()
+        self.meta.read_counts = {} if getattr(self, 'navigation_only', False) else None
         try:
             return self._snapshot()
         finally:
+            self._phase(None)
             self.last_read_stats = {'retries': self.read_budget.retries,
-                                    'extra_seconds': self.read_budget.spent}
+                                    'extra_seconds': self.read_budget.spent,
+                                    'phases': dict(self.phase_times),
+                                    'managed_remote_reads': self.meta.read_counts}
+
+    def _phase(self, name):
+        now = time.monotonic()
+        if self.phase_name is not None:
+            self.phase_times[self.phase_name] = self.phase_times.get(self.phase_name, 0.) + max(0., now-self.phase_started)
+        self.phase_name, self.phase_started = name, now
 
     def _snapshot(self):
         scan_started = time.monotonic()
@@ -580,6 +607,7 @@ class MemorySceneMap:
             return result
 
         meta.stage = 'entities'
+        self._phase('entities')
         objects, groups, models, observations = [], [], [], []
         discovery_unknown = 0
         for hierarchy in entries:
@@ -631,12 +659,14 @@ class MemorySceneMap:
                 if not discovered:
                     discovery_unknown += 1
         entity_unknown = skipped
+        self._phase('barriers')
         try:
             barriers = self.barrier_owners()
             barrier_state = 'ready'
         except ValueError:
             barriers, barrier_state = {}, 'unavailable'
         meta.stage = 'managed_collisions'
+        self._phase('managed_collisions')
         colliders, visited, streams, triggers, inactive, unsupported = [], set(), set(), 0, 0, 0
         managed_unknown = 0
         for group in groups:
@@ -700,6 +730,7 @@ class MemorySceneMap:
         managed_observed_to = time.monotonic()
         self.read_budget.check()
         native_observed_from = time.monotonic()
+        self._phase('native_collisions')
         world_stats, world_state = {}, 'unavailable'
         try:
             if self.native is None:
@@ -713,11 +744,13 @@ class MemorySceneMap:
             # world's obstacles. The worker retries with a fresh snapshot.
             self.native = None
         native_observed_to = time.monotonic()
+        self._phase('scope_validation')
         self.read_budget.check()
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
             raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
         meta.stage = 'optional_definitions'
+        self._phase('optional_definitions')
         global_resources, global_state = [], 'unavailable'
         try:
             if getattr(self, 'global_minerals', None) is None:
@@ -748,6 +781,7 @@ class MemorySceneMap:
         colliders.extend(terrain)
         # Slow geometry work must not publish the object list from its beginning.
         transforms.clear()
+        self._phase('final_validation')
         meta.stage = 'registry_end'
         active = self.read_registry(registry, hierarchy_class, local_hierarchy, self.read_budget)
         live_stats = {'unknown': 0}
@@ -799,3 +833,7 @@ class NavigationSceneMap(MemorySceneMap):
     full map reader. Optional world/terrain verification remains unchanged.
     """
     navigation_only = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.meta.batch_object_headers = True

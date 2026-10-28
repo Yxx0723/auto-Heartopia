@@ -7,6 +7,7 @@ from utils.core.scene_read import issue_summary, navigation_quality_valid
 from utils.ui.playback_diagnostics import PlaybackDiagnostics
 import json
 from utils.core.scene_display_cache import SceneDisplayCache
+from utils.core.navigation_supply import SnapshotSupply
 from utils.drivers.mono_scene import MemorySceneMap
 
 
@@ -24,6 +25,7 @@ class SceneMapWorker:
         self.retry_delay = policy.COORD_MONITOR_RETRY_SECONDS
         self.diagnostics = PlaybackDiagnostics(diagnostics_path) if diagnostics_path is not None else None
         self.last_diagnostic_at = None
+        self.supply = SnapshotSupply()
 
     def start(self):
         self.thread = threading.Thread(target=self.run, name='scene-map-reader', daemon=True)
@@ -44,6 +46,7 @@ class SceneMapWorker:
             self.retry_delay = policy.COORD_MONITOR_RETRY_SECONDS
             self.latest_scene, self.latest_at = None, None
             self.history = SceneDisplayCache()
+            self.supply = SnapshotSupply()
             self.take_latest()
             self.wake.set()
             return True
@@ -59,6 +62,8 @@ class SceneMapWorker:
     def navigation_snapshot(self, pid):
         """Independent of the UI queue and category/visibility switches."""
         with self.lock:
+            if pid == self.pid and not self.stop.is_set():
+                self.supply.start(self.clock())
             if pid != self.pid or self.stop.is_set() or self.latest_scene is None \
                     or self.latest_scene.get('state') != 'ready' \
                     or self.latest_scene.get('world_state', 'ready') != 'ready' \
@@ -66,6 +71,14 @@ class SceneMapWorker:
                     or not navigation_quality_valid(self.latest_scene, self.clock()):
                 return None
             return self.latest_scene
+
+    def navigation_metrics(self, pid):
+        with self.lock:
+            return self.supply.metrics(self.clock()) if pid == self.pid else None
+
+    def pause_navigation_metrics(self):
+        with self.lock:
+            self.supply.pause(self.clock())
 
     def close_reader(self):
         if self.reader is not None:
@@ -97,10 +110,13 @@ class SceneMapWorker:
                 self.close_reader()
             result = {'state': 'error', 'objects': [], 'colliders': [],
                       'message': '场景正在更新，稍后自动重试', 'diagnostic': str(exc), 'issue': issue}
-        now = self.clock()
+        read_finished = self.clock()
         if isinstance(self.reader, MemorySceneMap):
             read_stats = self.reader.last_read_stats
-        display = history.update(result, now)
+        # Dedicated guidance readers never feed a map display. Do not run the
+        # display cache or its geometry processing before navigation publication.
+        display = result if result.get('navigation_only') is True else history.update(result, read_finished)
+        now = self.clock()
         with self.lock:
             if generation != self.generation or self.stop.is_set():
                 return False
@@ -109,10 +125,13 @@ class SceneMapWorker:
                 policy.COORD_SCENE_TRANSIENT_RETRY_SECONDS * 2**min(self.transient_failures-1, 5))
                 if transient else policy.COORD_MONITOR_RETRY_SECONDS)
             self.latest_scene, self.latest_at = result, now
+            self.supply.publish(result, now, max(0., now-started))
+            supply_metrics = self.supply.metrics(now)
+            navigation_usable = self.supply.deadline is not None
             self.take_latest()
             # A clear request during this read must not republish old history.
             self.results.put_nowait(display if self.history is history else result)
-        if self.diagnostics and (result.get('issue') or self.last_diagnostic_at is None
+        if self.diagnostics and (result.get('issue') or not navigation_usable or self.last_diagnostic_at is None
                 or now-self.last_diagnostic_at >= policy.COORD_SCENE_DIAGNOSTIC_SECONDS):
             self.last_diagnostic_at = now
             quality = result.get('quality')
@@ -120,10 +139,12 @@ class SceneMapWorker:
             parts = parts if isinstance(parts, dict) else {}
             self.diagnostics.write({'state': result.get('state'), 'message': json.dumps({
                 'duration_seconds': max(0., now-started), 'recovery': read_stats,
+                'publication_seconds': max(0., now-read_finished),
+                'supply': supply_metrics,
                 'issue': result.get('issue'), 'transient_failures': self.transient_failures,
                 'retry_delay': self.retry_delay,
                 'navigation_eligible': quality.get('navigation_eligible') if isinstance(quality, dict) else None,
-                'navigation_usable_now': navigation_quality_valid(result,now) if quality else False,
+                'navigation_usable_now': navigation_usable,
                 'navigation_only': result.get('navigation_only',False),
                 'part_ages': {key:max(0.,now-value['observed_from']) for key,value in parts.items()
                               if isinstance(value,dict) and type(value.get('observed_from')) in (int,float)},
@@ -146,9 +167,13 @@ class SceneMapWorker:
         finally:
             self.close_reader()
             if self.diagnostics:
+                with self.lock:
+                    metrics = self.supply.metrics(self.clock())
+                self.diagnostics.write({'state': 'supply_summary', 'message': json.dumps(metrics)})
                 self.diagnostics.close()
 
     def close(self):
+        self.pause_navigation_metrics()
         self.stop.set()
         self.wake.set()
         if self.thread:
