@@ -13,7 +13,8 @@ class Metadata:
         self.memory = bytearray(1000)
         self.memory[116] = 1
         self.memory[120:132] = struct.pack('<3f', 0, 0, 8)
-        self.fields = {'module': {'isNavigating': (16, 2), 'end': (20, 17)},
+        self.memory[140:148] = struct.pack('<Q',123)
+        self.fields = {'module': {'isNavigating': (16, 2), 'end': (20, 17), 'token': (40,11)},
                        'list': {'_size': (16, 8), '_version': (20, 8)}}
         self.references = {(100, 'realPathList'): 200, (100, '_path'): 300,
                            (200, '_items'): 400, (300, '_items'): 500}
@@ -86,6 +87,7 @@ def test_display_line_endpoint_gap_is_reported_not_mistaken_for_corruption():
 
 def test_inactive_guidance_does_not_read_unset_target_or_old_paths():
     r = reader();r.meta.memory[116] = 0
+    r.meta.memory[140:148] = bytes(8)
     r.meta.memory[120:132] = struct.pack('<3f', float('inf'), 0, 0)
     assert r.snapshot()['state'] == 'inactive'
 

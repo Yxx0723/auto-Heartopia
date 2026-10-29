@@ -138,14 +138,30 @@ class NativeGuidanceReader:
         info = m.obj(module)
         enabled = m.field(info['address'], 'isNavigating')
         target = m.field(info['address'], 'end')
+        tracking = m.field(info['address'], 'token')
         if enabled['code'] != 2 or target['code'] != 17 or enabled['flags'] & 16 or target['flags'] & 16 \
-                or not 16 <= enabled['offset'] < info['size'] or not 16 <= target['offset'] <= info['size']-12:
+                or not 16 <= enabled['offset'] < info['size'] or not 16 <= target['offset'] <= info['size']-12 \
+                or tracking['code'] != 11 or tracking['flags'] & 16 \
+                or not 16 <= tracking['offset'] <= info['size']-8:
             raise ValueError('游戏引导状态字段类型不符')
         def state():
-            return (m.data(module+enabled['offset'], 1), m.data(module+target['offset'], 12))
+            return (m.data(module+enabled['offset'], 1), m.data(module+target['offset'], 12),
+                    m.data(module+tracking['offset'], 8))
         before = state()
+        identity = struct.unpack('<Q',before[2])[0]
+        context = hashlib.sha256(json.dumps([self.memory.profile['game_assembly_sha256'],
+            self.memory.pid, self.memory.locator.domain, owner[0], module]).encode()).hexdigest()
+        scene_context = hashlib.sha256(json.dumps([self.memory.profile['game_assembly_sha256'],
+            self.memory.pid, self.memory.locator.domain, owner[0]]).encode()).hexdigest()
         if before[0] == b'\0':
-            return {'state': 'inactive', 'captured_at': self.clock()}
+            if state() != before or self._owner() != owner:
+                raise ValueError('游戏追踪身份正在更新')
+            if not identity:
+                return {'state': 'inactive', 'captured_at': self.clock()}
+            return {'state':'pending','context':context,'scene_context':scene_context,
+                    'tracking_id':str(identity),'captured_at':self.clock()}
+        if before[0] != b'\x01' or not identity:
+            raise ValueError('游戏追踪目标身份尚未确认')
         goal = struct.unpack('<3f', before[1])
         if not all(math.isfinite(v) and abs(v) <= 100000 for v in goal):
             raise ValueError('游戏尚未确认引导目标')
@@ -164,15 +180,39 @@ class NativeGuidanceReader:
             raise ValueError('游戏追踪目标或场景已变化')
         if len(chosen) < 2:
             raise ValueError('游戏地面引导路径尚未生成')
-        context = hashlib.sha256(json.dumps([self.memory.profile['game_assembly_sha256'],
-            self.memory.pid, self.memory.locator.domain, owner[0], module]).encode()).hexdigest()
         tokens = []
         for name, (obj, stamp, points) in paths.items():
             sampled = tuple(points[i] for i in sorted({0, len(points)//2, len(points)-1})) if full else points
             tokens.append((name, obj, stamp, sampled))
-        result = {'state': 'ready', 'context': context, 'target': goal,
+        result = {'state': 'ready', 'context': context, 'scene_context':scene_context,
+                  'target': goal, 'tracking_id':str(identity),
                   'path_token': hashlib.sha256(json.dumps(tokens).encode()).hexdigest(),
                   'captured_at': self.clock()}
         if full:
             result.update(path=chosen, target_gap_xz=math.hypot(chosen[-1][0]-goal[0], chosen[-1][2]-goal[2]))
         return result
+
+
+def probe_guidance_identity(profile):
+    """Read-only packaged-reader preflight. Never creates input controllers."""
+    from utils.drivers.coordinate_memory import ReadOnlyPosition
+    from utils.drivers.coordinate_process import find_game_processes
+    pids = find_game_processes()
+    if len(pids) != 1:
+        raise ValueError('预检需要唯一游戏进程')
+    memory = ReadOnlyPosition(pids[0],profile)
+    try:
+        reader = NativeGuidanceReader(memory)
+        full, status = reader.snapshot(), reader.status()
+        same = (full.get('state') == status.get('state') == 'ready'
+                and full['tracking_id'] == status['tracking_id']
+                and full['scene_context'] == status['scene_context'])
+        def summary(value):
+            result = {k:value[k] for k in ('state','context','scene_context','tracking_id','target','captured_at') if k in value}
+            if 'path' in value:
+                result['path_points'] = len(value['path'])
+            return result
+        return {'state':'ready' if same else 'unconfirmed','read_only':True,'input_sent':False,
+                'full':summary(full),'status':summary(status)}
+    finally:
+        memory.close()

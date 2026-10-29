@@ -3,7 +3,7 @@ import math
 
 from utils.core import thresholds as policy
 from utils.core.guidance_path import (GuidanceCursor, GuidanceRouteCache, GuidanceRecovery,
-                                      validate_guidance_state)
+                                      validate_guidance_state, guidance_identity, guidance_identity_change)
 from utils.core.coordinate_navigation import NavigationWait
 from utils.core.guidance_navigation import GuidanceNavigator
 from utils.drivers.windows_input import PreciseClock
@@ -30,8 +30,7 @@ class GuidanceFollower(_Follower):
         self.status_source = getattr(reader, 'guidance_status', None)
         self.cache = prepared or GuidanceRouteCache()
         self.refresh_at = 0.
-        self.accepted = ((self.cache.route['context'], self.cache.route['target'])
-                         if self.cache.route else None)
+        self.accepted = guidance_identity(self.cache.route) if self.cache.route else None
         self.cursor = None
         self.in_recovery = False
         self.episode_arc = None
@@ -48,17 +47,16 @@ class GuidanceFollower(_Follower):
                 raise _GuidanceRetry(str(exc)) from exc
 
     def same_target(self, snapshot):
-        return self.accepted is not None and snapshot['context'] == self.accepted[0] \
-            and math.dist(snapshot['target'], self.accepted[1]) <= policy.COORD_REACH_RADIUS
+        return self.accepted is not None and guidance_identity_change(self.accepted,guidance_identity(snapshot)) is None
 
-    def pause_guidance(self, message):
+    def pause_guidance(self, message, **evidence):
         self.release()
         pause = getattr(self.controls, 'pause_with_reason', None)
         if callable(pause):
             pause(message+' · F6确认后继续 · F9停止')
         else:
             self.controls.pause()
-        self.report('paused', message+' · F6确认后继续 · F9停止', navigation_path=[])
+        self.report('paused', message+' · F6确认后继续 · F9停止', navigation_path=[], **evidence)
         raise _Paused()
 
     def refresh_guidance(self, position, force=False):
@@ -74,9 +72,25 @@ class GuidanceFollower(_Follower):
         while True:
             if isinstance(raw, dict) and raw.get('state') == 'inactive':
                 raise _GuidanceEnded()
+            if isinstance(raw, dict) and raw.get('state') == 'pending':
+                raise ValueError('追踪仍存在，引导路线正在更新，稍后自动重试')
             validate_guidance_state(raw, self.clock.monotonic())
-            if self.accepted is not None and not self.same_target(raw):
-                self.pause_guidance('追踪目标或场景已改变，请按 F6 重新确认')
+            current_identity = guidance_identity(raw)
+            reason = guidance_identity_change(self.accepted,current_identity) if self.accepted is not None else None
+            if reason:
+                messages = {'scene_context_changed':'游戏引导场景身份已改变，请按 F6 重新确认',
+                            'tracking_id_changed':'游戏追踪目标已改变，请按 F6 重新确认',
+                            'tracking_identity_unavailable':'追踪目标身份未确认，请按 F6 重新确认',
+                            'legacy_target_coordinates_changed':'目标坐标已改变，当前来源缺少追踪 ID，请按 F6 重新确认'}
+                old_target = self.cache.route['target'] if self.cache.route else self.accepted[1]
+                self.pause_guidance(messages[reason],guidance_pause_reason=reason,
+                    previous_context=self.cache.route['context'] if self.cache.route else self.accepted[0],
+                    observed_context=raw['context'],previous_scene_context=self.accepted[0],
+                    observed_scene_context=current_identity[0],
+                    previous_tracking_id=self.accepted[2],tracking_id=current_identity[2],
+                    previous_target=list(old_target),observed_target=list(raw['target']),
+                    target_delta_xz=math.hypot(raw['target'][0]-old_target[0],raw['target'][2]-old_target[2]),
+                    target_delta_y=raw['target'][1]-old_target[1])
             if full:
                 self.cache.install(raw, self.clock.monotonic())
                 break
@@ -93,9 +107,10 @@ class GuidanceFollower(_Follower):
             self.navigator.invalidate()
             self.report('guidance_path', '完整游戏引导路线已缓存 · F6暂停 · F9停止',
                         navigation_path=list(cursor.path), target=list(cursor.target),
-                        guidance_revision=cursor.revision, navigation_mode='native_guidance')
+                        guidance_revision=cursor.revision, navigation_mode='native_guidance',
+                        tracking_id=snapshot.get('tracking_id'))
         if self.accepted is None:
-            self.accepted = (snapshot['context'], snapshot['target'])
+            self.accepted = guidance_identity(snapshot)
         self.read_stats['read_seconds'] = max(0.,self.clock.monotonic()-started)
         self.read_stats['route_points'] = len(snapshot['path'])
         self.refresh_at = self.clock.monotonic()+policy.COORD_GUIDANCE_REFRESH_SECONDS
@@ -243,7 +258,7 @@ class GuidanceFollower(_Follower):
                     self.report('playing', f'跟随缓存引导 · 路线剩余约 {aim["remaining"]:.1f} 单位 · F6暂停 · F9停止',
                                 navigation_path=list(self.cursor.path), target=list(self.cursor.target),
                                 guidance_revision=self.cursor.revision, navigation_mode='native_guidance',
-                                guidance_metrics=dict(self.read_stats))
+                                guidance_metrics=dict(self.read_stats),tracking_id=snapshot.get('tracking_id'))
                     self.last_report = self.clock.monotonic()
                 self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
             except _GuidanceRetry:

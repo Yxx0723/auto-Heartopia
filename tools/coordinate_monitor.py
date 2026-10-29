@@ -7,6 +7,17 @@ if __name__ == '__main__':
     import multiprocessing
     multiprocessing.freeze_support()
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    if len(sys.argv) == 3 and sys.argv[1] == '--check-guidance-identity-output':
+        import json
+        from utils.drivers.native_guidance import probe_guidance_identity
+        from utils.core.scene_read import issue_summary
+        resources = Path(sys._MEIPASS)/'monitor' if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1]/'webui/coordinate-monitor'
+        try:
+            result = probe_guidance_identity(resources/'profile.json')
+        except (OSError,ValueError) as exc:
+            result = {'state':'error','read_only':True,'input_sent':False,'issue':issue_summary(exc)}
+        Path(sys.argv[2]).write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
+        raise SystemExit(0 if result.get('state')=='ready' else 1)
     if len(sys.argv) == 3 and sys.argv[1] == '--check-navigation-process-output':
         import json
         from utils.drivers.navigation_process import probe_navigation_process

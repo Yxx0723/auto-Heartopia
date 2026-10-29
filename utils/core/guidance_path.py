@@ -8,6 +8,32 @@ from utils.core import thresholds as policy
 from utils.core.coordinate_route import valid_position
 
 
+def guidance_tracking_id(value):
+    if 'tracking_id' not in value:
+        return None  # Legacy injected readers only; production always supplies it.
+    token = value['tracking_id']
+    if not isinstance(token, str) or not 1 <= len(token) <= 20 or not token.isascii() \
+            or not token.isdecimal() or not 0 < int(token) < 1 << 64 or str(int(token)) != token:
+        raise ValueError('游戏追踪目标 ID 无效')
+    return token
+
+
+def guidance_identity(value):
+    return value.get('scene_context',value['context']), tuple(value['target']), guidance_tracking_id(value)
+
+
+def guidance_identity_change(previous, current):
+    if previous[0] != current[0]:
+        return 'scene_context_changed'
+    if previous[2] is not None or current[2] is not None:
+        if previous[2] is None or current[2] is None:
+            return 'tracking_identity_unavailable'
+        return None if previous[2] == current[2] else 'tracking_id_changed'
+    if math.dist(previous[1], current[1]) > policy.COORD_REACH_RADIUS:
+        return 'legacy_target_coordinates_changed'
+    return None
+
+
 def validate_guidance_state(value, now):
     if not isinstance(value, dict) or value.get('state') != 'ready':
         raise ValueError('游戏地面引导尚未开启或正在更新')
@@ -18,6 +44,10 @@ def validate_guidance_state(value, now):
     context, target = value.get('context'), value.get('target')
     if not isinstance(context, str) or not 1 <= len(context) <= 256 or not valid_position(target):
         raise ValueError('游戏引导目标或场景身份无效')
+    if 'scene_context' in value and (not isinstance(value['scene_context'],str)
+                                   or not 1 <= len(value['scene_context']) <= 256):
+        raise ValueError('游戏引导场景身份无效')
+    guidance_tracking_id(value)
     return context, tuple(target)
 
 
@@ -35,7 +65,14 @@ def validate_guidance(value, now):
     if len(points) < 2:
         raise ValueError('游戏引导路径没有有效长度')
     result = {'context': context, 'target': tuple(target), 'path': tuple(points), 'captured_at': stamp}
-    result['revision'] = hashlib.sha256(json.dumps([context, target, points], separators=(',', ':'),
+    if 'scene_context' in value:
+        result['scene_context'] = value['scene_context']
+    identity = guidance_tracking_id(value)
+    payload = [context, target, points]
+    if identity is not None:
+        result['tracking_id'] = identity
+        payload.insert(1, identity)
+    result['revision'] = hashlib.sha256(json.dumps(payload, separators=(',', ':'),
                                                  allow_nan=False).encode()).hexdigest()
     return result
 
@@ -54,8 +91,14 @@ class GuidanceRouteCache:
         return changed
 
     def confirm(self, value, now):
-        context, target = validate_guidance_state(value, now)
-        if self.route is None or context != self.route['context'] or math.dist(target,self.route['target']) > policy.COORD_REACH_RADIUS:
+        _, target = validate_guidance_state(value, now)
+        if self.route is None or guidance_identity_change(guidance_identity(self.route),guidance_identity(value)):
+            return False
+        if value['context'] != self.route['context']:
+            return False  # Rebuilt module: same scene/task still needs a fresh full payload.
+        if guidance_tracking_id(value) is not None and target != self.route['target']:
+            # Same task, new coordinates: require a fresh full route before
+            # changing steering/cursor state, even if its sampled token matches.
             return False
         if not self.token or value.get('path_token') != self.token:
             return False
