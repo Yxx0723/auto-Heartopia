@@ -11,6 +11,7 @@ from utils.core.terrain_map import verified_terrain_walls
 from utils.core.navigation_reference import default_reference_path, load_reference
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.native_world_collisions import NativeWorldCollisions
+from utils.drivers.managed_box_lifecycle import DetachedBoxGuard
 from utils.drivers.global_minerals import GlobalMineralReader
 from utils.drivers.house_entrances import HouseEntranceReader
 from utils.drivers.special_gather import SPECIAL_COMPONENTS, special_gather
@@ -565,6 +566,7 @@ class MemorySceneMap:
         self.meta.stage = 'registry_start'
         self.read_failure = None
         self.managed_details = []
+        self.detached_stats = {}
         try:
             return self._snapshot()
         except (OSError, ValueError) as exc:
@@ -578,7 +580,8 @@ class MemorySceneMap:
                                     'phases': dict(self.phase_times),
                                     'managed_remote_reads': self.meta.read_counts,
                                     'failure': self.read_failure,
-                                    'managed_issues': self.managed_details}
+                                    'managed_issues': self.managed_details,
+                                    'detached_boxes': dict(self.detached_stats)}
 
     def _managed_step(self, stage, operation):
         self.meta.stage = stage
@@ -696,6 +699,10 @@ class MemorySceneMap:
         colliders, visited, streams, triggers, inactive, unsupported = [], set(), set(), 0, 0, 0
         managed_unknown = 0
         managed_details, stream_anchors = self.managed_details, {}
+        if not hasattr(self, '_detached_image_cache'):
+            self._detached_image_cache = {}
+        detached = DetachedBoxGuard(meta,self.read_budget.check,self._detached_image_cache)
+        self.detached_stats = detached.stats
 
         def changed():
             raise SceneReadIssue('托管碰撞场景或归属已变化', kind='scope_changed', stage=meta.stage)
@@ -767,6 +774,12 @@ class MemorySceneMap:
                             return list(struct.unpack('<' + 'f' * count, meta.data(start + offset, count * 4)))
                         owner = meta.ref(collider, '_group')
                         hierarchy = meta.ref(collider, '_hierarchy')
+                        if not owner and not hierarchy:
+                            if detached.consider(collider,info,stream):
+                                continue
+                            issue = SceneReadIssue('碰撞体父变换未确认',kind='unknown',stage='managed_shape_data')
+                            issue.code = 'missing_transform_owner'
+                            raise issue
                         if not hierarchy:
                             hierarchy = self.group_hierarchy(owner, owners)
                         if not hierarchy or hierarchy == local_hierarchy:
@@ -785,6 +798,8 @@ class MemorySceneMap:
                             geometry['source'] = 'verified-solid-collider'
                         colliders.append(geometry)
                     except ValueError as exc:
+                        if isinstance(exc, SceneReadIssue) and exc.kind in ('cancelled','scope_changed'):
+                            raise
                         skipped += 1
                         managed_unknown += 1
                         if len(managed_details) < 16:
@@ -851,6 +866,13 @@ class MemorySceneMap:
         live_stats = {'unknown': 0}
         objects = self.refresh_live_objects(observations, registry, world, active=active,
                                             stats=live_stats, check=self.read_budget.check)
+        meta.stage = 'managed_detached_validation'
+        changed_detached = detached.revalidate()
+        managed_unknown += changed_detached
+        if changed_detached and len(managed_details) < 16:
+            managed_details.append({'kind':'unknown','stage':meta.stage,'retryable':False,
+                                    'scope_verified':False,'code':'detached_state_changed'})
+        meta.stage = 'registry_end'
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
             raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
@@ -889,6 +911,7 @@ class MemorySceneMap:
                     'fences': sum(c.get('category') == 'fence' for c in colliders),
                     'handrails': sum(c.get('category') == 'handrail' for c in colliders),
                     'triggers_filtered': triggers, 'inactive_filtered': inactive,
+                    'detached_boxes_filtered': detached.stats['confirmed'],
                     'unsupported_colliders': unsupported, 'skipped': skipped}}
 
 class NavigationSceneMap(MemorySceneMap):
