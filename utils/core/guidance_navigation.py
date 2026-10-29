@@ -1,4 +1,7 @@
 """Guidance-only scheduling over the existing local collision planner."""
+import math
+
+from utils.core import thresholds as policy
 from utils.core.coordinate_navigation import LocalNavigator, polygon_distance
 
 
@@ -13,10 +16,73 @@ class GuidanceNavigator(LocalNavigator):
         self.scene_provider = lambda:snapshot
         self.before_refresh = before_plan
         try:
-            return super().next_target(position,target,check,before_plan)
+            # The parent still owns scene validation, map invalidation and every
+            # A*/shortcut collision check. No stale alternate-point cache exists.
+            self._refresh_obstacles(position, target)
+            alternate = self._shore_target(position, target, check)
+            selected = target if alternate is None else alternate
+            result = super().next_target(position, selected, check, before_plan)
+            if alternate is not None:
+                self.last_decision = {**self.last_decision,
+                    'kind': 'guidance_shore_alternative',
+                    'requested_target': tuple(target), 'local_target': alternate,
+                    'offset': math.dist(alternate, target)}
+            return result
         finally:
             self.scene_provider = provider
             self.before_refresh = lambda:None
+
+    def _shore_target(self, position, target, check):
+        """Only replace a dry local aim rejected by approximate water padding.
+
+        This is a steering helper, never a destination/arrival edit. A candidate
+        must also have a fully checked direct approach in the current map; no
+        water, bridge, physical collider or learned-risk rule is relaxed.
+        """
+        obstacles = self.obstacles
+        a, b = (position[0], position[2]), (target[0], target[2])
+        if obstacles.clear(b, b) or not obstacles.clear(a, a):
+            return None
+        rejecting = []
+        for index in obstacles.bins.get((math.floor(b[0]/4), math.floor(b[1]/4)), ()):
+            check()
+            polygon, clearance = obstacles.polygons[index]
+            gap = polygon_distance(b, b, polygon)
+            if gap > clearance:
+                continue
+            # Actual water and any non-water rejection keep the original wait.
+            if index not in obstacles.water_polygon_ids or gap <= 1e-6:
+                return None
+            rejecting.append((polygon, clearance))
+        if not rejecting:
+            return None
+        candidates = set()
+        for polygon, clearance in rejecting:
+            for c, d in zip(polygon, polygon[1:]+polygon[:1]):
+                check()
+                dx, dz = d[0]-c[0], d[1]-c[1]
+                length = dx*dx+dz*dz
+                if not length:
+                    continue
+                t = max(0., min(1., ((b[0]-c[0])*dx+(b[1]-c[1])*dz)/length))
+                nearest = (c[0]+t*dx, c[1]+t*dz)
+                gap = math.dist(b, nearest)
+                if not 1e-6 < gap <= clearance:
+                    continue
+                scale = (clearance+policy.COORD_GUIDANCE_SHORE_MARGIN)/gap
+                point = (nearest[0]+(b[0]-nearest[0])*scale,
+                         nearest[1]+(b[1]-nearest[1])*scale)
+                if math.dist(point, b) <= policy.COORD_GUIDANCE_CORRIDOR_RADIUS:
+                    candidates.add(point)
+        for point in sorted(candidates, key=lambda p:(math.dist(p,b), p))[
+                :policy.COORD_GUIDANCE_SHORE_MAX_CANDIDATES]:
+            check()
+            if math.dist(a, point) <= 1e-6:
+                continue  # Never turn the current position into an arrival.
+            if obstacles.clear(point, point) and obstacles.clear(a, point) \
+                    and not obstacles.risk_cost(a, point):
+                return (point[0], target[1], point[1])
+        return None
 
     def _build_map(self, *args):
         self.before_refresh()  # Also catches a height-layer or risk-driven rebuild.

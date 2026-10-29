@@ -548,3 +548,8 @@ COORD_NAV_PROCESS_TIMEOUT_SECONDS = 8.
 COORD_NAV_PROCESS_POLL_SECONDS = .02
 COORD_NAV_PROCESS_CLOSE_SECONDS = .3
 COORD_NAV_PROCESS_MAX_BYTES = 64 * 1024 * 1024
+
+# Guidance shore projection: engineering search/numeric bounds, NOT measured
+# character abilities. Existing water clearance and guide corridor stay intact.
+COORD_GUIDANCE_SHORE_MARGIN = .01
+COORD_GUIDANCE_SHORE_MAX_CANDIDATES = 16

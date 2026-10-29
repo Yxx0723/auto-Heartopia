@@ -14,6 +14,8 @@ from utils.core import thresholds
 
 #: 常量名 -> 搬运时的原值。新增阈值时在这里补一行。
 GOLDEN_VALUES = {
+    'COORD_GUIDANCE_SHORE_MARGIN': .01,
+    'COORD_GUIDANCE_SHORE_MAX_CANDIDATES': 16,
     'COORD_NAV_PROCESS_TIMEOUT_SECONDS': 8.,
     'COORD_NAV_PROCESS_POLL_SECONDS': .02,
     'COORD_NAV_PROCESS_CLOSE_SECONDS': .3,
