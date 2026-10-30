@@ -8,6 +8,7 @@ from utils.ui.playback_diagnostics import PlaybackDiagnostics
 import json
 from utils.core.scene_display_cache import SceneDisplayCache
 from utils.core.navigation_supply import SnapshotSupply
+from utils.core.prepared_navigation import PreparedNavigationScene
 from utils.drivers.mono_scene import MemorySceneMap
 
 
@@ -122,6 +123,18 @@ class SceneMapWorker:
             result = {'state': 'error', 'objects': [], 'colliders': [],
                       'message': '场景正在更新，稍后自动重试', 'diagnostic': str(exc), 'issue': issue}
         read_finished = self.clock()
+        geometry_preparation_seconds = 0.
+        if result.get('navigation_only') is True and result.get('state') == 'ready' \
+                and navigation_quality_valid(result, read_finished):
+            preparation_started = self.clock()
+            try:
+                result = PreparedNavigationScene(result)
+            except (ValueError, TypeError, KeyError, MemoryError):
+                # Discard this entire publication, never reuse old geometry or
+                # move forward with a partially prepared signature.
+                result = {'state': 'error', 'objects': [], 'colliders': [],
+                          'message': '导航几何准备失败，等待重新读取', 'navigation_only': True}
+            geometry_preparation_seconds = max(0., self.clock()-preparation_started)
         if isinstance(self.reader, MemorySceneMap):
             read_stats = self.reader.last_read_stats
         # Dedicated guidance readers never feed a map display. Do not run the
@@ -153,6 +166,7 @@ class SceneMapWorker:
             self.diagnostics.write({'state': result.get('state'), 'message': json.dumps({
                 'duration_seconds': max(0., now-started), 'recovery': read_stats,
                 'publication_seconds': max(0., now-read_finished),
+                'geometry_preparation_seconds': geometry_preparation_seconds,
                 'supply': supply_metrics,
                 'issue': result.get('issue'), 'transient_failures': self.transient_failures,
                 'fresh_restart_failures': self.fresh_failures, 'fresh_restart': fresh_retry,

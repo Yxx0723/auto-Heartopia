@@ -6,6 +6,7 @@ from utils.core import thresholds as policy
 from utils.core.navigation_supply import navigation_expiry
 from utils.core.guidance_anchor import GuidanceAnchor
 from utils.core.local_collision_scope import local_collision_scene
+from utils.core.prepared_navigation import PreparedNavigationScene
 from utils.core.coordinate_navigation import LocalNavigator, NavigationWait, polygon_distance
 
 
@@ -51,6 +52,15 @@ class GuidanceNavigator(LocalNavigator):
             return callback()
         finally:
             self.release_reason = previous
+
+    def _geometry_signature(self, scene):
+        started = time.perf_counter()
+        prepared = scene.prepared_signature() if isinstance(scene, PreparedNavigationScene) else None
+        result = prepared if prepared is not None else super()._geometry_signature(scene)
+        if self._in_call:
+            self._timings['signature_seconds'] = time.perf_counter()-started
+            self._timings['signature_prepared'] = prepared is not None
+        return result
 
     def _refresh_key(self, position):
         return (id(self.scene), id(self.obstacles), tuple(position), self.risks.revision,

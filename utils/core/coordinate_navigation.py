@@ -540,6 +540,9 @@ class LocalNavigator:
         return ObstacleMap(scene, position, [p for _, p in self.probes], self.water_areas,
                            goal=target, search_radius=radius, risks=self.risks)
 
+    def _geometry_signature(self, scene):
+        return scene_geometry_signature(scene)
+
     def _refresh_obstacles(self, position, target):
         scene = self.scene_provider()
         if not scene or scene.get('state') != 'ready':
@@ -565,7 +568,7 @@ class LocalNavigator:
         if len(probes) != len(self.probes):
             self.obstacles = None
         self.probes = probes
-        signature = scene_geometry_signature(scene) if scene is not self.scene \
+        signature = self._geometry_signature(scene) if scene is not self.scene \
             or reference_revision != self.reference_revision else self.scene_signature
         self.reference_revision = reference_revision
         changed = signature != self.scene_signature

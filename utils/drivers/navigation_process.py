@@ -166,6 +166,8 @@ class NavigationProcessScene(MemorySceneMap):
 def probe_navigation_process(profile):
     """Frozen-package read-only preflight. No Tk, window activation or input."""
     from utils.drivers.coordinate_process import find_game_processes
+    from utils.core.prepared_navigation import PreparedNavigationScene
+    from utils.core.coordinate_navigation import scene_geometry_signature
     pids = find_game_processes()
     if len(pids) != 1:
         raise ValueError('预检需要唯一游戏进程')
@@ -173,8 +175,15 @@ def probe_navigation_process(profile):
     result = {'read_only':True, 'input_sent':False, 'parent_pid':os.getpid(), 'scans':[]}
     try:
         for _ in range(4):
-            start = time.monotonic();scene = source.snapshot();now = time.monotonic()
-            result['scans'].append({'seconds':now-start,
+            start = time.monotonic();scene = source.snapshot();read_finished = time.monotonic()
+            prepared = PreparedNavigationScene(scene)
+            prepared_at = time.monotonic()
+            same = prepared.prepared_signature() == scene_geometry_signature(scene)
+            if not same:
+                raise ValueError('Prepared geometry signature mismatch')
+            now = time.monotonic()
+            result['scans'].append({'seconds':now-start, 'read_seconds':read_finished-start,
+                'geometry_preparation_seconds':prepared_at-read_finished, 'prepared_signature_equal':same,
                 'usable':navigation_quality_valid(scene,now), 'colliders':len(scene.get('colliders',[])),
                 'remaining_ttl':min(scene['quality']['parts'][key]['observed_from']
                     for key in ('managed_collisions','native_collisions'))+policy.COORD_NAV_SCENE_MAX_AGE-now,

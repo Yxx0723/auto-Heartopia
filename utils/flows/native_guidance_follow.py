@@ -220,8 +220,36 @@ class GuidanceFollower(_Follower):
             self.last_report = now
         self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
 
+    def wait_next_cycle(self, started):
+        if self.input_lease is None:
+            # Injected/legacy pulse planners release before each plan. Retain
+            # their original movement dwell rather than creating zero-length pulses.
+            self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
+            return
+        now = self.clock.monotonic()
+        work = max(0., now-started)
+        remaining = max(0., policy.COORD_SAMPLE_SECONDS-work)
+        self.read_stats['cycle_work_seconds'] = work
+        self.read_stats['cycle_overruns'] = self.read_stats.get('cycle_overruns', 0)+int(
+            work >= policy.COORD_SAMPLE_SECONDS)
+        if self.input_lease:
+            with self.input_lease.lock:
+                deadline = self.input_lease.deadline
+            if deadline is not None and remaining > 0:
+                available = max(0., deadline-now-policy.COORD_GUIDANCE_INPUT_POLL_SECONDS)
+                if available < min(remaining, policy.COORD_GUIDANCE_INPUT_POLL_SECONDS):
+                    self.release('cycle_budget_exhausted')
+                else:
+                    remaining = min(remaining, available)
+            self.input_lease.set_phase('sample_sleep')
+        self.read_stats['cycle_sleep_requested'] = remaining
+        if remaining:
+            self.clock.sleep(math.nextafter(now+remaining, math.inf)-now)
+        self.read_stats['cycle_sleep_actual'] = max(0., self.clock.monotonic()-now)
+
     def follow_guidance(self):
         while True:
+            cycle_started = self.clock.monotonic()
             try:
                 self.guard()
                 self.travelling = False
@@ -369,8 +397,7 @@ class GuidanceFollower(_Follower):
                                 guidance_metrics=dict(self.read_stats),tracking_id=snapshot.get('tracking_id'),
                                 input_continuity=self.input_lease.metrics() if self.input_lease else None)
                     self.last_report = self.clock.monotonic()
-                if self.input_lease: self.input_lease.set_phase('sample_sleep')
-                self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
+                self.wait_next_cycle(cycle_started)
             except _GuidanceRetry:
                 self.release('guidance_retry')
                 # The normal guidance stage owns the retry deadline and can

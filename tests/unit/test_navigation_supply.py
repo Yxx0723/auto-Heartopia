@@ -71,7 +71,11 @@ def test_navigation_only_publication_does_not_build_display_history():
     worker = SceneMapWorker('profile', factory=lambda *a: reader, clock=lambda: 1.)
     worker.set_pid(7); worker.history.update = Mock(side_effect=AssertionError('display work'))
     worker.poll_once()
-    assert worker.navigation_snapshot(7) is reader.snapshot.return_value
+    from utils.core.prepared_navigation import PreparedNavigationScene
+    published = worker.navigation_snapshot(7)
+    assert isinstance(published, PreparedNavigationScene)
+    assert published['quality'] == reader.snapshot.return_value['quality']
+    assert tuple(published['colliders']) == tuple(reader.snapshot.return_value['colliders'])
     worker.close()
 
 
