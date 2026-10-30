@@ -7,6 +7,7 @@ from utils.core.guidance_path import (GuidanceCursor, GuidanceRouteCache, Guidan
 from utils.core.coordinate_navigation import NavigationWait
 from utils.core.guidance_navigation import GuidanceNavigator
 from utils.drivers.windows_input import PreciseClock
+from utils.drivers.guidance_input_lease import GuidanceInputLease
 from utils.flows.coordinate_player import (_Follower, _Paused, _Stopped, _SkipPoint, _RecoveryLimit)
 
 
@@ -36,8 +37,54 @@ class GuidanceFollower(_Follower):
         self.episode_arc = None
         self.waiting = GuidanceRecovery()
         self.read_stats = {'full_reads': 0, 'status_reads': 0}
+        self.input_lease = GuidanceInputLease(device, controls, window, list(size), clock.monotonic) \
+            if isinstance(navigator, GuidanceNavigator) else None
+        self.move_deadline = float('-inf')
+
+    def report(self, state, message, **extra):
+        if self.input_lease is not None:
+            extra.setdefault('input_continuity', self.input_lease.metrics())
+        return super().report(state, message, **extra)
+
+    def release(self, reason='controller'):
+        if self.input_lease is None:
+            return super().release()
+        self.input_lease.release(reason, active=bool(self.keys))
+        self.keys.clear()
+
+    def planning_release(self):
+        self.release('planning_or_map_change')
+
+    def set_keys(self, keys):
+        if self.input_lease is None or self.in_recovery:
+            return super().set_keys(keys)
+        with self.input_lease.lock:
+            self.guard()
+            if self.clock.monotonic() >= self.move_deadline:
+                self.release('permit_not_ready')
+                raise _GuidanceRetry('移动许可到期，重新核对')
+            try:
+                self.input_lease.arm(self.move_deadline)
+            except ValueError as exc:
+                self.release('permit_not_ready')
+                raise _GuidanceRetry(str(exc)) from exc
+            try:
+                return super().set_keys(keys)
+            except BaseException:
+                self.release('input_exception')
+                raise
 
     def guard(self):
+        if self.input_lease is not None:
+            self.input_lease.poll()
+            with self.input_lease.lock:
+                if self.input_lease.error:
+                    raise OSError('独立按键释放失败') from self.input_lease.error
+                if self.input_lease.tripped:
+                    self.keys.clear()
+                    self.input_lease.tripped = False
+                    self.cache.healthy_at = None
+                    raise _GuidanceRetry('移动许可已撤销，重新核对')
         super().guard()
         if self.in_recovery and self.clock.monotonic() >= self.refresh_at:
             try:
@@ -50,7 +97,7 @@ class GuidanceFollower(_Follower):
         return self.accepted is not None and guidance_identity_change(self.accepted,guidance_identity(snapshot)) is None
 
     def pause_guidance(self, message, **evidence):
-        self.release()
+        self.release('guidance_pause')
         pause = getattr(self.controls, 'pause_with_reason', None)
         if callable(pause):
             pause(message+' · F6确认后继续 · F9停止')
@@ -63,7 +110,10 @@ class GuidanceFollower(_Follower):
         now = self.clock.monotonic()
         if not force and now < self.refresh_at:
             return self.cache.require_healthy(now)
-        self.release()  # No input held during memory reads or route replacement.
+        if self.input_lease is None:
+            self.release()  # Keep legacy/injected planner behavior.
+        # A read never renews the existing short movement permit. The independent
+        # watchdog releases keys if a synchronous read blocks beyond that permit.
         started = now
         full = self.cache.route is None or not self.cache.token or not callable(self.status_source) \
             or now-self.cache.loaded_at >= policy.COORD_GUIDANCE_AUDIT_SECONDS
@@ -102,6 +152,7 @@ class GuidanceFollower(_Follower):
         if self.cursor is None or self.cursor.revision != snapshot['revision']:
             # Construct fully before publishing the new cursor. Reconnect near
             # the current position, never resume a historical start index.
+            self.release('guidance_route_changed')
             cursor = GuidanceCursor(snapshot, position)
             self.cursor = cursor
             self.navigator.invalidate()
@@ -117,7 +168,7 @@ class GuidanceFollower(_Follower):
         return snapshot
 
     def wait_for_input_data(self, stage, exc):
-        self.release()
+        self.release('wait_'+stage)
         if stage == 'guidance':
             self.cache.healthy_at = None
             self.refresh_at = 0.
@@ -152,7 +203,7 @@ class GuidanceFollower(_Follower):
                     self.waiting.passed('direction')
                     self.direction_source = 'memory'
                     if aim['arrived']:
-                        self.release()
+                        self.release('arrived')
                         return {'arrived': True, 'target_distance': aim['target_distance'],
                                 'reason': '已到游戏引导线末端附近，未执行交互'}
                     stage = 'scene'
@@ -164,7 +215,7 @@ class GuidanceFollower(_Follower):
                     try:
                         try:
                             target = self.navigator.next_target(position, aim['position'], check=self.guard,
-                                                                before_plan=self.release)
+                                                                before_plan=self.planning_release)
                         except NavigationWait as original:
                             if original.reason != 'no_path' or not isinstance(self.navigator, GuidanceNavigator):
                                 raise
@@ -178,7 +229,7 @@ class GuidanceFollower(_Follower):
                                     continue
                                 try:
                                     target = self.navigator.next_target(position,later['position'],check=self.guard,
-                                                                        before_plan=self.release)
+                                                                        before_plan=self.planning_release)
                                 except NavigationWait as retry:
                                     if retry.reason != 'no_path':raise
                                     continue
@@ -213,7 +264,7 @@ class GuidanceFollower(_Follower):
                     self.cache.require_healthy(self.clock.monotonic())
                     self.waiting.ready()
                 except (OSError, ValueError, TypeError, NavigationWait) as exc:
-                    self.release()
+                    self.release('invalid_'+stage)
                     if isinstance(exc,NavigationWait) and exc.reason != 'scene':
                         stage = 'path'
                         if self.clock.monotonic()-self.last_report>=.5:
@@ -253,22 +304,33 @@ class GuidanceFollower(_Follower):
                     self.navigator.invalidate()
                     continue
                 travel = max(.15, self.calibration_speed*policy.COORD_SAMPLE_SECONDS*2)
+                if self.input_lease is not None:
+                    now = self.clock.monotonic()
+                    expiry = self.navigator.collision_deadline(now)
+                    if expiry is None:
+                        raise _GuidanceRetry('碰撞许可已失效')
+                    self.move_deadline = min(
+                        self.position_at+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS,
+                        self.cache.healthy_at+policy.COORD_GUIDANCE_MAX_AGE, expiry,
+                        self.position_at+math.dist(position, target)/max(3., self.calibration_speed)*.5)
                 self.set_keys(self.navigator.steering_keys(position, target, basis, travel))
                 if self.clock.monotonic()-self.last_report >= .5:
                     self.report('playing', f'跟随缓存引导 · 路线剩余约 {aim["remaining"]:.1f} 单位 · F6暂停 · F9停止',
                                 navigation_path=list(self.cursor.path), target=list(self.cursor.target),
                                 guidance_revision=self.cursor.revision, navigation_mode='native_guidance',
-                                guidance_metrics=dict(self.read_stats),tracking_id=snapshot.get('tracking_id'))
+                                guidance_metrics=dict(self.read_stats),tracking_id=snapshot.get('tracking_id'),
+                                input_continuity=self.input_lease.metrics() if self.input_lease else None)
                     self.last_report = self.clock.monotonic()
                 self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
             except _GuidanceRetry:
+                self.release('guidance_retry')
                 # The normal guidance stage owns the retry deadline and can
                 # safely enter the outer pause handler on its next iteration.
                 self.cache.healthy_at = None
                 self.refresh_at = 0.
                 self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
             except _GuidanceEnded:
-                self.release()
+                self.release('guidance_ended')
                 return {'arrived': False, 'reason': '游戏追踪已结束，已停止跟随'}
             except _Paused:
                 self.release()
@@ -288,7 +350,7 @@ class GuidanceFollower(_Follower):
 
 
 def drive_guidance(size, reader_factory, device, window, controls, report, clock=PreciseClock, *, navigator):
-    reader = None
+    reader = follower = None
     try:
         if not isinstance(size, (list, tuple)) or len(size) != 2 \
                 or any(type(v) is not int or not 64 <= v <= 16384 for v in size):
@@ -321,12 +383,19 @@ def drive_guidance(size, reader_factory, device, window, controls, report, clock
             if running:
                 break
             clock.sleep(.01)
-        return GuidanceFollower(size, reader, device, window, controls, report, clock, navigator, prepared).follow_guidance()
+        follower = GuidanceFollower(size, reader, device, window, controls, report, clock, navigator, prepared)
+        if follower.input_lease is not None:
+            follower.input_lease.start()
+        return follower.follow_guidance()
     except _Stopped:
         return {'arrived': False, 'reason': '已停止，按键已释放'}
     finally:
         try:
-            device.release_all()
+            if follower is not None and follower.input_lease is not None:
+                follower.input_lease.close()
         finally:
-            if reader:
-                reader.close()
+            try:
+                device.release_all()
+            finally:
+                if reader:
+                    reader.close()

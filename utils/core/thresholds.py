@@ -553,3 +553,8 @@ COORD_NAV_PROCESS_MAX_BYTES = 64 * 1024 * 1024
 # character abilities. Existing water clearance and guide corridor stay intact.
 COORD_GUIDANCE_SHORE_MARGIN = .01
 COORD_GUIDANCE_SHORE_MAX_CANDIDATES = 16
+
+# Guidance input watchdog: engineering budgets, not measured game abilities.
+# Does not extend guidance/collision TTL; travel and source deadlines may be shorter.
+COORD_GUIDANCE_INPUT_LEASE_SECONDS = .15
+COORD_GUIDANCE_INPUT_POLL_SECONDS = .01

@@ -1,18 +1,32 @@
 """Guidance-only scheduling over the existing local collision planner."""
 import math
+import time
 
 from utils.core import thresholds as policy
+from utils.core.navigation_supply import navigation_expiry
 from utils.core.coordinate_navigation import LocalNavigator, polygon_distance
 
 
 class GuidanceNavigator(LocalNavigator):
     continuous_guidance = True
 
+    def __init__(self, *args, scene_clock=time.monotonic, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.scene_clock = scene_clock
+
+    def collision_deadline(self, control_now):
+        # Scene workers use monotonic; Windows Python 3.12 perf_counter has a
+        # different origin. Transfer a remaining DURATION, never a raw timestamp.
+        if self.scene is not None and 'quality' not in self.scene:
+            return control_now+policy.COORD_NAV_SCENE_MAX_AGE  # Legacy fixtures.
+        source_now = self.scene_clock()
+        expiry = navigation_expiry(self.scene, source_now)
+        return None if expiry is None else control_now+max(0., expiry-source_now)
+
+
     def next_target(self, position, target, check=lambda:None, before_plan=lambda:None):
         provider = self.scene_provider
         snapshot = provider()
-        if snapshot is not self.scene:
-            before_plan()  # Signature work / scene invalidation may be expensive.
         self.scene_provider = lambda:snapshot
         self.before_refresh = before_plan
         try:
