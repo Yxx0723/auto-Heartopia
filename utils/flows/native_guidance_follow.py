@@ -43,24 +43,32 @@ class GuidanceFollower(_Follower):
         self.anchor_rejoin_reported = None
 
     def read(self, force=False):
+        previous = self.input_lease.set_phase('position_read') if self.input_lease else None
         started = self.clock.monotonic()
         try:
             return super().read(force)
         finally:
             self.read_stats['position_read_seconds'] = max(0., self.clock.monotonic()-started)
+            if self.input_lease: self.input_lease.set_phase(previous)
 
     def read_direction(self):
+        previous = self.input_lease.set_phase('direction_read') if self.input_lease else None
         started = self.clock.monotonic()
         try:
             return super().read_direction()
         finally:
             self.read_stats['direction_read_seconds'] = max(0., self.clock.monotonic()-started)
+            if self.input_lease: self.input_lease.set_phase(previous)
 
     def report(self, state, message, **extra):
         if self.input_lease is not None:
             extra.setdefault('input_continuity', self.input_lease.metrics())
             extra.setdefault('navigation_timings', dict(self.navigator.last_timings))
-        return super().report(state, message, **extra)
+        previous = self.input_lease.set_phase('report') if self.input_lease else None
+        try:
+            return super().report(state, message, **extra)
+        finally:
+            if self.input_lease: self.input_lease.set_phase(previous)
 
     def release(self, reason='controller'):
         if self.input_lease is None:
@@ -129,6 +137,13 @@ class GuidanceFollower(_Follower):
         raise _Paused()
 
     def refresh_guidance(self, position, force=False):
+        previous = self.input_lease.set_phase('guidance_read') if self.input_lease else None
+        try:
+            return self._refresh_guidance(position, force)
+        finally:
+            if self.input_lease: self.input_lease.set_phase(previous)
+
+    def _refresh_guidance(self, position, force=False):
         now = self.clock.monotonic()
         if not force and now < self.refresh_at:
             return self.cache.require_healthy(now)
@@ -234,6 +249,7 @@ class GuidanceFollower(_Follower):
                     planned_revision = self.cursor.revision
                     started = self.clock.monotonic()
                     self.navigation_waiting = True
+                    if self.input_lease: self.input_lease.set_phase('navigation')
                     try:
                         try:
                             if isinstance(self.navigator, GuidanceNavigator):
@@ -266,6 +282,7 @@ class GuidanceFollower(_Follower):
                                 raise original
                     finally:
                         self.navigation_waiting = False
+                        if self.input_lease: self.input_lease.set_phase('control')
                         self.last_tick = self.clock.monotonic()
                     if isinstance(self.navigator, GuidanceNavigator) and self.navigator.anchor_rejoin:
                         token = (self.cursor.revision, self.navigator.anchor.point)
@@ -352,6 +369,7 @@ class GuidanceFollower(_Follower):
                                 guidance_metrics=dict(self.read_stats),tracking_id=snapshot.get('tracking_id'),
                                 input_continuity=self.input_lease.metrics() if self.input_lease else None)
                     self.last_report = self.clock.monotonic()
+                if self.input_lease: self.input_lease.set_phase('sample_sleep')
                 self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
             except _GuidanceRetry:
                 self.release('guidance_retry')

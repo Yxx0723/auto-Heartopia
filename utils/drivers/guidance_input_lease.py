@@ -22,10 +22,18 @@ class GuidanceInputLease:
         self.tripped = False
         self.error = None
         self.counts, self.recent = Counter(), deque(maxlen=32)
+        self.phase, self.phase_at = 'idle', self.clock()
         self.observed_held = False
         self.gap_since = self.gap_reason = None
         self.gaps = deque(maxlen=32)
         self.gap_count, self.gap_total, self.gap_max = 0, 0., 0.
+
+    def set_phase(self, phase):
+        # Attribution only. Updating phase must never renew an input permit.
+        with self.lock:
+            previous = self.phase
+            self.phase, self.phase_at = phase, self.clock()
+            return previous
 
     def start(self):
         self.thread = threading.Thread(target=self._run, name='guidance-input-watchdog', daemon=True)
@@ -49,7 +57,8 @@ class GuidanceInputLease:
             if held:
                 self.counts[reason] += 1
                 released_at = self.clock()
-                self.recent.append({'at': released_at, 'reason': reason})
+                self.recent.append({'at': released_at, 'reason': reason, 'phase': self.phase,
+                                    'phase_seconds': max(0., released_at-self.phase_at)})
                 if self.gap_since is None:
                     self.gap_since, self.gap_reason = released_at, reason
 
@@ -103,6 +112,7 @@ class GuidanceInputLease:
             return {'release_counts': dict(self.counts), 'recent_releases': list(self.recent),
                     'resumed_gap_count': self.gap_count, 'resumed_gap_total_seconds': self.gap_total,
                     'longest_resumed_gap_seconds': self.gap_max, 'recent_input_gaps': list(self.gaps),
+                    'current_phase': self.phase,
                     'current_release_seconds': max(0., self.clock()-self.gap_since) if self.gap_since is not None else 0.,
                     'permit_remaining': max(0., self.deadline-self.clock()) if self.deadline is not None else 0.}
 

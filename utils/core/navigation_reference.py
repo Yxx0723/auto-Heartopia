@@ -179,6 +179,14 @@ class ReferenceRisks:
             kind, vertices = layer['kind'], layer['vertices']
             for face in layer['triangles']:
                 points = [vertices[i] for i in face]
+                # Height clipping stays inside the original triangle. Even a
+                # degenerate projected hull expands by at most sqrt(2)*agent
+                # clearance per axis; 2*clearance is a conservative broad phase.
+                margin = 2*policy.COORD_NAV_CLEARANCE
+                xs, zs = [p[0] for p in points], [p[2] for p in points]
+                if max(xs)+margin < left or min(xs)-margin > right \
+                        or max(zs)+margin < low or min(zs)-margin > high:
+                    continue
                 ys = [p[1] for p in points]
                 lower, upper = (height-policy.COORD_REFERENCE_WATER_HEIGHT_BAND,
                                 height+policy.COORD_REFERENCE_WATER_HEIGHT_BAND) if kind == 'water' else (

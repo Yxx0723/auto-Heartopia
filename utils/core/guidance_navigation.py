@@ -5,6 +5,7 @@ import time
 from utils.core import thresholds as policy
 from utils.core.navigation_supply import navigation_expiry
 from utils.core.guidance_anchor import GuidanceAnchor
+from utils.core.local_collision_scope import local_collision_scene
 from utils.core.coordinate_navigation import LocalNavigator, NavigationWait, polygon_distance
 
 
@@ -174,7 +175,12 @@ class GuidanceNavigator(LocalNavigator):
         self._release_for('map_build', self.before_refresh)
         started = time.perf_counter()
         try:
-            return super()._build_map(*args)
+            scene, position, target, radius = args
+            local = local_collision_scene(scene, position, radius)
+            if self._in_call:
+                self._timings['map_input_colliders'] = len(scene.get('colliders', ()))
+                self._timings['map_local_colliders'] = len(local['colliders'])
+            return super()._build_map(local, position, target, radius)
         finally:
             if self._in_call:
                 self._timings['map_build_seconds'] += time.perf_counter()-started
