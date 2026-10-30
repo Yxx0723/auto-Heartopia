@@ -4,7 +4,8 @@ import time
 
 from utils.core import thresholds as policy
 from utils.core.navigation_supply import navigation_expiry
-from utils.core.coordinate_navigation import LocalNavigator, polygon_distance
+from utils.core.guidance_anchor import GuidanceAnchor
+from utils.core.coordinate_navigation import LocalNavigator, NavigationWait, polygon_distance
 
 
 class GuidanceNavigator(LocalNavigator):
@@ -13,6 +14,61 @@ class GuidanceNavigator(LocalNavigator):
     def __init__(self, *args, scene_clock=time.monotonic, **kwargs):
         super().__init__(*args, **kwargs)
         self.scene_clock = scene_clock
+        self.anchor = GuidanceAnchor()
+        self._refresh_ticket = None
+        self._in_call = False
+        self.before_refresh = lambda: None
+        self.release_reason = 'planning_or_map_change'
+        self.last_timings = {}
+        self.anchor_rejoin = False
+        self._timings = {}
+
+    def invalidate(self):
+        super().invalidate()
+        if hasattr(self, 'anchor'):
+            self.anchor.reset()
+        self._refresh_ticket = None
+
+    def follow_target(self, cursor, position, aim, check, before_plan):
+        selected = self.anchor.choose(cursor, position, aim)
+        self.anchor_rejoin = False
+        try:
+            result = self.next_target(position, selected, check, before_plan)
+            original = (aim['position'][0], aim['position'][2])
+            self.anchor_rejoin = selected != aim['position'] and not self.obstacles.clear(original, original)
+            return result
+        except NavigationWait as exc:
+            if exc.reason != 'no_path' or selected == aim['position']:
+                raise
+            self.anchor.reject(cursor)
+            return self.next_target(position, aim['position'], check, before_plan)
+
+    def _release_for(self, reason, callback):
+        previous = self.release_reason
+        self.release_reason = reason
+        try:
+            return callback()
+        finally:
+            self.release_reason = previous
+
+    def _refresh_key(self, position):
+        return (id(self.scene), id(self.obstacles), tuple(position), self.risks.revision,
+                self.reference_revision)
+
+    def _refresh_obstacles(self, position, target):
+        if self._in_call and self._refresh_ticket == self._refresh_key(position) \
+                and self.obstacles is not None and not self.probes and not self.risks.count \
+                and getattr(self, 'slope', None) is None and getattr(self, 'coverage', None) is None:
+            self.obstacles.set_goal(target)  # Goal-specific padding is never cached.
+            self._timings['refresh_reuses'] += 1
+            return self.clock()
+        started = time.perf_counter()
+        result = super()._refresh_obstacles(position, target)
+        if self._in_call:
+            self._timings['refresh_seconds'] += time.perf_counter()-started
+            self._timings['refresh_calls'] += 1
+            self._refresh_ticket = self._refresh_key(position)
+        return result
 
     def collision_deadline(self, control_now):
         # Scene workers use monotonic; Windows Python 3.12 perf_counter has a
@@ -29,13 +85,24 @@ class GuidanceNavigator(LocalNavigator):
         snapshot = provider()
         self.scene_provider = lambda:snapshot
         self.before_refresh = before_plan
+        self._refresh_ticket = None
+        self._in_call = True
+        self._timings = {'refresh_seconds': 0., 'refresh_calls': 0, 'refresh_reuses': 0,
+                         'map_build_seconds': 0., 'shore_seconds': 0., 'plan_and_path_seconds': 0.}
+        started = time.perf_counter()
+        plans_before, maps_before = self.stats['plans'], self.stats['map_builds']
         try:
             # The parent still owns scene validation, map invalidation and every
             # A*/shortcut collision check. No stale alternate-point cache exists.
             self._refresh_obstacles(position, target)
+            phase = time.perf_counter()
             alternate = self._shore_target(position, target, check)
+            self._timings['shore_seconds'] += time.perf_counter()-phase
             selected = target if alternate is None else alternate
-            result = super().next_target(position, selected, check, before_plan)
+            phase = time.perf_counter()
+            result = super().next_target(position, selected, check,
+                lambda: self._release_for('path_search', before_plan))
+            self._timings['plan_and_path_seconds'] += time.perf_counter()-phase
             if alternate is not None:
                 self.last_decision = {**self.last_decision,
                     'kind': 'guidance_shore_alternative',
@@ -43,6 +110,11 @@ class GuidanceNavigator(LocalNavigator):
                     'offset': math.dist(alternate, target)}
             return result
         finally:
+            self._in_call = False
+            self._refresh_ticket = None  # Never reused by a later control tick.
+            self.last_timings = {**self._timings, 'total_seconds': time.perf_counter()-started,
+                'plans': self.stats['plans']-plans_before, 'map_builds': self.stats['map_builds']-maps_before,
+                'anchor_changes': self.anchor.changes}
             self.scene_provider = provider
             self.before_refresh = lambda:None
 
@@ -99,8 +171,13 @@ class GuidanceNavigator(LocalNavigator):
         return None
 
     def _build_map(self, *args):
-        self.before_refresh()  # Also catches a height-layer or risk-driven rebuild.
-        return super()._build_map(*args)
+        self._release_for('map_build', self.before_refresh)
+        started = time.perf_counter()
+        try:
+            return super()._build_map(*args)
+        finally:
+            if self._in_call:
+                self._timings['map_build_seconds'] += time.perf_counter()-started
 
     def explain(self, position, target):
         """Bounded diagnostics; observations, not inferred physical contact."""

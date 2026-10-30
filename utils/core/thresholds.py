@@ -558,3 +558,7 @@ COORD_GUIDANCE_SHORE_MAX_CANDIDATES = 16
 # Does not extend guidance/collision TTL; travel and source deadlines may be shorter.
 COORD_GUIDANCE_INPUT_LEASE_SECONDS = .15
 COORD_GUIDANCE_INPUT_POLL_SECONDS = .01
+
+# Guidance anchor engineering bounds, not measured character abilities.
+COORD_GUIDANCE_ANCHOR_LOOKAHEAD = 3.
+COORD_GUIDANCE_ANCHOR_CHORD_ERROR = .25

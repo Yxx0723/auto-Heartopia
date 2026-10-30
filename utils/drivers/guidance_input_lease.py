@@ -22,6 +22,10 @@ class GuidanceInputLease:
         self.tripped = False
         self.error = None
         self.counts, self.recent = Counter(), deque(maxlen=32)
+        self.observed_held = False
+        self.gap_since = self.gap_reason = None
+        self.gaps = deque(maxlen=32)
+        self.gap_count, self.gap_total, self.gap_max = 0, 0., 0.
 
     def start(self):
         self.thread = threading.Thread(target=self._run, name='guidance-input-watchdog', daemon=True)
@@ -36,12 +40,36 @@ class GuidanceInputLease:
 
     def release(self, reason, active=False):
         with self.lock:
-            held = self.deadline is not None or active
+            actual = getattr(self.device, 'keys', None)
+            held = bool(actual) if isinstance(actual, (set, frozenset)) else \
+                self.deadline is not None or (active and not self.tripped)
             self.deadline = None
             self.device.release_all()
+            self.observed_held = False
             if held:
                 self.counts[reason] += 1
-                self.recent.append({'at': self.clock(), 'reason': reason})
+                released_at = self.clock()
+                self.recent.append({'at': released_at, 'reason': reason})
+                if self.gap_since is None:
+                    self.gap_since, self.gap_reason = released_at, reason
+
+    def observe_keys(self, keys):
+        """Called after successful input, under the same serialized input lock."""
+        with self.lock:
+            if not keys and self.observed_held and self.gap_since is None:
+                self.gap_since, self.gap_reason = self.clock(), 'steering_idle'
+                self.counts['steering_idle'] += 1
+                self.recent.append({'at': self.gap_since, 'reason': 'steering_idle'})
+            self.observed_held = bool(keys)
+            if keys and self.gap_since is not None:
+                now = self.clock()
+                gap = max(0., now-self.gap_since)
+                self.gaps.append({'released_at': self.gap_since, 'resumed_at': now,
+                                  'seconds': gap, 'reason': self.gap_reason})
+                self.gap_count += 1
+                self.gap_total += gap
+                self.gap_max = max(self.gap_max, gap)
+                self.gap_since = self.gap_reason = None
 
     def poll(self):
         with self.lock:
@@ -73,6 +101,9 @@ class GuidanceInputLease:
     def metrics(self):
         with self.lock:
             return {'release_counts': dict(self.counts), 'recent_releases': list(self.recent),
+                    'resumed_gap_count': self.gap_count, 'resumed_gap_total_seconds': self.gap_total,
+                    'longest_resumed_gap_seconds': self.gap_max, 'recent_input_gaps': list(self.gaps),
+                    'current_release_seconds': max(0., self.clock()-self.gap_since) if self.gap_since is not None else 0.,
                     'permit_remaining': max(0., self.deadline-self.clock()) if self.deadline is not None else 0.}
 
     def close(self):

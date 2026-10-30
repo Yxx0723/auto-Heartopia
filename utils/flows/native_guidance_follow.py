@@ -40,10 +40,26 @@ class GuidanceFollower(_Follower):
         self.input_lease = GuidanceInputLease(device, controls, window, list(size), clock.monotonic) \
             if isinstance(navigator, GuidanceNavigator) else None
         self.move_deadline = float('-inf')
+        self.anchor_rejoin_reported = None
+
+    def read(self, force=False):
+        started = self.clock.monotonic()
+        try:
+            return super().read(force)
+        finally:
+            self.read_stats['position_read_seconds'] = max(0., self.clock.monotonic()-started)
+
+    def read_direction(self):
+        started = self.clock.monotonic()
+        try:
+            return super().read_direction()
+        finally:
+            self.read_stats['direction_read_seconds'] = max(0., self.clock.monotonic()-started)
 
     def report(self, state, message, **extra):
         if self.input_lease is not None:
             extra.setdefault('input_continuity', self.input_lease.metrics())
+            extra.setdefault('navigation_timings', dict(self.navigator.last_timings))
         return super().report(state, message, **extra)
 
     def release(self, reason='controller'):
@@ -53,11 +69,15 @@ class GuidanceFollower(_Follower):
         self.keys.clear()
 
     def planning_release(self):
-        self.release('planning_or_map_change')
+        self.release(getattr(self.navigator, 'release_reason', 'planning_or_map_change'))
 
     def set_keys(self, keys):
-        if self.input_lease is None or self.in_recovery:
+        if self.input_lease is None:
             return super().set_keys(keys)
+        if self.in_recovery:
+            result = super().set_keys(keys)
+            self.input_lease.observe_keys(self.keys)
+            return result
         with self.input_lease.lock:
             self.guard()
             if self.clock.monotonic() >= self.move_deadline:
@@ -69,7 +89,9 @@ class GuidanceFollower(_Follower):
                 self.release('permit_not_ready')
                 raise _GuidanceRetry(str(exc)) from exc
             try:
-                return super().set_keys(keys)
+                result = super().set_keys(keys)
+                self.input_lease.observe_keys(self.keys)
+                return result
             except BaseException:
                 self.release('input_exception')
                 raise
@@ -214,8 +236,12 @@ class GuidanceFollower(_Follower):
                     self.navigation_waiting = True
                     try:
                         try:
-                            target = self.navigator.next_target(position, aim['position'], check=self.guard,
-                                                                before_plan=self.planning_release)
+                            if isinstance(self.navigator, GuidanceNavigator):
+                                target = self.navigator.follow_target(self.cursor, position, aim, self.guard,
+                                                                      self.planning_release)
+                            else:
+                                target = self.navigator.next_target(position, aim['position'], check=self.guard,
+                                                                    before_plan=self.planning_release)
                         except NavigationWait as original:
                             if original.reason != 'no_path' or not isinstance(self.navigator, GuidanceNavigator):
                                 raise
@@ -241,6 +267,11 @@ class GuidanceFollower(_Follower):
                     finally:
                         self.navigation_waiting = False
                         self.last_tick = self.clock.monotonic()
+                    if isinstance(self.navigator, GuidanceNavigator) and self.navigator.anchor_rejoin:
+                        token = (self.cursor.revision, self.navigator.anchor.point)
+                        if token != self.anchor_rejoin_reported:
+                            self.anchor_rejoin_reported = token
+                            self.report('guidance_rejoin', '已通过碰撞检查，接入前方引导线', guidance_rejoin=True)
                     self.waiting.passed('scene')
                     self.read_stats['plan_seconds'] = max(0.,self.clock.monotonic()-started)
                     stage = 'guidance'
