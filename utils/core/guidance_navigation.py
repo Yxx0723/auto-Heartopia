@@ -8,6 +8,7 @@ from utils.core.guidance_anchor import GuidanceAnchor
 from utils.core.local_collision_scope import local_collision_scene
 from utils.core.prepared_navigation import PreparedNavigationScene
 from utils.core.coordinate_navigation import LocalNavigator, NavigationWait, polygon_distance
+from utils.core.coordinate_route import direction_keys, key_vector
 
 
 class GuidanceNavigator(LocalNavigator):
@@ -24,11 +25,67 @@ class GuidanceNavigator(LocalNavigator):
         self.last_timings = {}
         self.anchor_rejoin = False
         self._timings = {}
+        self._steering_state = None
+        self.steering_stats = {'switches': 0, 'holds': 0, 'rejected_holds': 0}
+
+    def reset_steering(self):
+        self._steering_state = None
+
+    def steering_keys(self, position, target, basis, travel, obstacles=None, reach_radius=None):
+        """Dampen adjacent-sector chatter, never keep an unchecked WASD pulse.
+
+        No timer forces a direction to be held. Significant turns, stale state,
+        a changed camera/layer/world, arrival and recovery use ordinary steering.
+        The parent rechecks physical clearance and learned risks even on a hold.
+        """
+        chosen = super().steering_keys(position, target, basis, travel,
+                                       obstacles=obstacles, reach_radius=reach_radius)
+        old = self._steering_state
+        if not chosen or self.obstacles is None or obstacles is not None:
+            self.reset_steering()
+            return chosen
+        now = self.clock()
+        context = ((self.scene or {}).get('cache_context'),
+                   (self.scene or {}).get('terrain_revision'))
+        camera = tuple(basis['forward'])
+        nominal = direction_keys(position, target, basis, reach_radius=reach_radius)
+
+        def angle(a, b):
+            return math.degrees(math.acos(max(-1., min(1.,
+                sum(x*y for x,y in zip(a,b))/math.hypot(*a)/math.hypot(*b)))))
+
+        if old is not None and chosen != old['keys'] and chosen == nominal \
+                and 0. <= now-old['at'] <= policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS \
+                and context == old['context'] \
+                and math.dist(position, old['position']) <= policy.COORD_DIRECTION_POSITION_TOLERANCE \
+                and abs(position[1]-old['height']) < policy.COORD_NAV_HEIGHT_REFRESH \
+                and angle(camera, old['camera']) <= policy.COORD_DIRECTION_STABLE_DEGREES:
+            previous = key_vector(old['keys'], basis)
+            proposed = key_vector(chosen, basis)
+            desired = (target[0]-position[0], target[2]-position[2])
+            if angle(previous, proposed) <= 45.+1e-6 \
+                    and angle(previous, desired) < 45. \
+                    and angle(previous, desired)-angle(proposed, desired) \
+                        <= policy.COORD_GUIDANCE_STEERING_HYSTERESIS_DEGREES:
+                checked = super().steering_keys(position, target, basis, travel,
+                    reach_radius=reach_radius, preferred_keys=old['keys'])
+                if checked == old['keys']:
+                    chosen = checked
+                    self.steering_stats['holds'] += 1
+                else:
+                    self.steering_stats['rejected_holds'] += 1
+        if old is not None and chosen != old['keys']:
+            self.steering_stats['switches'] += 1
+        self._steering_state = {'keys': frozenset(chosen), 'camera': camera,
+                               'position': tuple(position), 'height': position[1],
+                               'context': context, 'at': now}
+        return chosen
 
     def invalidate(self):
         super().invalidate()
         if hasattr(self, 'anchor'):
             self.anchor.reset()
+        self.reset_steering()
         self._refresh_ticket = None
 
     def follow_target(self, cursor, position, aim, check, before_plan):

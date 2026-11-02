@@ -64,6 +64,7 @@ class GuidanceFollower(_Follower):
         if self.input_lease is not None:
             extra.setdefault('input_continuity', self.input_lease.metrics())
             extra.setdefault('navigation_timings', dict(self.navigator.last_timings))
+            extra.setdefault('steering_metrics', dict(self.navigator.steering_stats))
         previous = self.input_lease.set_phase('report') if self.input_lease else None
         try:
             return super().report(state, message, **extra)
@@ -75,6 +76,7 @@ class GuidanceFollower(_Follower):
             return super().release()
         self.input_lease.release(reason, active=bool(self.keys))
         self.keys.clear()
+        self.navigator.reset_steering()
 
     def planning_release(self):
         self.release(getattr(self.navigator, 'release_reason', 'planning_or_map_change'))

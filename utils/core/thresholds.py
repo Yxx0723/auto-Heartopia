@@ -562,3 +562,7 @@ COORD_GUIDANCE_INPUT_POLL_SECONDS = .01
 # Guidance anchor engineering bounds, not measured character abilities.
 COORD_GUIDANCE_ANCHOR_LOOKAHEAD = 3.
 COORD_GUIDANCE_ANCHOR_CHORD_ERROR = .25
+
+# Guidance-only adjacent-sector deadband; engineering bound, NOT game-measured.
+# 6 degrees of score improvement means a 3-degree shift of a 22.5-degree boundary.
+COORD_GUIDANCE_STEERING_HYSTERESIS_DEGREES = 6.

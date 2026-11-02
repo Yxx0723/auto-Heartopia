@@ -397,7 +397,8 @@ class LocalNavigator:
         return self.obstacles is not None and self.obstacles.clear(
             (before[0], before[2]), (after[0], after[2]), escape=True)
 
-    def steering_keys(self, position, target, basis, travel, obstacles=None, reach_radius=None):
+    def steering_keys(self, position, target, basis, travel, obstacles=None, reach_radius=None,
+                      preferred_keys=None):
         """Check the actual quantized WASD pulse, not just the ideal path line.
 
         A tangent path beside a river can round to a diagonal into the water.
@@ -405,6 +406,11 @@ class LocalNavigator:
         Moving outward from existing padding uses the same escape rule as A*.
         """
         preferred = direction_keys(position, target, basis, reach_radius=reach_radius)
+        if preferred and preferred_keys is not None:
+            preferred_keys = set(preferred_keys)
+            if preferred_keys not in [set(k) for k in ('w', 'd', 's', 'a', 'wd', 'ds', 'sa', 'aw')]:
+                raise ValueError('Invalid preferred movement keys')
+            preferred = preferred_keys
         obstacles = self.obstacles if obstacles is None else obstacles
         if not preferred or obstacles is None:
             return preferred

@@ -14,6 +14,7 @@ from utils.core import thresholds
 
 #: 常量名 -> 搬运时的原值。新增阈值时在这里补一行。
 GOLDEN_VALUES = {
+    'COORD_GUIDANCE_STEERING_HYSTERESIS_DEGREES': 6.,
     'COORD_GUIDANCE_ANCHOR_LOOKAHEAD': 3.,
     'COORD_GUIDANCE_ANCHOR_CHORD_ERROR': .25,
     'COORD_GUIDANCE_INPUT_LEASE_SECONDS': .15,
