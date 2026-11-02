@@ -86,7 +86,7 @@ def scene_geometry_signature(scene):
 
 
 class ObstacleMap:
-    def __init__(self, scene, position, probes=(), water_areas=WATER_AREAS, goal=None, search_radius=None, risks=None):
+    def __init__(self, scene, position, probes=(), water_areas=WATER_AREAS, goal=None, search_radius=None, risks=None, respect_water=True):
         self.height = position[1]
         self.risks = risks
         self.origin = tuple(position)
@@ -96,7 +96,8 @@ class ObstacleMap:
         water_areas = tuple(water_areas)
         self.bridge_decks = detect_bridge_decks(scene, position, water_areas)
         self.reference_risks = ReferenceRisks(scene.get('navigation_reference'), self.height,
-                                              position, self.radius, self.bridge_decks)
+                                              position, self.radius, self.bridge_decks,
+                                              ignore_water=not respect_water)
         self.bridge_geometry_keys = {deck['key'] for deck in self.bridge_decks}
         self.water_polygon_ids = {}
         self.approachable, self.terminal_padding, self.goal = set(), {}, None
@@ -118,8 +119,9 @@ class ObstacleMap:
             segment = len(footprint) == 2
             candidates.append((footprint, policy.COORD_NAV_CLEARANCE,
                                box.get('category') != 'mountain' and not segment, None, segment))
-        candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False, water_index, False)
-                          for water_index, polygon in enumerate(water_areas))
+        if respect_water:
+            candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False, water_index, False)
+                              for water_index, polygon in enumerate(water_areas))
         candidates.extend((polygon, policy.COORD_PATROL_HOME_MARGIN, False, None, False)
                           for polygon in scene.get('navigation_exclusions', ()))
         candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False, None, False) for polygon in probes)
@@ -451,7 +453,8 @@ class LocalNavigator:
                 or not self.water_guard.covers_search(position, travel):
             walls = [box for box in scene.get('colliders', ())
                      if box.get('source') == 'verified-main-terrain-mesh']
-            self.water_guard = ObstacleMap({'colliders': walls}, position, water_areas=self.water_areas)
+            self.water_guard = ObstacleMap({'colliders': walls}, position, water_areas=self.water_areas,
+                                           respect_water=getattr(self, 'respect_water', True))
             self.water_guard_context = context
         return self.steering_keys(position, target, basis, travel, obstacles=self.water_guard)
 
@@ -544,7 +547,8 @@ class LocalNavigator:
     def _build_map(self, scene, position, target, radius):
         self.stats['map_builds'] += 1
         return ObstacleMap(scene, position, [p for _, p in self.probes], self.water_areas,
-                           goal=target, search_radius=radius, risks=self.risks)
+                           goal=target, search_radius=radius, risks=self.risks,
+                           respect_water=getattr(self, 'respect_water', True))
 
     def _geometry_signature(self, scene):
         return scene_geometry_signature(scene)

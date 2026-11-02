@@ -160,7 +160,7 @@ class ReferenceRisks:
     integrate unioned exposure lengths, so a split edge has the same cost.
     No source mesh is interpreted as proof of standing or ground continuity.
     """
-    def __init__(self, reference, height, origin, radius, bridge_decks=()):
+    def __init__(self, reference, height, origin, radius, bridge_decks=(), *, ignore_water=False):
         self.entries, self.bins, self.decks = [], {}, []
         self.cost_cache = {}
         self.size = policy.COORD_REFERENCE_BIN_SIZE
@@ -176,6 +176,8 @@ class ReferenceRisks:
         left, right = origin[0]-radius, origin[0]+radius
         low, high = origin[2]-radius, origin[2]+radius
         for layer in reference['layers']:
+            if ignore_water and layer['kind'] == 'water':
+                continue
             kind, vertices = layer['kind'], layer['vertices']
             for face in layer['triangles']:
                 points = [vertices[i] for i in face]

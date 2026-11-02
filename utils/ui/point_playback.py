@@ -255,7 +255,8 @@ class PointPlayback:
                 navigation_worker.start()
                 provider = lambda:navigation_worker.navigation_snapshot(pid)
             factory = GuidanceNavigator if self.navigator_factory is LocalNavigator else self.navigator_factory
-            navigator = factory(provider, clock=self.clock.monotonic)
+            options = {'respect_water': False} if factory is GuidanceNavigator else {}
+            navigator = factory(provider, clock=self.clock.monotonic, **options)
             result = self.guidance_runner(size,
                 lambda: self._recording_reader(pid, window.hwnd, guidance=True), device, window, controls,
                 report, clock=self.clock, navigator=navigator)

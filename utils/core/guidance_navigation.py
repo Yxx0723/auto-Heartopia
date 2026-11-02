@@ -14,7 +14,10 @@ from utils.core.coordinate_route import direction_keys, key_vector
 class GuidanceNavigator(LocalNavigator):
     continuous_guidance = True
 
-    def __init__(self, *args, scene_clock=time.monotonic, **kwargs):
+    def __init__(self, *args, scene_clock=time.monotonic, respect_water=True, **kwargs):
+        if type(respect_water) is not bool:
+            raise ValueError('Invalid guidance water policy')
+        self._respect_water = respect_water
         super().__init__(*args, **kwargs)
         self.scene_clock = scene_clock
         self.anchor = GuidanceAnchor()
@@ -27,6 +30,11 @@ class GuidanceNavigator(LocalNavigator):
         self._timings = {}
         self._steering_state = None
         self.steering_stats = {'switches': 0, 'holds': 0, 'rejected_holds': 0}
+
+    @property
+    def respect_water(self):
+        # Constructor-only: a live map/path cannot silently change policy.
+        return self._respect_water
 
     def reset_steering(self):
         self._steering_state = None
@@ -182,7 +190,7 @@ class GuidanceNavigator(LocalNavigator):
             self._refresh_ticket = None  # Never reused by a later control tick.
             self.last_timings = {**self._timings, 'total_seconds': time.perf_counter()-started,
                 'plans': self.stats['plans']-plans_before, 'map_builds': self.stats['map_builds']-maps_before,
-                'anchor_changes': self.anchor.changes}
+                'anchor_changes': self.anchor.changes, 'respect_water': self.respect_water}
             self.scene_provider = provider
             self.before_refresh = lambda:None
 
