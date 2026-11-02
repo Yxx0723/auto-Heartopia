@@ -1,5 +1,6 @@
 """Owned navigation-only geometry, prepared before publication, not a TTL cache."""
 from utils.core.coordinate_navigation import scene_geometry_signature
+from utils.core.terrain_sections import terrain_profile_signature
 
 
 class _FrozenDict(dict):
@@ -28,6 +29,10 @@ class PreparedNavigationScene(_FrozenDict):
         self._geometry = tuple(self.get(k) for k in
                                ('colliders', 'navigation_exclusions', 'navigation_reference'))
         self._signature = scene_geometry_signature(self)
+        self._terrain_signature = terrain_profile_signature(self)
+
+    def prepared_terrain_signature(self):
+        return self._terrain_signature if self.prepared_signature() is not None else None
 
     def prepared_signature(self):
         # Replacing a field on this outer mapping revokes the prepared result.

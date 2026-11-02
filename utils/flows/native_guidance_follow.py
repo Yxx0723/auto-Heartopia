@@ -383,6 +383,11 @@ class GuidanceFollower(_Follower):
                     continue
                 travel = max(.15, self.calibration_speed*policy.COORD_SAMPLE_SECONDS*2)
                 if self.input_lease is not None:
+                    # Cover the configured permit + watchdog poll, not only
+                    # two nominal ticks. This is an estimated distance budget,
+                    # not a measured upper bound on the game's walking speed.
+                    travel = max(travel, max(3., self.calibration_speed)*(
+                        policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS+policy.COORD_GUIDANCE_INPUT_POLL_SECONDS))
                     now = self.clock.monotonic()
                     expiry = self.navigator.collision_deadline(now)
                     if expiry is None:

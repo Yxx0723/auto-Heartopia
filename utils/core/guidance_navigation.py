@@ -9,6 +9,8 @@ from utils.core.local_collision_scope import local_collision_scene
 from utils.core.prepared_navigation import PreparedNavigationScene
 from utils.core.coordinate_navigation import LocalNavigator, NavigationWait, polygon_distance
 from utils.core.coordinate_route import direction_keys, key_vector
+from utils.core.terrain_sections import section_scene, terrain_profile_signature
+from utils.core.terrain_wall_profiles import TERRAIN_SECTION_REVISION
 
 
 class GuidanceNavigator(LocalNavigator):
@@ -28,6 +30,9 @@ class GuidanceNavigator(LocalNavigator):
         self.last_timings = {}
         self.anchor_rejoin = False
         self._timings = {}
+        self._terrain_height_gates = ()
+        self._recovery_height_gates = ()
+        self._recovery_terrain_signature = None
         self._steering_state = None
         self.steering_stats = {'switches': 0, 'holds': 0, 'rejected_holds': 0}
 
@@ -94,6 +99,7 @@ class GuidanceNavigator(LocalNavigator):
         if hasattr(self, 'anchor'):
             self.anchor.reset()
         self.reset_steering()
+        self._terrain_height_gates = ()
         self._refresh_ticket = None
 
     def follow_target(self, cursor, position, aim, check, before_plan):
@@ -122,16 +128,24 @@ class GuidanceNavigator(LocalNavigator):
         started = time.perf_counter()
         prepared = scene.prepared_signature() if isinstance(scene, PreparedNavigationScene) else None
         result = prepared if prepared is not None else super()._geometry_signature(scene)
+        terrain = scene.prepared_terrain_signature() if prepared is not None else terrain_profile_signature(scene)
         if self._in_call:
             self._timings['signature_seconds'] = time.perf_counter()-started
             self._timings['signature_prepared'] = prepared is not None
-        return result
+        return result, terrain
 
     def _refresh_key(self, position):
         return (id(self.scene), id(self.obstacles), tuple(position), self.risks.revision,
                 self.reference_revision)
 
     def _refresh_obstacles(self, position, target):
+        # A previously skipped source face may enter the body band before the
+        # ordinary .75 height refresh. Do not retain that stale classification.
+        if self.obstacles is not None and any(
+                (low < position[1] < high) != (low < self.obstacles.height < high)
+                for low, high in self._terrain_height_gates):
+            self.obstacles, self.path, self.retry_at = None, [], 0.
+            self._refresh_ticket = None
         if self._in_call and self._refresh_ticket == self._refresh_key(position) \
                 and self.obstacles is not None and not self.probes and not self.risks.count \
                 and getattr(self, 'slope', None) is None and getattr(self, 'coverage', None) is None:
@@ -207,7 +221,8 @@ class GuidanceNavigator(LocalNavigator):
         """
         obstacles = self.obstacles
         a, b = (position[0], position[2]), (target[0], target[2])
-        if obstacles.clear(b, b) or not obstacles.clear(a, a):
+        if obstacles.clear(b, b) or math.dist(a, b) <= policy.COORD_REACH_RADIUS \
+                or (self.respect_water and not obstacles.clear(a, a)):
             return None
         rejecting = []
         for index in obstacles.bins.get((math.floor(b[0]/4), math.floor(b[1]/4)), ()):
@@ -248,7 +263,7 @@ class GuidanceNavigator(LocalNavigator):
             check()
             if math.dist(a, point) <= 1e-6:
                 continue  # Never turn the current position into an arrival.
-            if obstacles.clear(point, point) and obstacles.clear(a, point) \
+            if obstacles.clear(point, point) and obstacles.clear(a, point, escape=True) \
                     and not obstacles.risk_cost(a, point):
                 return (point[0], target[1], point[1])
         return None
@@ -259,13 +274,49 @@ class GuidanceNavigator(LocalNavigator):
         try:
             scene, position, target, radius = args
             local = local_collision_scene(scene, position, radius)
+            self._terrain_height_gates = self._height_gates(local)
+            local = section_scene(local, position[1])
             if self._in_call:
+                self._timings['terrain_sections'] = TERRAIN_SECTION_REVISION
                 self._timings['map_input_colliders'] = len(scene.get('colliders', ()))
                 self._timings['map_local_colliders'] = len(local['colliders'])
             return super()._build_map(local, position, target, radius)
         finally:
             if self._in_call:
                 self._timings['map_build_seconds'] += time.perf_counter()-started
+
+    def recovery_keys(self, position, target, basis, travel):
+        provider = self.scene_provider
+        scene = provider()
+        signature = (scene.prepared_terrain_signature() if isinstance(scene, PreparedNavigationScene)
+                     else terrain_profile_signature(scene)) if scene else None
+        if signature is None and scene:
+            signature = terrain_profile_signature(scene)
+        if signature != self._recovery_terrain_signature:
+            self.water_guard = None
+        local = local_collision_scene(scene, position, policy.COORD_NAV_SEARCH_RADIUS) if scene else scene
+        if self.water_guard is not None and any(
+                (low < position[1] < high) != (low < self.water_guard.height < high)
+                for low, high in self._recovery_height_gates):
+            self.water_guard = None
+        old = self.water_guard
+        self.scene_provider = lambda: section_scene(local, position[1]) if local else local
+        try:
+            result = super().recovery_keys(position, target, basis, travel)
+            if self.water_guard is not old and local:
+                self._recovery_height_gates = self._height_gates(local)
+                self._recovery_terrain_signature = signature
+            return result
+        finally:
+            self.scene_provider = provider
+
+    @staticmethod
+    def _height_gates(scene):
+        return tuple((box['height'][0]-policy.COORD_NAV_BODY_HEIGHT,
+                      box['height'][1]-policy.COORD_NAV_GROUND_CLEARANCE)
+                     for box in scene['colliders'] if box.get('source') == 'verified-main-terrain-mesh'
+                     and isinstance(box.get('height'), (tuple, list)) and len(box['height']) == 2
+                     and all(type(v) in (int, float) and math.isfinite(v) for v in box['height']))
 
     def explain(self, position, target):
         """Bounded diagnostics; observations, not inferred physical contact."""
