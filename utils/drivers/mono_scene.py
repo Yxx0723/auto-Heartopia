@@ -43,6 +43,39 @@ _BARRIER_PROCESSORS = {
 _RENDER_TARGET = ('RenderPhysicTarget', _BAKE_NAMESPACE + '.Collider')
 
 
+def read_float_fields(meta, base, info, fields):
+    """One fresh bounded payload read, using the existing runtime field layout.
+
+    ``base`` has the same header-relative origin as Mono field offsets (also
+    for an inline value type). This is not an atomic game snapshot, a support
+    surface observation, or a cache. Callers retain their ownership/end checks.
+    """
+    if type(info.get('size')) is not int or not 16 <= info['size'] <= policy.MONO_OBJECT_LIMIT:
+        raise ValueError('场景向量类型布局无效')
+    layout = []
+    for name, count in fields:
+        if count not in (1, 3, 4):
+            raise ValueError('场景向量字段数量无效')
+        field = meta.field(info['address'], name)
+        offset = field['offset']
+        if field['flags'] & 16 or field['code'] != (12 if count == 1 else 17) \
+                or not 16 <= offset <= info['size']-count*4:
+            raise ValueError('场景向量字段布局无效')
+        layout.append((offset, count))
+    if not layout or len(layout) > policy.MONO_FIELD_LIMIT:
+        raise ValueError('场景向量字段数量无效')
+    ordered = sorted(layout)
+    if any(a+n*4 > b for (a,n),(b,_) in zip(ordered, ordered[1:])):
+        raise ValueError('场景向量字段重叠')
+    low, high = ordered[0][0], max(offset+count*4 for offset,count in layout)
+    if high-low > policy.MONO_OBJECT_LIMIT:
+        raise ValueError('场景向量字段范围无效')
+    raw = meta.data(base+low, high-low)
+    if not isinstance(raw, bytes) or len(raw) != high-low:
+        raise ValueError('场景数据正在变化')
+    return [list(struct.unpack_from('<'+'f'*count, raw, offset-low)) for offset,count in layout]
+
+
 class SceneMetadata:
     def __init__(self, read, domain):
         self.read, self.domain, self.cache = read, domain, {}
@@ -626,7 +659,12 @@ class MemorySceneMap:
             def values(name, count):
                 field = meta.field(info['address'], name)
                 return list(struct.unpack('<' + 'f' * count, meta.data(address + field['offset'], count * 4)))
-            local = (values('_position', 3), values('_rotation', 4), values('__scale', 1)[0])
+            if getattr(self, 'navigation_only', False):
+                p, q, scale = read_float_fields(meta, address, info,
+                    (('_position',3), ('_rotation',4), ('__scale',1)))
+                local = (p, q, scale[0])
+            else:
+                local = (values('_position', 3), values('_rotation', 4), values('__scale', 1)[0])
             parent = meta.ref(address, '_parent')
             result = compose_transform(world(parent, (*seen, address)), local) if parent else compose_transform(
                 ([0, 0, 0], [0, 0, 0, 1], 1.), local)
@@ -785,8 +823,11 @@ class MemorySceneMap:
                         if not hierarchy or hierarchy == local_hierarchy:
                             unsupported += 1
                             continue
-                        geometry = box_geometry(vector('Position', 3), vector('Rotation', 4),
-                                                vector('Center', 3), vector('Size', 3), world(hierarchy),
+                        vectors = (read_float_fields(meta, start, data_class,
+                            (('Position',3), ('Rotation',4), ('Center',3), ('Size',3)))
+                            if getattr(self, 'navigation_only', False) else
+                            [vector('Position',3), vector('Rotation',4), vector('Center',3), vector('Size',3)])
+                        geometry = box_geometry(*vectors, world(hierarchy),
                                                 allow_planar=True)
                         if geometry.get('surface_kind') in ('zero-x-box-plane', 'zero-y-box-plane', 'zero-z-box-plane'):
                             geometry['source'] = 'verified-managed-planar-box'

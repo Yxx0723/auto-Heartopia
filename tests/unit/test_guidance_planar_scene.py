@@ -22,7 +22,7 @@ def plane_reader(size=(6., 0., 8.)):
     reader.collider_barrier = Mock(return_value=None)
     m.obj.side_effect = lambda at: ({'name':'PhysicGroup','address':22} if at == 22 else
         {'name':'DynamicBoxCollider','address':300} if at == 3000 else
-        {'name':'Hierarchy','namespace':'XDTGame.Core','address':99})
+        {'name':'Hierarchy','namespace':'XDTGame.Core','address':99,'size':48})
     refs = {(2,'_hierarchyObject'):22, (22,'_colliders'):1000,
             (1001,'_stream'):2000, (2000,'_collisions'):2001, (2002,'colliders'):2003,
             (3000,'_group'):22, (3000,'_hierarchy'):2, (2,'_parent'):0}
@@ -31,14 +31,21 @@ def plane_reader(size=(6., 0., 8.)):
     m.array_refs.return_value = [3000]
     fields = {'_enabled':16,'_colliderData':32,'IsTrigger':16,'Position':20,'Rotation':32,
               'Center':48,'Size':60,'_position':16,'_rotation':28,'__scale':44}
-    m.field.side_effect = lambda cls,name: {'offset':fields[name],'type':400}
-    m.cls.return_value = {'address':400}
+    m.field.side_effect = lambda cls,name: {'offset':fields[name],'type':400,
+        'flags':1,'code':12 if name=='__scale' else 17}
+    m.cls.return_value = {'address':400,'size':72}
     start = 3016
     memory = {(3016,1):b'\x01',(start+16,1):b'\0',
               (start+20,12):struct.pack('<3f',0,0,0),(start+32,16):struct.pack('<4f',0,0,0,1),
               (start+48,12):struct.pack('<3f',0,0,0),(start+60,12):struct.pack('<3f',*size),
               (18,12):struct.pack('<3f',0,0,0),(30,16):struct.pack('<4f',0,0,0,1),(46,4):struct.pack('<f',1)}
-    m.data.side_effect = lambda at,n: memory[at,n]
+    def read(at,n):
+        if (at,n) in memory:return memory[at,n]
+        if (at,n) not in ((start+20,52),(18,32)):
+            raise KeyError((at,n))
+        values = {address+i:b for (address,_),raw in memory.items() for i,b in enumerate(raw)}
+        return bytes(values.get(address,0) for address in range(at,at+n))
+    m.data.side_effect = read
     return reader
 
 
