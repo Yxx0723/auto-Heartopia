@@ -174,6 +174,8 @@ class GuidanceNavigator(LocalNavigator):
             phase = time.perf_counter()
             alternate = self._shore_target(position, target, check)
             self._timings['shore_seconds'] += time.perf_counter()-phase
+            if alternate is not None:
+                self._timings['local_aim_offset'] = math.dist(alternate, target)
             selected = target if alternate is None else alternate
             phase = time.perf_counter()
             result = super().next_target(position, selected, check,
@@ -181,7 +183,8 @@ class GuidanceNavigator(LocalNavigator):
             self._timings['plan_and_path_seconds'] += time.perf_counter()-phase
             if alternate is not None:
                 self.last_decision = {**self.last_decision,
-                    'kind': 'guidance_shore_alternative',
+                    'kind': ('guidance_shore_alternative' if self.respect_water
+                             else 'guidance_padding_alternative'),
                     'requested_target': tuple(target), 'local_target': alternate,
                     'offset': math.dist(alternate, target)}
             return result
@@ -195,11 +198,12 @@ class GuidanceNavigator(LocalNavigator):
             self.before_refresh = lambda:None
 
     def _shore_target(self, position, target, check):
-        """Only replace a dry local aim rejected by approximate water padding.
+        """Replace an outside-body local aim rejected only by artificial padding.
 
         This is a steering helper, never a destination/arrival edit. A candidate
-        must also have a fully checked direct approach in the current map; no
-        water, bridge, physical collider or learned-risk rule is relaxed.
+        must have a fully checked direct approach in the current map. The legacy
+        policy only handles water margins; water-ignoring guidance may make a
+        much smaller adjustment near solid geometry. No clearance is reduced.
         """
         obstacles = self.obstacles
         a, b = (position[0], position[2]), (target[0], target[2])
@@ -212,8 +216,8 @@ class GuidanceNavigator(LocalNavigator):
             gap = polygon_distance(b, b, polygon)
             if gap > clearance:
                 continue
-            # Actual water and any non-water rejection keep the original wait.
-            if index not in obstacles.water_polygon_ids or gap <= 1e-6:
+            # No aim inside physical geometry can be reclassified as padding.
+            if gap <= 1e-6 or (self.respect_water and index not in obstacles.water_polygon_ids):
                 return None
             rejecting.append((polygon, clearance))
         if not rejecting:
@@ -234,7 +238,10 @@ class GuidanceNavigator(LocalNavigator):
                 scale = (clearance+policy.COORD_GUIDANCE_SHORE_MARGIN)/gap
                 point = (nearest[0]+(b[0]-nearest[0])*scale,
                          nearest[1]+(b[1]-nearest[1])*scale)
-                if math.dist(point, b) <= policy.COORD_GUIDANCE_CORRIDOR_RADIUS:
+                limit = policy.COORD_GUIDANCE_CORRIDOR_RADIUS
+                if not self.respect_water:
+                    limit = min(limit, policy.COORD_GUIDANCE_PADDING_MAX_OFFSET)
+                if math.dist(point, b) <= limit:
                     candidates.add(point)
         for point in sorted(candidates, key=lambda p:(math.dist(p,b), p))[
                 :policy.COORD_GUIDANCE_SHORE_MAX_CANDIDATES]:

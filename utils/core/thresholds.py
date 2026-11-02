@@ -566,3 +566,7 @@ COORD_GUIDANCE_ANCHOR_CHORD_ERROR = .25
 # Guidance-only adjacent-sector deadband; engineering bound, NOT game-measured.
 # 6 degrees of score improvement means a 3-degree shift of a 22.5-degree boundary.
 COORD_GUIDANCE_STEERING_HYSTERESIS_DEGREES = 6.
+
+# Guidance-only local aim adjustment cap; engineering bound, NOT game-measured.
+# Keeps solid-collider margins unchanged; only the temporary steering aim moves.
+COORD_GUIDANCE_PADDING_MAX_OFFSET = .25
