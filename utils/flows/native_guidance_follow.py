@@ -5,6 +5,7 @@ from utils.core import thresholds as policy
 from utils.core.guidance_path import (GuidanceCursor, GuidanceRouteCache, GuidanceRecovery,
                                       validate_guidance_state, guidance_identity, guidance_identity_change)
 from utils.core.coordinate_navigation import NavigationWait
+from utils.core.coordinate_route import key_vector
 from utils.core.guidance_navigation import GuidanceNavigator
 from utils.drivers.windows_input import PreciseClock
 from utils.drivers.guidance_input_lease import GuidanceInputLease
@@ -41,6 +42,107 @@ class GuidanceFollower(_Follower):
             if isinstance(navigator, GuidanceNavigator) else None
         self.move_deadline = float('-inf')
         self.anchor_rejoin_reported = None
+        self.reset_path_escape()
+
+    def reset_path_escape(self):
+        self.path_escape_attempts = 0
+        self.path_escape_origin = self.path_escape_arc = self.path_escape_revision = None
+        self.path_escape_next_at = 0.
+
+    def guidance_travel(self, position, target):
+        travel = max(.15, self.calibration_speed*policy.COORD_SAMPLE_SECONDS*2)
+        if self.input_lease is not None:
+            travel = max(travel, max(3., self.calibration_speed)*(
+                policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS+policy.COORD_GUIDANCE_INPUT_POLL_SECONDS))
+            now = self.clock.monotonic()
+            expiry = self.navigator.collision_deadline(now)
+            if expiry is None:
+                raise _GuidanceRetry('碰撞许可已失效')
+            self.move_deadline = min(
+                self.position_at+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS,
+                self.cache.healthy_at+policy.COORD_GUIDANCE_MAX_AGE, expiry,
+                self.position_at+math.dist(position,target)/max(3.,self.calibration_speed)*.5)
+        return travel
+
+    def try_path_escape(self, position, target):
+        """A no-path branch can probe a checked retreat, never a blind jump.
+
+        The normal watchdog remains armed. Failed planning never calls blocked()
+        and cannot manufacture directional failure/physical collision evidence.
+        """
+        now = self.clock.monotonic()
+        since = self.waiting.since.get('path')
+        if not isinstance(self.navigator,GuidanceNavigator) or since is None \
+                or now-since < policy.COORD_GUIDANCE_WAIT_SECONDS \
+                or now < self.path_escape_next_at \
+                or now-since >= policy.COORD_GUIDANCE_RETRY_SECONDS:
+            return False
+        if self.path_escape_attempts >= self.recovery_attempts:
+            self.pause_guidance('局部路径仍不可达，有限退让未通过；请调整位置或重新追踪')
+        self.release('path_escape')
+        position = self.read(force=True)
+        revision = self.cursor.revision
+        self.refresh_guidance(position,force=True)
+        if self.cursor.revision != revision:
+            return True  # Replan the new route before attempting any withdrawal.
+        if self.path_escape_origin is None:
+            self.path_escape_origin = position
+            self.path_escape_arc, self.path_escape_revision = self.cursor.arc, self.cursor.revision
+        self.path_escape_attempts += 1
+        self.path_escape_next_at = now+policy.COORD_GUIDANCE_WAIT_SECONDS
+        self.report('recovering','局部路径不可达，检查短距离退让后重新接入引导线',
+                    incident_kind='navigation_recovery',recovery_phase='path_escape',
+                    recovery_attempt=self.path_escape_attempts,recovery_limit=self.recovery_attempts,
+                    position=list(position),target=list(target))
+        try:
+            goal = self.navigator.path_escape_target(position,target,self.path_escape_attempts,
+                self.path_escape_origin,self.guard,self.planning_release)
+            if goal is None:
+                self.report('recovering','未找到可确认安全的退让方向，保持站定并等待重新寻路',
+                            recovery_phase='path_escape',recovery_result='no_safe_step')
+                return False
+            try:
+                self.cursor._nearest(goal,0,len(self.cursor.path)-1)
+            except ValueError:
+                return False  # A pure projection: never advance cursor.arc here.
+            context = (self.navigator.scene.get('cache_context'),self.navigator.scene.get('terrain_revision'))
+            end = self.clock.monotonic()+policy.COORD_RECOVERY_LEG_SECONDS
+            while self.clock.monotonic() < end:
+                started = self.clock.monotonic()
+                current = self.read(force=True)
+                self.refresh_guidance(current)
+                self.cursor.aim(current)  # Same route corridor and height-hint checks.
+                if math.dist(current,goal) <= policy.COORD_REACH_RADIUS:
+                    break
+                limit = min(policy.COORD_RECOVERY_MAX_RADIUS,
+                    policy.COORD_GUIDANCE_CORRIDOR_RADIUS-policy.COORD_REACH_RADIUS)
+                if math.dist(current,self.path_escape_origin) >= limit:
+                    break
+                basis = self.read_direction()
+                if basis is None:
+                    raise _GuidanceRetry('退让方向未确认，等待重新核对')
+                travel = self.guidance_travel(current,goal)
+                keys = self.navigator.path_escape_keys(current,goal,basis,travel,context,
+                                                       self.guard,self.planning_release)
+                if not keys:
+                    break
+                dx,dz = key_vector(keys,basis)
+                norm = math.hypot(dx,dz)
+                predicted = (current[0]+dx/norm*travel,current[1],current[2]+dz/norm*travel)
+                if math.dist(predicted,self.path_escape_origin) > limit:
+                    break
+                try:
+                    self.cursor._nearest(predicted,0,len(self.cursor.path)-1)
+                except ValueError:
+                    break
+                self.set_keys(keys)
+                self.wait_next_cycle(started)
+            self.report('recovering','退让尝试结束，重新检查引导连接',
+                        recovery_phase='path_escape',recovery_result='replan',position=list(self.position))
+            return True
+        finally:
+            self.release('path_escape_complete')
+            self.navigator.invalidate()
 
     def read(self, force=False):
         previous = self.input_lease.set_phase('position_read') if self.input_lease else None
@@ -213,6 +315,11 @@ class GuidanceFollower(_Follower):
             self.refresh_at = 0.
         now = self.clock.monotonic()
         if self.waiting.failed(stage, now):
+            if stage == 'path' and self.path_escape_attempts:
+                self.pause_guidance(f'局部路径持续不可达，已做 {self.path_escape_attempts} 次有限退让检查'
+                    '，仍未找到完整通行连接；请调整位置或重新追踪',
+                    recovery_phase='path_escape',recovery_result='no_connection',
+                    recovery_attempt=self.path_escape_attempts,navigation_wait_reason='no_path')
             self.pause_guidance(f'{stage} 持续未恢复：{exc}')
         if now-self.last_report >= .5:
             self.report('navigating', f'{exc} · 正在自动重试 · 按键已释放 · F9停止',
@@ -263,6 +370,11 @@ class GuidanceFollower(_Follower):
                     self.waypoints[0]['position'] = snapshot['target']
                     self.travel_progress.bind(self.accepted, position, snapshot['target'], self.calibration_speed)
                     aim = self.cursor.aim(position)
+                    if self.path_escape_origin is not None:
+                        if self.path_escape_revision != self.cursor.revision:
+                            self.path_escape_arc, self.path_escape_revision = self.cursor.arc, self.cursor.revision
+                        elif self.cursor.arc-self.path_escape_arc >= policy.COORD_RECOVERY_CONFIRM_DISTANCE:
+                            self.reset_path_escape()
                     stage = 'direction'
                     basis = self.read_direction() if self.direction_method else None
                     if basis is None:
@@ -342,7 +454,8 @@ class GuidanceFollower(_Follower):
                     self.cache.require_healthy(self.clock.monotonic())
                     self.waiting.ready()
                 except (OSError, ValueError, TypeError, NavigationWait) as exc:
-                    self.release('invalid_'+stage)
+                    self.release('path_unavailable' if isinstance(exc,NavigationWait)
+                                 and exc.reason=='no_path' else 'invalid_'+stage)
                     if isinstance(exc,NavigationWait) and exc.reason != 'scene':
                         stage = 'path'
                         if self.clock.monotonic()-self.last_report>=.5:
@@ -351,6 +464,12 @@ class GuidanceFollower(_Follower):
                                         navigation_evidence=self.navigator.explain(position,aim['position'])
                                             if isinstance(self.navigator,GuidanceNavigator) else None,
                                         navigator_stats=dict(self.navigator.stats))
+                        try:
+                            if exc.reason=='no_path' and self.try_path_escape(position,aim['position']):
+                                continue
+                        except NavigationWait as unavailable:
+                            self.wait_for_input_data('scene',unavailable)
+                            continue
                     self.wait_for_input_data(stage, exc)
                     continue
                 self.travelling = True
@@ -381,21 +500,7 @@ class GuidanceFollower(_Follower):
                         self.release()
                     self.navigator.invalidate()
                     continue
-                travel = max(.15, self.calibration_speed*policy.COORD_SAMPLE_SECONDS*2)
-                if self.input_lease is not None:
-                    # Cover the configured permit + watchdog poll, not only
-                    # two nominal ticks. This is an estimated distance budget,
-                    # not a measured upper bound on the game's walking speed.
-                    travel = max(travel, max(3., self.calibration_speed)*(
-                        policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS+policy.COORD_GUIDANCE_INPUT_POLL_SECONDS))
-                    now = self.clock.monotonic()
-                    expiry = self.navigator.collision_deadline(now)
-                    if expiry is None:
-                        raise _GuidanceRetry('碰撞许可已失效')
-                    self.move_deadline = min(
-                        self.position_at+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS,
-                        self.cache.healthy_at+policy.COORD_GUIDANCE_MAX_AGE, expiry,
-                        self.position_at+math.dist(position, target)/max(3., self.calibration_speed)*.5)
+                travel = self.guidance_travel(position,target)
                 self.set_keys(self.navigator.steering_keys(position, target, basis, travel))
                 if self.clock.monotonic()-self.last_report >= .5:
                     self.report('playing', f'跟随缓存引导 · 路线剩余约 {aim["remaining"]:.1f} 单位 · F6暂停 · F9停止',
@@ -426,6 +531,7 @@ class GuidanceFollower(_Follower):
                 self.position_at = self.last_tick = None
                 self.navigator.invalidate()
                 self.waiting.ready()
+                self.reset_path_escape()
                 self.clock.sleep(.01)
             except _SkipPoint as exc:
                 self.release()

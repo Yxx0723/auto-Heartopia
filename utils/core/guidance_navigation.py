@@ -1,6 +1,7 @@
 """Guidance-only scheduling over the existing local collision planner."""
 import math
 import time
+from contextlib import contextmanager
 
 from utils.core import thresholds as policy
 from utils.core.navigation_supply import navigation_expiry
@@ -168,6 +169,65 @@ class GuidanceNavigator(LocalNavigator):
         source_now = self.scene_clock()
         expiry = navigation_expiry(self.scene, source_now)
         return None if expiry is None else control_now+max(0., expiry-source_now)
+
+    @contextmanager
+    def _path_escape_map(self, position, target, check, before_plan):
+        """Full current body geometry, without final-interaction padding relief."""
+        previous = self.before_refresh
+        self.before_refresh = before_plan
+        obstacles = padding = None
+        try:
+            check()
+            self._refresh_obstacles(position, target)
+            obstacles = self.obstacles
+            padding = obstacles.terminal_padding
+            obstacles.terminal_padding = {}
+            check()
+            yield obstacles
+        finally:
+            if obstacles is not None and padding is not None:
+                obstacles.terminal_padding = padding
+            self.before_refresh = previous
+
+    def path_escape_target(self, position, target, attempt, origin, check=lambda:None,
+                           before_plan=lambda:None):
+        """Bounded retreat/side-step; a failed plan is not collision evidence.
+
+        Reuse engineering recovery distances, NOT measured step/slope limits.
+        An actual polygon overlap never gains permission to move through it.
+        """
+        dx, dz = target[0]-position[0], target[2]-position[2]
+        length = math.hypot(dx,dz)
+        if length <= 1e-6:
+            return None
+        dx, dz = dx/length, dz/length
+        back, side = policy.COORD_RECOVERY_BACK_DISTANCE, policy.COORD_RECOVERY_SIDE_DISTANCE
+        offsets = [(-dx*back,-dz*back),
+                   (-dx*back-dz*side,-dz*back+dx*side),
+                   (-dx*back+dz*side,-dz*back-dx*side),
+                   (-dz*side,dx*side),(dz*side,-dx*side)]
+        shift = (attempt-1)%len(offsets)
+        limit = min(policy.COORD_RECOVERY_MAX_RADIUS,
+                    policy.COORD_GUIDANCE_CORRIDOR_RADIUS-policy.COORD_REACH_RADIUS)
+        with self._path_escape_map(position,target,check,before_plan) as obstacles:
+            a = (position[0],position[2])
+            for x,z in offsets[shift:]+offsets[:shift]:
+                check()
+                point = (position[0]+x,position[1],position[2]+z)
+                b = (point[0],point[2])
+                if math.dist(point,origin) <= limit and obstacles.clear(b,b) \
+                        and obstacles.clear(a,b,escape=True) and obstacles.risk_cost(a,b) == 0:
+                    return point
+        return None
+
+    def path_escape_keys(self, position, target, basis, travel, context,
+                         check=lambda:None, before_plan=lambda:None):
+        """Recheck every quantized pulse against ALL current local obstacles."""
+        with self._path_escape_map(position,target,check,before_plan) as obstacles:
+            if ((self.scene or {}).get('cache_context'),
+                    (self.scene or {}).get('terrain_revision')) != context:
+                raise NavigationWait('退让期间场景已改变，等待重新核对',reason='scene')
+            return super().steering_keys(position,target,basis,travel,obstacles=obstacles)
 
 
     def next_target(self, position, target, check=lambda:None, before_plan=lambda:None):
