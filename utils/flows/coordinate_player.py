@@ -36,6 +36,10 @@ class _Stopped(Exception):
     pass
 
 
+class _MovementRetry(Exception):
+    """A short input permit expired; revalidate without resetting the waypoint."""
+
+
 class _CalibrationRetry(Exception):
     pass
 
@@ -223,6 +227,28 @@ class _Follower:
     def release(self):
         self.device.release_all()
         self.keys.clear()
+
+    def planning_release(self):
+        self.release()
+
+    def steering_travel(self,position,target,precise=False):
+        travel=max(.15,self.calibration_speed*policy.COORD_SAMPLE_SECONDS*2)
+        return min(travel,max(.02,distance(position,target))) if precise else travel
+
+    def apply_movement(self,keys,position,target):
+        self.set_keys(keys)
+
+    def wait_movement(self,started,remaining,final):
+        if final:
+            self.clock.sleep(min(policy.COORD_SAMPLE_SECONDS,
+                                 max(.01,remaining/(2*self.calibration_speed))))
+            self.release()
+            self.wait(policy.COORD_NAV_APPROACH_SETTLE_SECONDS)
+        else:
+            self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
+
+    def recover_no_path(self,target,basis,segment_start,index,total):
+        return self.recover(target,basis,segment_start,index,total)
 
     def wait(self, duration):
         end = self.clock.monotonic() + duration
@@ -1063,6 +1089,7 @@ class _Follower:
         navigation_leg = None
         navigation_wait_since = None
         while index < len(points):
+            cycle_started = self.clock.monotonic()
             try:
                 self.guard()
                 self.travelling = False
@@ -1291,7 +1318,7 @@ class _Follower:
                         self.navigator.learning_finished = None
                         self.navigator.learning_time = self.active_time
                         self.navigator.set_waypoint(index)
-                        target = self.navigator.next_target(position, target, check=self.guard, before_plan=self.release)
+                        target = self.navigator.next_target(position, target, check=self.guard, before_plan=self.planning_release)
                     except NavigationWait as exc:
                         self.release()
                         if exc.reason == 'no_path' and self.continuous_recovery and self.recovery_attempts:
@@ -1302,7 +1329,7 @@ class _Follower:
                                 self.approach_attempt(index)
                                 try:
                                     self.fail_recovery(index, len(points))
-                                    if not self.recover(points[index]['position'], basis, segment_start, index, len(points)):
+                                    if not self.recover_no_path(points[index]['position'], basis, segment_start, index, len(points)):
                                         self.retry_recovery(index, len(points))
                                 except _RecoveryLimit as limit:
                                     if limit.reason != 'distance':
@@ -1474,14 +1501,12 @@ class _Follower:
                 if self.heading_cache is not None:
                     self.heading_cache['basis'] = basis
                 if self.navigator:
-                    steering_travel = max(.15, self.calibration_speed * policy.COORD_SAMPLE_SECONDS * 2)
-                    if special_steering:
-                        steering_travel = min(steering_travel, max(.02, distance(position, target)))
+                    steering_travel = self.steering_travel(position,target,bool(special_steering))
                     desired = self.navigator.steering_keys(position, target, basis,
                         steering_travel, **special_steering)
                 if anchor is None or desired != anchor_keys:
                     anchor, anchor_keys, anchor_at = position, set(desired), now
-                self.set_keys(desired)
+                self.apply_movement(desired,position,target)
                 if now - self.last_report >= .5:
                     navigation = ({'navigation_path': [list(p) for p in self.navigator.path],
                                    'navigation_decision': self.navigator.last_decision,
@@ -1494,14 +1519,12 @@ class _Follower:
                     self.report('playing', f'{mode} {index + 1}/{len(points)} · F6暂停 · F9停止',
                                 position=list(position), waypoint=index + 1, waypoint_count=len(points), **navigation)
                     self.last_report = now
-                if self.navigator and distance(target, points[index]['position']) < .01 \
-                        and remaining <= policy.COORD_NAV_APPROACH_RADIUS:
-                    self.clock.sleep(min(policy.COORD_SAMPLE_SECONDS,
-                                         max(.01, remaining / (2 * self.calibration_speed))))
-                    self.release()
-                    self.wait(policy.COORD_NAV_APPROACH_SETTLE_SECONDS)
-                else:
-                    self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
+                self.wait_movement(cycle_started,remaining,
+                    bool(self.navigator and distance(target,points[index]['position'])<.01
+                         and remaining<=policy.COORD_NAV_APPROACH_RADIUS))
+            except _MovementRetry:
+                self.release()
+                self.clock.sleep(.01)
             except _SkipPoint as exc:
                 self.release()
                 self.travelling = False
@@ -1615,7 +1638,11 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
             clock.sleep(.01)
         reader = reader_factory()
         config = {'duration': 0., 'client_size': list(size)}
-        follower = _Follower(config, reader, device, window, controls, report, clock,
+        follower_type = _Follower
+        if getattr(navigator,'continuous_collection',False) is True:
+            from utils.flows.collection_player import CollectionFollower
+            follower_type = CollectionFollower
+        follower = follower_type(config, reader, device, window, controls, report, clock,
                          waypoints=points, start_mode=start_mode, recovery_attempts=recovery_attempts,
                          jump_on_recovery=jump_on_recovery, collect_wait_seconds=collect_wait_seconds,
                          loop_count=loop_count, continuous_recovery=continuous_recovery, navigator=navigator,

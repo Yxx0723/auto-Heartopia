@@ -8,6 +8,7 @@ import threading
 from utils.core.coordinate_points import ordered_waypoints, validate_collect_wait, validate_loop_count
 from utils.core.coordinate_recovery import validate_recovery_options
 from utils.core.coordinate_navigation import LocalNavigator
+from utils.core.collection_navigation import CollectionNavigator
 from utils.core import special_verdict
 from utils.core.special_patrol import validate_patrol
 from utils.core import thresholds as policy
@@ -288,7 +289,8 @@ class PointPlayback:
             device = self.device_factory(window)
             controls = self.controls_factory(window, size, self, self.stop_event.is_set)
             controls.start()
-            navigation = ({'navigator': self.navigator_factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic)}
+            factory = CollectionNavigator if self.navigator_factory is LocalNavigator else self.navigator_factory
+            navigation = ({'navigator': factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic)}
                           if auto_navigate else {})
             if auto_navigate and self.scene_refresh is not None:
                 navigation['scene_refresh'] = lambda: self.scene_refresh(pid)
