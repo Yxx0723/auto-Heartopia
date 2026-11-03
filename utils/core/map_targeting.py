@@ -93,6 +93,32 @@ def plan_map_click(target, first, second, now, *, max_age, margin):
     return MapClickPlan(tuple(target),pixel,second.scene,second.signature(),now)
 
 
+def plan_map_pan(target,view,now,*,max_age,margin):
+    """A bounded screen-space drag towards the target; not a guessed new aim.
+
+    Both endpoints stay inside the current ROI. The .45 span is an engineering
+    drag bound, not a world/map capability. The caller must read back real pan.
+    """
+    view.validate(now,max_age)
+    if not _numbers((margin,),1) or margin<0:
+        raise ValueError('地图拖动边距无效')
+    l,t,r,b=view.map_rect;w,h=r-l-2*margin,b-t-2*margin
+    if min(w,h)<=4:
+        raise ValueError('地图拖动区域过小')
+    center=((l+r)/2,(t+b)/2);pixel=view.world_to_client(target)
+    dx=max(-w*.45,min(w*.45,center[0]-pixel[0]))
+    dy=max(-h*.45,min(h*.45,center[1]-pixel[1]))
+    if math.hypot(dx,dy)<1.:
+        raise ValueError('当前目标无需平移或被控件遮挡')
+    start=(center[0]-dx/2,center[1]-dy/2);end=(center[0]+dx/2,center[1]+dy/2)
+    # Conservative bounding-box rejection also covers crossing a control.
+    x1,x2=sorted((start[0],end[0]));y1,y2=sorted((start[1],end[1]))
+    if any(x1<=br+margin and x2>=bl-margin and y1<=bb+margin and y2>=bt-margin
+           for bl,bt,br,bb in view.blocked_rects):
+        raise ValueError('地图拖动路径被控件遮挡')
+    return start,end
+
+
 def confirm_map_target(plan, first, second, now, *, requested_at, world_tolerance):
     """Validate native readback after a UI request, preserving saved XYZ."""
     if not _numbers((requested_at,world_tolerance,now),3) or world_tolerance<=0 \

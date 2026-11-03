@@ -162,7 +162,7 @@ def test_changed_dialog_identity_is_rejected_before_saving():
 
 def test_zoom_positions_cursor_over_map_before_sending_wheel():
     g=FakeMap();g.opened=True;g.target=(10.,2.,300.);g.scale=2.
-    t=targeter(g);original=g.execute
+    t=targeter(g);t.options=MapTargetPolicy(max_pan_steps=0);original=g.execute
     def execute(event):
         if event['type']=='scroll' and 6<g.cursor[0]<994 and 6<g.cursor[1]<994:
             g.scale=1.

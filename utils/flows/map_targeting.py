@@ -4,12 +4,17 @@ Runs only inside a user-started task. No process writes or game API invocation;
 all input goes through the existing injectable device and stop/focus controls.
 """
 import math
+from dataclasses import replace
 
 from utils.core import thresholds as policy
 from utils.core.map_target_policy import MapTargetPolicy
-from utils.core.map_targeting import plan_map_click,confirm_map_target
+from utils.core.map_targeting import plan_map_click,plan_map_pan,confirm_map_target
 from utils.drivers.guidance_input_lease import GuidanceInputLease
 from utils.drivers.map_panel import MapPanelReader
+
+
+class _MapActionTimeout(ValueError):
+    pass
 
 
 class MapTargeter:
@@ -64,7 +69,7 @@ class MapTargeter:
         self.report('map_targeting',f'{self.phase}未确认',map_stage=self.phase,
             map_observed=observed,map_read_error=str(error) if error else None,
             map_wait_seconds=self.clock.monotonic()-start)
-        raise ValueError(f'{self.phase}未确认：{error or "界面尚未达到预期状态"}；最近读数 {observed}')
+        raise _MapActionTimeout(f'{self.phase}未确认：{error or "界面尚未达到预期状态"}；最近读数 {observed}')
 
     def tap(self,key):
         self.guard()
@@ -117,9 +122,42 @@ class MapTargeter:
         self.click_button(button,action)
         self.poll(self.panel.snapshot,lambda v:v['state']==expected)
 
+    def pan(self,target,view):
+        self.stage('平移地图',target=list(target),map_pan=list(view.pan))
+        start,end=plan_map_pan(target,view,self.clock.monotonic(),
+            max_age=self.options.view_max_age,margin=self.options.pixel_margin)
+        current=self.panel.geometry(self.size)
+        if current.signature()!=view.signature():
+            raise ValueError('拖动前地图视图已经变化')
+        self.position_cursor(start)
+        with self.lease.lock:
+            self.lease.arm(self.clock.monotonic()+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS)
+            self.device.execute({'type':'mouse_down','button':'left'})
+        try:
+            self.wait(self.options.press_seconds)
+            for step in range(1,self.options.drag_steps+1):
+                fraction=step/self.options.drag_steps
+                self.position_cursor(tuple(a+(b-a)*fraction for a,b in zip(start,end)))
+                self.wait(self.options.drag_seconds/self.options.drag_steps)
+        finally:self.lease.release('map_drag_complete')
+        try:
+            current=self.poll(lambda:self.panel.geometry(self.size),lambda v:v.pan!=view.pan)
+        except _MapActionTimeout:
+            current=self.panel.geometry(self.size)
+        current.validate(self.clock.monotonic(),self.options.view_max_age)
+        if replace(current,pan=view.pan).signature()!=view.signature():
+            raise ValueError('地图平移时视图归属或缩放发生变化')
+        l,t,r,b=view.map_rect;center=((l+r)/2,(t+b)/2)
+        before=math.dist(view.world_to_client(target),center)
+        after=math.dist(current.world_to_client(target),center)
+        if after>before+.5:
+            raise ValueError('地图平移方向未接近目标，未点击或保存标记')
+        return after<before-.5
+
     def prepare(self,target):
         self.stage('校准地图视图',target=list(target))
-        for attempt in range(self.options.max_zoom_steps+1):
+        pans=zooms=0
+        for _ in range(self.options.max_zoom_steps+self.options.max_pan_steps+1):
             a=self.panel.geometry(self.size);self.wait(self.options.settle_seconds)
             b=self.panel.geometry(self.size)
             try:
@@ -134,8 +172,13 @@ class MapTargeter:
                 if l+self.options.pixel_margin<pixel[0]<r-self.options.pixel_margin \
                         and t+self.options.pixel_margin<pixel[1]<bot-self.options.pixel_margin:
                     raise  # Do not call a changed/invalid view an out-of-view target.
-                if attempt==self.options.max_zoom_steps:raise
-                self.stage('缩小地图',map_scale=a.scale,map_zoom_attempt=attempt+1)
+                if pans<self.options.max_pan_steps:
+                    pans+=1
+                    if self.pan(target,b):continue
+                    pans=self.options.max_pan_steps  # No progress / map edge: try zoom, not endless dragging.
+                if zooms==self.options.max_zoom_steps:raise
+                zooms+=1
+                self.stage('缩小地图',map_scale=a.scale,map_zoom_attempt=zooms)
                 center=((l+r)/2,(t+bot)/2)
                 if any(x1<=center[0]<=x2 and y1<=center[1]<=y2 for x1,y1,x2,y2 in b.blocked_rects):
                     raise ValueError('地图缩放位置被其他控件遮挡')

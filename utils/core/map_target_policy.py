@@ -15,18 +15,25 @@ class MapTargetPolicy:
     action_timeout: float = 6.
     setup_timeout: float = 40.
     max_zoom_steps: int = 24
+    max_pan_steps: int = 12
+    drag_seconds: float = .35
+    drag_steps: int = 12
     view_max_age: float = 1.
     pixel_margin: float = 6.
     world_tolerance: float = .75
 
     def __post_init__(self):
         for name in ('hold_seconds','press_seconds','settle_seconds','action_timeout',
-                     'setup_timeout','view_max_age','world_tolerance'):
+                     'setup_timeout','view_max_age','world_tolerance','drag_seconds'):
             value=getattr(self,name)
             if type(value) not in (int,float) or not math.isfinite(value) or value<=0:
                 raise ValueError('地图操作时间或容差必须是有限正数')
         if type(self.max_zoom_steps) is not int or not 0<=self.max_zoom_steps<=100:
             raise ValueError('地图缩放次数无效')
+        if type(self.max_pan_steps) is not int or not 0<=self.max_pan_steps<=100:
+            raise ValueError('地图平移次数无效')
+        if type(self.drag_steps) is not int or not 1<=self.drag_steps<=60:
+            raise ValueError('地图拖动分段无效')
         if type(self.pixel_margin) not in (int,float) or not math.isfinite(self.pixel_margin) \
                 or self.pixel_margin<0:
             raise ValueError('地图点击边距无效')
