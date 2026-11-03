@@ -114,3 +114,72 @@ def test_closed_and_unknown_region_context_never_inherit_a_previous_region():
     r,m,p=reader();original=m.ref.side_effect
     m.ref.side_effect=lambda obj,name:500 if (obj,name)==(300,'_viewContext') else original(obj,name)
     with pytest.raises(ValueError):r.snapshot()
+
+
+@pytest.mark.parametrize('fault',[None,'canvas_origin','scale','rotation','other_region'])
+def test_actual_native_layout_must_match_the_current_map_model(monkeypatch,fault):
+    r,m,_=reader();original=m.ref.side_effect
+    m.ref.side_effect=lambda obj,name:600 if name=='<CanvasRect>k__BackingField' else 601 if name=='sketch_t' else original(obj,name)
+    native=Mock();canvas=(-960.,-540.,1920.,1080.)
+    scale=1.19;rot=(0.,0.,0.,1.)
+    if fault=='canvas_origin':canvas=(0.,0.,1920.,1080.)
+    elif fault=='scale':scale=1.3
+    elif fault=='rotation':rot=(0.,0.,1.,0.)
+    elif fault=='other_region':r.region_context=Mock(return_value=(500,True))
+    native.rect.side_effect=lambda obj:dict(rect=canvas,anchored_position=(100.,200.))
+    native.transforms.return_value=(((0.,0.,0.),rot,(scale,scale,1.)),)
+    monkeypatch.setattr('utils.drivers.native_ui_layout.NativeUiLayout',Mock(return_value=native))
+    if fault:
+        with pytest.raises(ValueError):r.geometry((1366,768))
+    else:
+        v=r.geometry((1366,768));assert v.verified and v.canvas_size==(1920.,1080.)
+        assert v.pan==(100.,200.) and v.scale==pytest.approx(1.19)
+
+
+def marker_reader(monkeypatch):
+    r=MapPanelReader.__new__(MapPanelReader);m=r.meta=Mock();r.memory=Mock();r.clock=lambda:20.
+    r.snapshot=Mock(return_value=dict(state='projection_unverified',other_region_view=False,
+        scene_context='s',view_identity='v',map_ratio=5.))
+    r.owner=Mock(return_value=(1,2,3,300,301))
+    r.find_class=Mock(return_value=41);r.static_instance=Mock(return_value=42)
+    m.list_refs.return_value=[]
+    r.expected=Mock();r.vector=Mock()
+    refs={(42,'_currentMapSpot'):43,(300,'_spotWidgets'):400,(400,'head'):500,
+          (500,'list'):400,(500,'item'):600,(500,'next'):500,(500,'prev'):500,
+          (600,'<selfData>k__BackingField'):700,(600,'ui'):800,(800,'root_t'):900}
+    m.ref.side_effect=lambda obj,name:refs[obj,name]
+    payloads={(400,'count'):struct.pack('<i',1),(400,'version'):struct.pack('<i',2),
+              (700,'category'):struct.pack('<i',7),(700,'usageId'):struct.pack('<I',25047276)}
+    r.payload=Mock(side_effect=lambda obj,name,code,n:payloads[obj,name])
+    layout=Mock();layout.rect.return_value={'anchored_position':(-1056.78894,-498.9049)}
+    monkeypatch.setattr('utils.drivers.native_ui_layout.NativeUiLayout',Mock(return_value=layout))
+    return r,m,refs,payloads,layout
+
+
+def test_custom_markers_come_from_live_owned_widgets_not_a_stale_initial_map_list(monkeypatch):
+    r,m,_,_,_=marker_reader(monkeypatch)
+    result=r.custom_markers()
+    assert result['25047276']==pytest.approx((-211.357788,0.,-99.78098))
+    assert not any(c.args[1]=='_currentMapSpot' for c in m.ref.call_args_list)
+
+
+@pytest.mark.parametrize('fault',['loop','count','version','widget_replaced','scene','ratio'])
+def test_mutating_or_invalid_marker_graph_is_never_accepted(monkeypatch,fault):
+    r,m,refs,p,layout=marker_reader(monkeypatch)
+    if fault=='loop':refs[500,'next']=0
+    elif fault=='count':p[400,'count']=struct.pack('<i',5000)
+    elif fault=='version':
+        original=r.payload.side_effect;reads=0
+        def payload(obj,name,code,n):
+            nonlocal reads
+            if name=='version':
+                reads+=1
+                return struct.pack('<i',reads)
+            return original(obj,name,code,n)
+        r.payload.side_effect=payload
+    elif fault=='widget_replaced':
+        layout.rect.side_effect=lambda obj:refs.update({(600,'<selfData>k__BackingField'):701}) or {'anchored_position':(1.,2.)}
+    elif fault=='scene':
+        a=r.snapshot.return_value;r.snapshot.side_effect=[a,{**a,'scene_context':'other'}]
+    else:r.snapshot.return_value['map_ratio']=0.
+    with pytest.raises(ValueError):r.custom_markers()

@@ -210,7 +210,6 @@ class PointPlayback:
                                        name='native-guidance-follow', daemon=True)
         self.thread.start()
 
-
     def _run_guidance(self, pid):
         if self.input_gate is None:
             return self._execute_guidance(pid)
@@ -221,7 +220,6 @@ class PointPlayback:
             self.update('error', str(exc), navigation_mode='native_guidance')
             if self.history:
                 self.history.close()
-
 
     def _execute_guidance(self, pid):
         controls, device = None, None
@@ -280,9 +278,14 @@ class PointPlayback:
             if navigation_worker:
                 navigation_worker.close()
 
-
     def _execute(self, data, pid, start_mode, recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat):
-        controls, device = None, None
+        controls, device, navigation_worker = None, None, None
+        def report(state,message,**extra):
+            if navigation_worker is not None:
+                extra['navigation_supply']=navigation_worker.navigation_metrics(pid)
+                if state in ('paused','finished','stopped','error'):
+                    navigation_worker.pause_navigation_metrics()
+            self.update(state,message,**extra)
         try:
             window = self.window_factory(pid)
             size = window.size()
@@ -290,8 +293,17 @@ class PointPlayback:
             controls = self.controls_factory(window, size, self, self.stop_event.is_set)
             controls.start()
             factory = CollectionNavigator if self.navigator_factory is LocalNavigator else self.navigator_factory
-            navigation = ({'navigator': factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic)}
+            options = {'native_map_collection': True} if factory is CollectionNavigator else {}
+            navigation = ({'navigator': factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic, **options)}
                           if auto_navigate else {})
+            if auto_navigate and getattr(navigation['navigator'],'native_map_collection',False) is True \
+                    and self.guidance_scene_factory is not None:
+                factory=(NavigationProcessScene if self.guidance_scene_factory is NavigationSceneMap
+                         else self.guidance_scene_factory)
+                navigation_worker=SceneMapWorker(self.profile,factory=factory,
+                    diagnostics_path=self.history_root.parent/'日志'/'采集引导碰撞读取.jsonl' if self.history_root else None)
+                navigation_worker.set_pid(pid);navigation_worker.start()
+                navigation['navigator'].native_scene_provider=lambda:navigation_worker.navigation_snapshot(pid)
             if auto_navigate and self.scene_refresh is not None:
                 navigation['scene_refresh'] = lambda: self.scene_refresh(pid)
             if auto_navigate and self.path_memory is not None:
@@ -312,7 +324,7 @@ class PointPlayback:
             self.update('playback_wait', f'{mode_text} · 循环 {loop_count} 次 · 切回游戏按 F6 开始 · F9 停止')
             completed = self.runner(data, size,
                                      lambda: self._recording_reader(pid, window.hwnd),
-                                     device, window, controls, self.update, clock=self.clock, start_mode=start_mode,
+                                     device, window, controls, report, clock=self.clock, start_mode=start_mode,
                                      recovery_attempts=recovery_attempts, jump_on_recovery=jump_on_recovery,
                                      collect_wait_seconds=collect_wait_seconds, loop_count=loop_count,
                                      continuous_recovery=True, **navigation)
@@ -352,6 +364,9 @@ class PointPlayback:
                                                 'message': f'走法遇阻记录暂未保存：{exc}'})
             if self.history:
                 self.history.close()
+
+            if navigation_worker:
+                navigation_worker.close()
 
     def _recording_reader(self, pid, hwnd, guidance=False):
         reader = self.reader_factory(pid, self.profile, hwnd=hwnd)

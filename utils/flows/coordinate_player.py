@@ -83,6 +83,7 @@ class _Follower:
         self.data, self.reader, self.device = data, reader, device
         self.window, self.controls, self._report, self.clock = window, controls, report, clock
         self.cycle, self.loop_count = 1, loop_count
+        self.show_cycle_label = True
         self.keys = set()
         self.position, self.position_at = None, None
         self.motion_position, self.motion_at = None, None
@@ -159,7 +160,7 @@ class _Follower:
                          position_age_seconds=max(0., self.clock.monotonic()-self.position_at)
                          if self.position_at is not None else None)
         extra.setdefault('input_keys', sorted(self.keys))
-        if self.waypoints is not None:
+        if self.waypoints is not None and self.show_cycle_label:
             message = f'第 {self.cycle}/{self.loop_count} 轮 · {message}'
             extra.update(cycle=self.cycle, loop_count=self.loop_count)
         self._report(state, message, **extra)
@@ -249,6 +250,9 @@ class _Follower:
 
     def recover_no_path(self,target,basis,segment_start,index,total):
         return self.recover(target,basis,segment_start,index,total)
+
+    def before_waypoint_navigation(self,index,target,position):
+        return False
 
     def wait(self, duration):
         end = self.clock.monotonic() + duration
@@ -1311,6 +1315,10 @@ class _Follower:
                             self.last_report = self.last_collect_report = float('-inf')
                     continue
                 self.travelling = True
+                if self.before_waypoint_navigation(index,target,position):
+                    anchor,navigation_leg,navigation_wait_since=None,None,None
+                    best,progress_at=math.inf,self.clock.monotonic()
+                    continue
                 if self.navigator:
                     planning_at = self.clock.monotonic()
                     self.navigation_waiting = True
@@ -1639,7 +1647,10 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
         reader = reader_factory()
         config = {'duration': 0., 'client_size': list(size)}
         follower_type = _Follower
-        if getattr(navigator,'continuous_collection',False) is True:
+        if getattr(navigator,'native_map_collection',False) is True:
+            from utils.flows.native_collection import NativeCollectionFollower
+            follower_type = NativeCollectionFollower
+        elif getattr(navigator,'continuous_collection',False) is True:
             from utils.flows.collection_player import CollectionFollower
             follower_type = CollectionFollower
         follower = follower_type(config, reader, device, window, controls, report, clock,

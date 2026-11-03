@@ -42,6 +42,7 @@ class GuidanceFollower(_Follower):
             if isinstance(navigator, GuidanceNavigator) else None
         self.move_deadline = float('-inf')
         self.anchor_rejoin_reported = None
+        self.maintenance_callback = None  # Collection owner only; standalone guide has no interactions.
         self.reset_path_escape()
 
     def reset_path_escape(self):
@@ -362,6 +363,12 @@ class GuidanceFollower(_Follower):
             try:
                 self.guard()
                 self.travelling = False
+                if self.maintenance_callback is not None and self.maintenance_callback():
+                    self.release('maintenance_complete')
+                    self.position_at = None
+                    self.navigator.invalidate()
+                    self.last_tick = self.clock.monotonic()
+                    continue
                 position = self.read()
                 stage = 'guidance'
                 try:
