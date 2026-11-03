@@ -73,7 +73,7 @@ class MapPanelReader:
             raise ValueError('地图区域状态无效')
         return (context,current==b'\0')
 
-    def owner(self):
+    def ui_views(self):
         m=self.meta
         managers=self.find_class('XDTBaseService','Managers','XDTGame.Framework')
         services=m.static_ref(managers,'_serviceDic')
@@ -87,6 +87,10 @@ class MapPanelReader:
         manager=matches[0];layers=m.ref(manager,'_viewLayerDic');views=[]
         for layer in m.dictionary(layers):
             views.extend(m.list_refs(m.ref(layer,'stack')))
+        return (services,manager,layers,tuple(views))
+
+    def owner(self):
+        m=self.meta;services,manager,layers,views=self.ui_views()
         panels=[]
         for obj in views:
             info=m.obj(obj)
@@ -99,6 +103,56 @@ class MapPanelReader:
         panel=panels[0];nodes=m.ref(panel,'ui')
         self.expected(nodes,'MapPanel_Auto','XDTGame.Auto')
         return (services,manager,layers,panel,nodes)
+
+    def map_control(self,client_size,action):
+        """Read owned map-open / map-back buttons; M is not a toggle contract."""
+        from utils.drivers.native_ui_layout import NativeUiLayout
+        if action not in ('open','close'):
+            raise ValueError('地图开关操作无效')
+        m=self.meta;scene=self.scene_context();scope=self.ui_views()
+        layout=NativeUiLayout(self.memory,m)
+        if action=='open':
+            if self.owner() is not None:
+                return {'state':'closed','kind':'map_open','captured_at':self.clock()}
+            panels=[v for v in scope[3] if (m.obj(v)['name'],m.obj(v)['namespace'])
+                    ==('MapHudPanel','XDTGame.UI.Panel')]
+            if len(panels)!=1:
+                raise ValueError('小地图入口不唯一或尚未显示')
+            panel=panels[0];nodes=m.ref(panel,'ui')
+            self.expected(nodes,'MapHudPanel_Auto','XDTGame.Auto')
+            root=m.ref(nodes,'map_root_go');bar=m.ref(nodes,'map_bar_go')
+            if not layout.active(root) or not layout.active(bar):
+                raise ValueError('小地图入口尚未显示')
+            widget=m.ref(nodes,'map_bar_widget')
+            self.expected(widget,'CommonMapBar','XDTGame.UI.Widget')
+            ui=m.ref(widget,'ui');self.expected(ui,'CommonMapBar_Auto','XDTGame.Auto')
+            component=m.ref(ui,'map_btn')
+        else:
+            owner=self.owner()
+            if owner is None:
+                return {'state':'closed','kind':'map_close','captured_at':self.clock()}
+            panel,nodes=owner[3:];root=bar=None
+            widget=m.ref(nodes,'close_widget')
+            self.expected(widget,'CommonTitleWidget','XDTGame.UI.Widget')
+            if m.ref(widget,'_thisView')!=panel or m.ref(widget,'_backHandler'):
+                raise ValueError('地图返回按钮未绑定默认关闭操作')
+            ui=m.ref(widget,'ui');self.expected(ui,'CommonTitleWidget_Auto','XDTGame.Auto')
+            component=m.ref(ui,'back_btn')
+        owner=(*scope[:3],panel,nodes)
+        rect=self._button_rect(layout,owner,component,client_size)
+        if self.ui_views()!=scope or self.scene_context()!=scene or m.ref(panel,'ui')!=nodes \
+                or m.ref(widget,'ui')!=ui:
+            raise ValueError('地图开关按钮的界面归属正在变化')
+        if action=='open':
+            if m.ref(nodes,'map_bar_widget')!=widget or m.ref(ui,'map_btn')!=component \
+                    or not layout.active(root) or not layout.active(bar) or self.owner() is not None:
+                raise ValueError('小地图入口正在变化')
+        elif m.ref(nodes,'close_widget')!=widget or m.ref(ui,'back_btn')!=component \
+                or m.ref(widget,'_thisView')!=panel or m.ref(widget,'_backHandler'):
+            raise ValueError('地图返回按钮正在变化')
+        identity=hashlib.sha256(json.dumps([scene,owner,widget,ui,component]).encode()).hexdigest()
+        return {'state':'open','kind':'map_'+action,'buttons':{action:rect},
+                'scene_context':scene,'view_identity':identity,'captured_at':self.clock()}
 
     def scene_context(self):
         domain=self.meta.pointer(self.base+0x4d3878)

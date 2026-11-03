@@ -13,6 +13,7 @@ class FakeMap:
         self.cursor=(0,0,True);self.target=(10.,2.,20.);self.markers={}
         self.held_at=0.;self.stop_at=100.;self.wrong_hold=self.wrong_track=False
         self.wrong_cursor=False;self.track_clicks=0
+        self.m_open_only=False
 
     def monotonic(self):return self.time
     def sleep(self,seconds):self.time+=seconds
@@ -29,12 +30,14 @@ class FakeMap:
         elif kind=='key_down':self.keys.add(e['key'])
         elif kind=='key_up':
             self.keys.discard(e['key'])
-            if e['key']=='m':self.opened=not self.opened
+            if e['key']=='m':self.opened=True if self.m_open_only else not self.opened
             if not self.opened:self.spot=False
         elif kind=='mouse_down':self.buttons.add(e['button']);self.held_at=self.time
         elif kind=='mouse_up':
             self.buttons.discard(e['button']);x,y,_=self.cursor
-            if self.time-self.held_at>=1.:self.add=True
+            if (x,y)==(100,100):self.opened=True
+            elif (x,y)==(50,50):self.opened=False;self.spot=False
+            elif self.time-self.held_at>=1.:self.add=True
             elif self.add and (x,y)==(750,750):self.markers['17']=self.target;self.add=False
             elif self.spot and (x,y)==(850,850):self.tracked=True;self.track_clicks+=1
             elif self.markers and (x,y)==(510,480):self.spot=True
@@ -57,6 +60,11 @@ class Panel:
         if not self.g.opened:raise ValueError('map closed')
         return MapView('s','v',tuple(size),(1000.,1000.),(0.,0.),1.,1.,self.g.time,True,True,(0.,0.,1000.,1000.))
     def custom_markers(self):return dict(self.g.markers)
+    def map_control(self,size,action):
+        opened=self.g.opened if action=='close' else not self.g.opened
+        return dict(state='open' if opened else 'closed',kind='map_'+action,
+            captured_at=self.g.time,scene_context='s',view_identity='v',
+            buttons={action:(40,40,60,60) if action=='close' else (90,90,110,110)})
     def dialog(self,size,kind='add'):
         opened=self.g.add if kind=='add' else self.g.spot
         d={'state':'open' if opened else 'closed','kind':kind,'captured_at':self.g.time}
@@ -95,8 +103,8 @@ def test_preexisting_saved_marker_popup_is_closed_before_target_click():
     g=FakeMap();g.opened=True;g.spot=True;g.markers['17']=g.target
     targeter(g).set_target(g.target)
     downs=[e for e in g.events if e['type'] in ('key_down','mouse_down')]
-    assert downs[0]=={'type':'key_down','key':'m'}
-    assert downs[1]=={'type':'key_down','key':'m'}
+    assert downs[0]=={'type':'mouse_down','button':'left'}
+    assert not any(e.get('key')=='m' for e in g.events)
 
 
 def test_wrong_hold_readback_is_never_saved():
@@ -150,3 +158,36 @@ def test_changed_dialog_identity_is_rejected_before_saving():
     t.panel.dialog=dialog
     with pytest.raises(ValueError,match='点击前发生变化'):t.set_target(g.target)
     assert not g.markers and not g.buttons and not g.keys
+
+
+def test_zoom_positions_cursor_over_map_before_sending_wheel():
+    g=FakeMap();g.opened=True;g.target=(10.,2.,300.);g.scale=2.
+    t=targeter(g);original=g.execute
+    def execute(event):
+        if event['type']=='scroll' and 6<g.cursor[0]<994 and 6<g.cursor[1]<994:
+            g.scale=1.
+        original(event)
+    g.execute=execute
+    t.panel.geometry=lambda size:MapView('s','v',tuple(size),(1000.,1000.),(0.,0.),
+        g.scale,1.,g.time,True,True,(0.,0.,1000.,1000.))
+    plan=t.prepare(g.target)
+    assert plan.pixel==(510.,200.)
+    wheel=next(i for i,e in enumerate(g.events) if e['type']=='scroll')
+    assert g.events[wheel-1]['type']=='cursor_move'
+
+
+def test_open_timeout_names_the_stage_and_last_observed_state():
+    g=FakeMap();original=g.execute
+    def execute(event):
+        original(event)
+        if event.get('key')=='m' or event['type']=='mouse_up':g.opened=False
+    g.execute=execute
+    with pytest.raises(ValueError,match='打开大地图.*closed'):targeter(g).set_target(g.target)
+    assert not g.keys and not g.buttons
+
+
+def test_map_open_and_close_use_owned_buttons_not_an_assumed_m_toggle():
+    g=FakeMap();g.m_open_only=True
+    result=targeter(g).set_target(g.target)
+    assert result['map_marker_id']=='17' and not g.opened
+    assert not any(e.get('key')=='m' for e in g.events)
