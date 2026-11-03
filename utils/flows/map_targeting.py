@@ -4,7 +4,7 @@ Runs only inside a user-started task. No process writes or game API invocation;
 all input goes through the existing injectable device and stop/focus controls.
 """
 import math
-from dataclasses import replace
+from dataclasses import replace,asdict
 
 from utils.core import thresholds as policy
 from utils.core.map_target_policy import MapTargetPolicy
@@ -137,9 +137,9 @@ class MapTargeter:
     def click_button(self,dialog,name):
         if self.clock.monotonic()-dialog['captured_at']>self.options.view_max_age:
             raise ValueError('地图按钮读数已过期')
-        fresh=(self.panel.map_control(self.size,dialog['kind'].removeprefix('map_'))
+        fresh=(self.panel.zoom_state(self.size) if dialog['kind']=='map_zoom' else self.panel.map_control(self.size,dialog['kind'].removeprefix('map_'))
             if dialog['kind'] in ('map_open','map_close') else self.panel.dialog(self.size,dialog['kind']))
-        fields=('state','kind','usage_id','category','scene_context','view_identity','position_xz')
+        fields=('state','kind','usage_id','category','scene_context','view_identity','position_xz','fraction')
         if any(fresh.get(k)!=dialog.get(k) for k in fields) \
                 or fresh.get('buttons',{}).get(name)!=dialog['buttons'][name]:
             raise ValueError('地图按钮或其目标在点击前发生变化')
@@ -167,6 +167,41 @@ class MapTargeter:
         self.click_button(button,action)
         self.poll(self.panel.snapshot,lambda v:v['state']==expected)
 
+    def dismiss_popups(self):
+        state=self.panel.overlays(self.size)
+        if not state['popups']:return
+        self.stage('点击地图空白处收起弹窗',map_popups=list(state['popups']))
+        for attempt in range(3):
+            state=self.panel.overlays(self.size)
+            if not state['popups']:return
+            points=state['blank_points']
+            if len(points)<=attempt:raise ValueError('没有确认可点击的地图空白区域，未关闭弹窗')
+            self.click(points[attempt])
+            try:
+                self.poll(lambda:self.panel.overlays(self.size),lambda s:not s['popups'])
+                return
+            except _MapActionTimeout:pass
+        raise ValueError('地图弹窗仍未收起，未继续设标')
+
+    def minimize(self):
+        self.dismiss_popups()
+        self.stage('缩放地图至最小')
+        for step in range(self.options.max_zoom_steps+1):
+            state=self.panel.zoom_state(self.size)
+            if state['fraction']<=1e-6:return
+            if step==self.options.max_zoom_steps:break
+            self.click_button(state,'decrease')
+            self.poll(lambda:self.panel.zoom_state(self.size),lambda s:s['fraction']<state['fraction'])
+            self.dismiss_popups()
+            self.stage('缩放地图至最小')
+        raise ValueError('地图最低缩放未确认，未平移或设标')
+
+    def view_changes(self,before,after):
+        a,b=asdict(before),asdict(after)
+        changes={k:{'before':a[k],'after':b[k]} for k in a if k not in ('captured_at','pan') and a[k]!=b[k]}
+        self.report('map_targeting','地图视图变化',map_stage=self.phase,map_view_changes=changes)
+        return ','.join(changes)
+
     def pan(self,target,view):
         self.stage('平移地图',target=list(target),map_pan=list(view.pan))
         start,end=plan_map_pan(target,view,self.clock.monotonic(),
@@ -185,13 +220,15 @@ class MapTargeter:
                 self.position_cursor(tuple(a+(b-a)*fraction for a,b in zip(start,end)))
                 self.wait(self.options.drag_seconds/self.options.drag_steps)
         finally:self.lease.release('map_drag_complete')
+        self.dismiss_popups()
+        self.stage('平移地图后核对',target=list(target))
         try:
             current=self.poll(lambda:self.panel.geometry(self.size),lambda v:v.pan!=view.pan)
         except _MapActionTimeout:
             current=self.panel.geometry(self.size)
         current.validate(self.clock.monotonic(),self.options.view_max_age)
         if replace(current,pan=view.pan).signature()!=view.signature():
-            raise ValueError('地图平移时视图归属或缩放发生变化')
+            raise ValueError('地图平移时视图发生变化：'+self.view_changes(view,current))
         l,t,r,b=view.map_rect;center=((l+r)/2,(t+b)/2)
         before=math.dist(view.world_to_client(target),center)
         after=math.dist(current.world_to_client(target),center)
@@ -200,9 +237,11 @@ class MapTargeter:
         return after<before-.5
 
     def prepare(self,target):
+        self.minimize()
         self.stage('校准地图视图',target=list(target))
-        pans=zooms=0
-        for _ in range(self.options.max_zoom_steps+self.options.max_pan_steps+1):
+        pans=0
+        for _ in range(self.options.max_pan_steps+1):
+            self.dismiss_popups()
             a=self.panel.geometry(self.size);self.wait(self.options.settle_seconds)
             b=self.panel.geometry(self.size)
             try:
@@ -226,16 +265,8 @@ class MapTargeter:
                             raise
                         self.recover_drag(b,target)
                         continue
-                    pans=self.options.max_pan_steps  # No progress / map edge: try zoom, not endless dragging.
-                if zooms==self.options.max_zoom_steps:raise
-                zooms+=1
-                self.stage('缩小地图',map_scale=a.scale,map_zoom_attempt=zooms)
-                center=((l+r)/2,(t+bot)/2)
-                if any(x1<=center[0]<=x2 and y1<=center[1]<=y2 for x1,y1,x2,y2 in b.blocked_rects):
-                    raise ValueError('地图缩放位置被其他控件遮挡')
-                self.position_cursor(center)
-                self.guard();self.device.execute({'type':'scroll','dx':0,'dy':-1})
-                self.poll(lambda:self.panel.geometry(self.size),lambda v:v.scale<a.scale)
+                    pans=self.options.max_pan_steps  # Already at minimum: never drag indefinitely.
+                raise ValueError('最小缩放下目标仍未进入可操作区域，未继续设标')
         raise ValueError('地图目标无法投影到可操作区域')
 
     def set_target(self,target):
@@ -247,16 +278,7 @@ class MapTargeter:
             self.guard();state=self.panel.snapshot()
             if state['state']=='closed':
                 self.change_map(True)
-            existing=self.panel.dialog(self.size)
-            if existing['state']=='open':
-                raise ValueError('地图有尚未保存的标记编辑，请先关闭该弹窗')
-            if self.panel.dialog(self.size,'spot')['state']=='open':
-                # Dismiss an existing popup without clicking through any of
-                # its buttons (which can include deletion or teleportation).
-                self.change_map(False)
-                self.change_map(True)
-                if self.panel.dialog(self.size,'spot')['state']=='open':
-                    raise ValueError('原地图标记弹窗尚未收起，未点击新位置')
+            self.dismiss_popups()
             plan=self.prepare(target);markers=self.panel.custom_markers()
             nearby=[(math.hypot(p[0]-target[0],p[2]-target[2]),i) for i,p in markers.items()
                     if math.hypot(p[0]-target[0],p[2]-target[2])<=self.options.world_tolerance]

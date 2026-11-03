@@ -262,6 +262,67 @@ class MapPanelReader:
             raise ValueError('地图按钮未完整位于游戏窗口内')
         return result
 
+    def zoom_state(self,client_size):
+        from utils.drivers.native_ui_layout import NativeUiLayout
+        before=self.snapshot();owner=self.owner()
+        if owner is None or before['other_region_view']:
+            raise ValueError('最低缩放需要当前区域大地图')
+        layout=NativeUiLayout(self.memory,self.meta);m=self.meta;n=layout.native
+        wrapper=m.ref(owner[4],'scale_slider');native=layout.resolve(wrapper,'Slider','UnityEngine.UI')
+        info=n.obj(native);fields=[n.field(info['address'],key,12) for key in ('m_Value','m_MinValue','m_MaxValue')]
+        raw=tuple(n.data(native+f['offset'],4) for f in fields)
+        value,low,high=(struct.unpack('<f',v)[0] for v in raw)
+        if not all(math.isfinite(v) for v in (value,low,high)) or not low<=value<=high or high<=low:
+            raise ValueError('地图缩放滑条范围无效')
+        component=m.ref(owner[4],'decrease_scale_btn')
+        buttons={} if (value-low)/(high-low)<=1e-6 else {'decrease':self._button_rect(layout,owner,component,client_size)}
+        after=self.snapshot()
+        if raw!=tuple(n.data(native+f['offset'],4) for f in fields) or self.owner()!=owner \
+                or layout.resolve(wrapper,'Slider','UnityEngine.UI')!=native \
+                or m.ref(owner[4],'scale_slider')!=wrapper or m.ref(owner[4],'decrease_scale_btn')!=component \
+                or any(before[k]!=after[k] for k in ('scene_context','view_identity','map_scale')):
+            raise ValueError('地图缩放滑条正在变化')
+        return dict(state='open',kind='map_zoom',fraction=(value-low)/(high-low),
+            scene_context=before['scene_context'],view_identity=before['view_identity'],
+            buttons=buttons,captured_at=self.clock())
+
+    def overlays(self,client_size):
+        """Recognized map popups and blank candidates avoiding current icons."""
+        from utils.drivers.native_ui_layout import NativeUiLayout
+        from utils.core.map_targeting import blank_map_points
+        view=self.geometry(client_size);owner=self.owner();m=self.meta
+        if owner is None:raise ValueError('地图已关闭')
+        layout=NativeUiLayout(self.memory,m);canvas=m.ref(owner[1],'<CanvasRect>k__BackingField')
+        cr=layout.rect(canvas)['rect'];chain=layout.transforms(canvas);rects=[];popups=[]
+        def projected(root):
+            return rect_to_client(layout.rect(root)['rect'],layout.transforms(root),cr,chain,client_size)
+        visible=[]
+        for name in ('dialog_customspot','dialog','spotClickedList'):
+            go=m.ref(owner[4],name+'_go');active=layout.active(go);visible.append((go,active))
+            if active:
+                widget=m.ref(owner[4],name+'_widget');ui=m.ref(widget,'ui')
+                rects.append(projected(m.ref(ui,'root_t')));popups.append(name)
+        if popups:
+            linked=m.ref(owner[3],'_spotWidgets')
+            self.expected(linked,'LinkedList`1','System.Collections.Generic')
+            head=m.ref(linked,'head');count=struct.unpack('<i',self.payload(linked,'count',8,4))[0]
+            version=self.payload(linked,'version',8,4);node=head;seen=set()
+            if not 0<=count<=4096 or bool(head)!=bool(count):raise ValueError('地图图标链表无效')
+            for _ in range(count):
+                if not node or node in seen or m.ref(node,'list')!=linked:raise ValueError('地图图标归属变化')
+                seen.add(node);widget=m.ref(node,'item')
+                self.expected(widget,'MapSpotWidget','XDTGame.UI.Widget')
+                rects.append(projected(m.ref(m.ref(widget,'ui'),'root_t')));node=m.ref(node,'next')
+            if node!=head or self.payload(linked,'version',8,4)!=version \
+                    or m.ref(owner[3],'_spotWidgets')!=linked:
+                raise ValueError('地图图标集合正在变化')
+        current=self.geometry(client_size)
+        if current.signature()!=view.signature() or self.owner()!=owner \
+                or any(layout.active(go)!=active for go,active in visible):
+            raise ValueError('地图弹窗或位置正在变化')
+        points=blank_map_points(view,tuple(rects),self.clock(),max_age=1.,margin=6.) if popups else ()
+        return dict(popups=tuple(popups),blank_points=points)
+
     def dialog(self,client_size,kind='add'):
         """Owned visible dialog only. Never treats a pooled widget as visible."""
         from utils.drivers.native_ui_layout import NativeUiLayout

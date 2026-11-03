@@ -119,6 +119,19 @@ def plan_map_pan(target,view,now,*,max_age,margin):
     return start,end
 
 
+def blank_map_points(view,rects,now,*,max_age,margin):
+    view.validate(now,max_age)
+    if not _numbers((margin,),1) or margin<0:
+        raise ValueError('地图空白点击边距无效')
+    obstacles=tuple(rects)+view.blocked_rects
+    if any(not _numbers(tuple(r),4) or r[0]>=r[2] or r[1]>=r[3] for r in obstacles):
+        raise ValueError('地图遮挡范围无效')
+    l,t,r,b=view.map_rect
+    points=[(l+(r-l)*x,t+(b-t)*y) for y in (.15,.35,.55,.75,.85) for x in (.15,.35,.55,.75,.85)]
+    return tuple((x,y) for x,y in points if l+margin<x<r-margin and t+margin<y<b-margin
+        and not any(a-margin<=x<=c+margin and bb-margin<=y<=d+margin for a,bb,c,d in obstacles))
+
+
 def confirm_map_target(plan, first, second, now, *, requested_at, world_tolerance):
     """Validate native readback after a UI request, preserving saved XYZ."""
     if not _numbers((requested_at,world_tolerance,now),3) or world_tolerance<=0 \

@@ -37,6 +37,8 @@ class FakeMap:
             self.buttons.discard(e['button']);x,y,_=self.cursor
             if (x,y)==(100,100):self.opened=True
             elif (x,y)==(50,50):self.opened=False;self.spot=False
+            elif (x,y)==(75,75):self.zoom_fraction=max(0.,getattr(self,'zoom_fraction',0.)-.5)
+            elif (x,y)==(250,250):self.add=False;self.spot=False
             elif self.time-self.held_at>=1.:self.add=True
             elif self.add and (x,y)==(750,750):self.markers['17']=self.target;self.add=False
             elif self.spot and (x,y)==(850,850):self.tracked=True;self.track_clicks+=1
@@ -60,6 +62,12 @@ class Panel:
         if not self.g.opened:raise ValueError('map closed')
         return MapView('s','v',tuple(size),(1000.,1000.),(0.,0.),1.,1.,self.g.time,True,True,(0.,0.,1000.,1000.))
     def custom_markers(self):return dict(self.g.markers)
+    def zoom_state(self,size):
+        return dict(state='open',kind='map_zoom',captured_at=self.g.time,scene_context='s',
+            view_identity='v',fraction=getattr(self.g,'zoom_fraction',0.),buttons={'decrease':(65,65,85,85)})
+    def overlays(self,size):
+        return dict(popups=('add',) if self.g.add else ('spot',) if self.g.spot else (),
+                    blank_points=((250.,250.),))
     def map_control(self,size,action):
         opened=self.g.opened if action=='close' else not self.g.opened
         return dict(state='open' if opened else 'closed',kind='map_'+action,
@@ -104,7 +112,7 @@ def test_preexisting_saved_marker_popup_is_closed_before_target_click():
     targeter(g).set_target(g.target)
     downs=[e for e in g.events if e['type'] in ('key_down','mouse_down')]
     assert downs[0]=={'type':'mouse_down','button':'left'}
-    assert sum(e.get('key')=='m' and e['type']=='key_down' for e in g.events)==1
+    assert not any(e.get('key')=='m' for e in g.events)
 
 
 def test_wrong_hold_readback_is_never_saved():
@@ -131,10 +139,11 @@ def test_stop_during_long_press_releases_mouse_without_saving():
     assert not g.buttons and not g.keys and not g.markers
 
 
-def test_preexisting_unsaved_dialog_is_not_overwritten():
+def test_preexisting_unsaved_dialog_is_dismissed_without_saving_its_position():
     g=FakeMap();g.opened=True;g.add=True
-    with pytest.raises(ValueError,match='尚未保存'):targeter(g).set_target(g.target)
-    assert not g.events
+    targeter(g).set_target(g.target)
+    assert list(g.markers.values())==[g.target]
+    assert next(e for e in g.events if e['type']=='cursor_move')['x']==250
 
 
 @pytest.mark.parametrize('field,value',[
@@ -160,20 +169,21 @@ def test_changed_dialog_identity_is_rejected_before_saving():
     assert not g.markers and not g.buttons and not g.keys
 
 
-def test_zoom_positions_cursor_over_map_before_sending_wheel():
-    g=FakeMap();g.opened=True;g.target=(10.,2.,300.);g.scale=2.
+def test_minimum_zoom_is_confirmed_before_target_projection():
+    from utils.drivers.guidance_input_lease import GuidanceInputLease
+    g=FakeMap();g.opened=True;g.target=(10.,2.,300.);g.scale=2.;g.zoom_fraction=1.
     t=targeter(g);t.options=MapTargetPolicy(max_pan_steps=0);original=g.execute
+    t.lease=GuidanceInputLease(g,g,g,g.size(),g.monotonic)
     def execute(event):
-        if event['type']=='scroll' and 6<g.cursor[0]<994 and 6<g.cursor[1]<994:
-            g.scale=1.
         original(event)
+        if event['type']=='mouse_up' and g.cursor[:2]==(75,75):g.scale=1.
     g.execute=execute
     t.panel.geometry=lambda size:MapView('s','v',tuple(size),(1000.,1000.),(0.,0.),
         g.scale,1.,g.time,True,True,(0.,0.,1000.,1000.))
     plan=t.prepare(g.target)
     assert plan.pixel==(510.,200.)
-    wheel=next(i for i,e in enumerate(g.events) if e['type']=='scroll')
-    assert g.events[wheel-1]['type']=='cursor_move'
+    assert not any(e['type']=='scroll' for e in g.events)
+    assert any(e.get('x')==75 and e.get('y')==75 for e in g.events)
 
 
 def test_open_timeout_names_the_stage_and_last_observed_state():
