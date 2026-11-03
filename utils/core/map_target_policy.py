@@ -16,6 +16,7 @@ class MapTargetPolicy:
     setup_timeout: float = 40.
     max_zoom_steps: int = 24
     max_pan_steps: int = 12
+    max_drag_retries: int = 2
     drag_seconds: float = .35
     drag_steps: int = 12
     view_max_age: float = 1.
@@ -32,6 +33,8 @@ class MapTargetPolicy:
             raise ValueError('地图缩放次数无效')
         if type(self.max_pan_steps) is not int or not 0<=self.max_pan_steps<=100:
             raise ValueError('地图平移次数无效')
+        if type(self.max_drag_retries) is not int or not 0<=self.max_drag_retries<=5:
+            raise ValueError('地图拖动恢复次数无效')
         if type(self.drag_steps) is not int or not 1<=self.drag_steps<=60:
             raise ValueError('地图拖动分段无效')
         if type(self.pixel_margin) not in (int,float) or not math.isfinite(self.pixel_margin) \

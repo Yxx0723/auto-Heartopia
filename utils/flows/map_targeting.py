@@ -17,6 +17,12 @@ class _MapActionTimeout(ValueError):
     pass
 
 
+class _MapInputRevoked(ValueError):
+    def __init__(self,reason):
+        self.reason=reason
+        super().__init__(f'地图输入许可已撤销（{reason}），等待重新核对')
+
+
 class MapTargeter:
     def __init__(self,reader,device,window,controls,clock,check,report,*,panel=None,options=None):
         self.reader,self.device,self.window,self.controls=reader,device,window,controls
@@ -27,9 +33,11 @@ class MapTargeter:
         self.lease=None
         self.started=0.
         self.phase='地图准备'
+        self.drag_retries=0
 
     def stage(self,name,**extra):
         self.phase=name
+        if self.lease:self.lease.set_phase(name)
         self.report('map_targeting',name,map_stage=name,**extra)
 
     def guard(self):
@@ -43,7 +51,36 @@ class MapTargeter:
             if self.lease.error:
                 raise OSError('地图输入释放失败') from self.lease.error
             if self.lease.tripped:
-                raise ValueError('地图输入许可已撤销，等待重新核对')
+                reason=self.lease.revocation_reason or 'unknown'
+                self.report('map_targeting','地图输入许可已撤销',map_stage=self.phase,
+                    map_revoke_reason=reason,map_input_lease=self.lease.metrics())
+                raise _MapInputRevoked(reason)
+
+    def start_lease(self):
+        self.lease=GuidanceInputLease(self.device,self.controls,self.window,list(self.size),self.clock.monotonic)
+        self.lease.start()
+
+    def recover_drag(self,view,target):
+        # The old watchdog has already released the gesture. Never resume its
+        # button-down: retire it, verify live UI without input, then replan.
+        self.lease.close();self.lease=None
+        self.guard()
+        first=self.panel.geometry(self.size)
+        self.wait(self.options.settle_seconds)
+        current=self.panel.geometry(self.size)
+        current.validate(self.clock.monotonic(),self.options.view_max_age)
+        if first.signature()!=current.signature() \
+                or replace(current,pan=view.pan).signature()!=view.signature():
+            raise ValueError('拖动中断后地图场景或视图已改变，未恢复输入')
+        l,t,r,b=view.map_rect;center=((l+r)/2,(t+b)/2)
+        if math.dist(current.world_to_client(target),center)>math.dist(view.world_to_client(target),center)+.5:
+            raise ValueError('中断的地图拖动远离目标，未恢复输入')
+        if any(self.panel.dialog(self.size,kind)['state']=='open' for kind in ('add','spot')):
+            raise ValueError('拖动中断后出现标记弹窗，未恢复输入')
+        self.guard()
+        self.drag_retries+=1
+        self.start_lease()
+        self.stage('重新核对后恢复地图平移',map_drag_retry=self.drag_retries,map_pan=list(current.pan))
 
     def wait(self,seconds):
         end=self.clock.monotonic()+seconds
@@ -182,7 +219,13 @@ class MapTargeter:
                     raise  # Do not call a changed/invalid view an out-of-view target.
                 if pans<self.options.max_pan_steps:
                     pans+=1
-                    if self.pan(target,b):continue
+                    try:
+                        if self.pan(target,b):continue
+                    except _MapInputRevoked as exc:
+                        if exc.reason!='lease_expired' or self.drag_retries>=self.options.max_drag_retries:
+                            raise
+                        self.recover_drag(b,target)
+                        continue
                     pans=self.options.max_pan_steps  # No progress / map edge: try zoom, not endless dragging.
                 if zooms==self.options.max_zoom_steps:raise
                 zooms+=1
@@ -197,8 +240,8 @@ class MapTargeter:
 
     def set_target(self,target):
         self.started=self.clock.monotonic()
-        self.lease=GuidanceInputLease(self.device,self.controls,self.window,list(self.size),self.clock.monotonic)
-        self.device.release_all();self.lease.start()
+        self.drag_retries=0
+        self.device.release_all();self.start_lease()
         try:
             self.stage('检查地图状态',target=list(target))
             self.guard();state=self.panel.snapshot()
@@ -261,4 +304,5 @@ class MapTargeter:
                 map_marker_id=marker_id,tracking_id=result['tracking_id'],path_end_gap=result['path_end_gap'])
             return result
         finally:
-            self.lease.close();self.lease=None
+            if self.lease:self.lease.close()
+            self.lease=None

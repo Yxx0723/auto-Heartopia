@@ -20,6 +20,7 @@ class GuidanceInputLease:
         self.thread = None
         self.deadline = None
         self.tripped = False
+        self.revocation_reason = None
         self.error = None
         self.counts, self.recent = Counter(), deque(maxlen=32)
         self.phase, self.phase_at = 'idle', self.clock()
@@ -49,7 +50,7 @@ class GuidanceInputLease:
     def release(self, reason, active=False):
         with self.lock:
             actual = getattr(self.device, 'keys', None)
-            held = bool(actual) if isinstance(actual, (set, frozenset)) else \
+            held = bool(actual or getattr(self.device,'buttons',None)) if isinstance(actual, (set, frozenset)) else \
                 self.deadline is not None or (active and not self.tripped)
             self.deadline = None
             self.device.release_all()
@@ -97,6 +98,7 @@ class GuidanceInputLease:
                 return
             reason = reason or ('lease_expired' if self.clock() >= self.deadline else None)
             if reason:
+                self.revocation_reason = reason
                 self.tripped = True
                 try:
                     self.release(reason)
