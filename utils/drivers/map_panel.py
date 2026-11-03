@@ -262,7 +262,7 @@ class MapPanelReader:
             raise ValueError('地图按钮未完整位于游戏窗口内')
         return result
 
-    def zoom_state(self,client_size):
+    def zoom_state(self,client_size,*,include_button=True):
         from utils.drivers.native_ui_layout import NativeUiLayout
         before=self.snapshot();owner=self.owner()
         if owner is None or before['other_region_view']:
@@ -275,7 +275,7 @@ class MapPanelReader:
         if not all(math.isfinite(v) for v in (value,low,high)) or not low<=value<=high or high<=low:
             raise ValueError('地图缩放滑条范围无效')
         component=m.ref(owner[4],'decrease_scale_btn')
-        buttons={} if (value-low)/(high-low)<=1e-6 else {'decrease':self._button_rect(layout,owner,component,client_size)}
+        buttons={} if not include_button or (value-low)/(high-low)<=1e-6 else {'decrease':self._button_rect(layout,owner,component,client_size)}
         after=self.snapshot()
         if raw!=tuple(n.data(native+f['offset'],4) for f in fields) or self.owner()!=owner \
                 or layout.resolve(wrapper,'Slider','UnityEngine.UI')!=native \

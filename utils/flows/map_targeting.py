@@ -8,7 +8,7 @@ from dataclasses import replace,asdict
 
 from utils.core import thresholds as policy
 from utils.core.map_target_policy import MapTargetPolicy
-from utils.core.map_targeting import plan_map_click,plan_map_pan,confirm_map_target
+from utils.core.map_targeting import plan_map_click,plan_map_pan,confirm_map_target,blank_map_points
 from utils.drivers.guidance_input_lease import GuidanceInputLease
 from utils.drivers.map_panel import MapPanelReader
 
@@ -98,7 +98,7 @@ class MapTargeter:
             self.guard()
             try:
                 value=read()
-                observed=({k:value[k] for k in ('state','kind','usage_id','category') if k in value}
+                observed=({k:value[k] for k in ('state','kind','usage_id','category','fraction') if k in value}
                     if isinstance(value,dict) else {'scale':value.scale} if hasattr(value,'scale') else None)
                 if accept(value):return value
             except (ValueError,OSError) as exc:error=exc
@@ -186,12 +186,33 @@ class MapTargeter:
     def minimize(self):
         self.dismiss_popups()
         self.stage('缩放地图至最小')
+        read=lambda:self.panel.zoom_state(self.size,include_button=False)
         for step in range(self.options.max_zoom_steps+1):
-            state=self.panel.zoom_state(self.size)
+            state=read()
             if state['fraction']<=1e-6:return
             if step==self.options.max_zoom_steps:break
-            self.click_button(state,'decrease')
-            self.poll(lambda:self.panel.zoom_state(self.size),lambda s:s['fraction']<state['fraction'])
+            a=self.panel.geometry(self.size);self.wait(self.options.settle_seconds)
+            b=self.panel.geometry(self.size)
+            a.validate(self.clock.monotonic(),self.options.view_max_age)
+            b.validate(self.clock.monotonic(),self.options.view_max_age)
+            if a.signature()!=b.signature() or b.scene!=state['scene_context'] \
+                    or b.identity!=state['view_identity']:
+                raise ValueError('缩放前地图视图发生变化，未滚动')
+            points=blank_map_points(b,(),self.clock.monotonic(),max_age=self.options.view_max_age,
+                                    margin=self.options.pixel_margin)
+            if not points:raise ValueError('没有确认可滚动的地图操作区域')
+            l,t,r,bot=b.map_rect;center=((l+r)/2,(t+bot)/2)
+            pixel=min(points,key=lambda point:math.dist(point,center))
+            self.position_cursor(pixel)
+            if self.panel.geometry(self.size).signature()!=b.signature():
+                raise ValueError('鼠标到位后地图视图发生变化，未滚动')
+            self.guard()
+            self.report('map_targeting','在地图区域滚轮缩小',map_stage=self.phase,
+                        map_zoom_fraction=state['fraction'],map_zoom_pixel=list(pixel))
+            # Negative wheel input shrinks via the map's native zoom handler.
+            # No held input or small button-center assumption is required.
+            self.device.execute({'type':'scroll','dx':0,'dy':-12})
+            self.poll(read,lambda s:s['fraction']<state['fraction'])
             self.dismiss_popups()
             self.stage('缩放地图至最小')
         raise ValueError('地图最低缩放未确认，未平移或设标')

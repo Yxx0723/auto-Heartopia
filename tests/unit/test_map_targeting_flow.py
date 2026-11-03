@@ -26,6 +26,7 @@ class FakeMap:
 
     def execute(self,e):
         self.events.append(e.copy());kind=e['type']
+        if kind=='scroll':self.zoom_fraction=max(0.,getattr(self,'zoom_fraction',0.)-.5)
         if kind=='cursor_move':self.cursor=(e['x'],e['y'],True)
         elif kind=='key_down':self.keys.add(e['key'])
         elif kind=='key_up':
@@ -62,7 +63,7 @@ class Panel:
         if not self.g.opened:raise ValueError('map closed')
         return MapView('s','v',tuple(size),(1000.,1000.),(0.,0.),1.,1.,self.g.time,True,True,(0.,0.,1000.,1000.))
     def custom_markers(self):return dict(self.g.markers)
-    def zoom_state(self,size):
+    def zoom_state(self,size,*,include_button=True):
         return dict(state='open',kind='map_zoom',captured_at=self.g.time,scene_context='s',
             view_identity='v',fraction=getattr(self.g,'zoom_fraction',0.),buttons={'decrease':(65,65,85,85)})
     def overlays(self,size):
@@ -176,14 +177,14 @@ def test_minimum_zoom_is_confirmed_before_target_projection():
     t.lease=GuidanceInputLease(g,g,g,g.size(),g.monotonic)
     def execute(event):
         original(event)
-        if event['type']=='mouse_up' and g.cursor[:2]==(75,75):g.scale=1.
+        if event['type']=='scroll':g.scale=1.
     g.execute=execute
     t.panel.geometry=lambda size:MapView('s','v',tuple(size),(1000.,1000.),(0.,0.),
         g.scale,1.,g.time,True,True,(0.,0.,1000.,1000.))
     plan=t.prepare(g.target)
     assert plan.pixel==(510.,200.)
-    assert not any(e['type']=='scroll' for e in g.events)
-    assert any(e.get('x')==75 and e.get('y')==75 for e in g.events)
+    assert any(e['type']=='scroll' and e['dy']<0 for e in g.events)
+    assert not any(e.get('x')==75 and e.get('y')==75 for e in g.events)
 
 
 def test_open_timeout_names_the_stage_and_last_observed_state():

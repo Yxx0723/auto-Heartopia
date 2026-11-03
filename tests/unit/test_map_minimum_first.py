@@ -9,15 +9,15 @@ from utils.core.map_targeting import MapView,blank_map_points
 def test_zoom_even_when_target_already_fits_before_marking():
     g=FakeMap();g.zoom_fraction=1.;result=targeter(g).set_target(g.target)
     assert result['map_marker_id']=='17' and g.zoom_fraction==0.
-    moves=[(e['x'],e['y']) for e in g.events if e['type']=='cursor_move']
-    assert moves.index((75,75))<moves.index((510,480))
+    assert next(i for i,e in enumerate(g.events) if e['type']=='scroll')<next(
+        i for i,e in enumerate(g.events) if e.get('x')==510 and e.get('y')==480)
 
 
 def test_zoom_failure_does_not_proceed_to_pan_or_mark():
     g=FakeMap();g.zoom_fraction=1.;t=targeter(g);original=g.execute
     def execute(e):
         original(e)
-        if e['type']=='mouse_up':g.zoom_fraction=1.
+        if e['type']=='scroll':g.zoom_fraction=1.
     g.execute=execute
     with pytest.raises(ValueError,match='最小'):t.set_target(g.target)
     assert not g.markers and not g.buttons
