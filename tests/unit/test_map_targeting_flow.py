@@ -104,7 +104,7 @@ def test_preexisting_saved_marker_popup_is_closed_before_target_click():
     targeter(g).set_target(g.target)
     downs=[e for e in g.events if e['type'] in ('key_down','mouse_down')]
     assert downs[0]=={'type':'mouse_down','button':'left'}
-    assert not any(e.get('key')=='m' for e in g.events)
+    assert sum(e.get('key')=='m' and e['type']=='key_down' for e in g.events)==1
 
 
 def test_wrong_hold_readback_is_never_saved():
@@ -186,8 +186,38 @@ def test_open_timeout_names_the_stage_and_last_observed_state():
     assert not g.keys and not g.buttons
 
 
-def test_map_open_and_close_use_owned_buttons_not_an_assumed_m_toggle():
+def test_m_opens_map_but_owned_back_button_closes_it():
     g=FakeMap();g.m_open_only=True
     result=targeter(g).set_target(g.target)
     assert result['map_marker_id']=='17' and not g.opened
+    assert sum(e.get('key')=='m' and e['type']=='key_down' for e in g.events)==1
+
+
+def test_hidden_pointer_before_map_is_opened_does_not_require_alt_or_a_click():
+    g=FakeMap();original=g.pointer
+    g.pointer=lambda:original() if g.opened else (500,500,False)
+    result=targeter(g).set_target(g.target)
+    first=next(e for e in g.events if e['type'] in ('key_down','mouse_down','cursor_move'))
+    assert first=={'type':'key_down','key':'m'}
+    assert result['map_marker_id']=='17' and not g.opened
+    assert not any(e.get('key') in ('alt','alt_l','alt_r') for e in g.events)
+
+
+def test_already_open_map_is_not_toggled_by_m():
+    g=FakeMap();g.opened=True
+    targeter(g).set_target(g.target)
     assert not any(e.get('key')=='m' for e in g.events)
+
+
+def test_pointer_still_hidden_in_map_never_presses_a_mouse_button():
+    g=FakeMap();g.pointer=lambda:(500,500,False)
+    with pytest.raises(ValueError,match='鼠标未到达'):targeter(g).set_target(g.target)
+    assert not any(e['type']=='mouse_down' for e in g.events)
+    assert not g.keys and not g.buttons
+
+
+def test_stop_while_opening_map_releases_m_without_clicking():
+    g=FakeMap();g.stop_at=.04
+    with pytest.raises(RuntimeError,match='stopped'):targeter(g).set_target(g.target)
+    assert not g.keys and not g.buttons
+    assert not any(e['type']=='mouse_down' for e in g.events)

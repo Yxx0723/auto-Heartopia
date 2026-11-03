@@ -115,6 +115,14 @@ class MapTargeter:
         expected='projection_unverified' if opened else 'closed'
         self.guard()
         if self.panel.snapshot()['state']==expected:return
+        if opened:
+            # In mouse-look mode the HUD cursor is hidden. Open the map with
+            # its shortcut first; cursor checks belong to the opened map.
+            # M is only used to open, never assumed to toggle the map closed.
+            self.tap('m')
+            self.poll(self.panel.snapshot,lambda v:v['state']==expected)
+            self.wait(self.options.settle_seconds)
+            return
         button=self.panel.map_control(self.size,action)
         if button.get('state')!='open':
             if self.panel.snapshot()['state']==expected:return
