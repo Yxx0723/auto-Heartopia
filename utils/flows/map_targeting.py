@@ -9,6 +9,7 @@ from dataclasses import replace,asdict
 from utils.core import thresholds as policy
 from utils.core.map_target_policy import MapTargetPolicy
 from utils.core.map_targeting import plan_map_click,plan_map_pan,confirm_map_target,blank_map_points
+from utils.core.map_targeting import MapLayoutUpdating
 from utils.drivers.guidance_input_lease import GuidanceInputLease
 from utils.drivers.map_panel import MapPanelReader
 
@@ -34,6 +35,7 @@ class MapTargeter:
         self.started=0.
         self.phase='地图准备'
         self.drag_retries=0
+        self.map_scope=None
 
     def stage(self,name,**extra):
         self.phase=name
@@ -116,6 +118,54 @@ class MapTargeter:
         try:self.wait(self.options.press_seconds)
         finally:self.lease.release('map_key_complete')
 
+    def read_layout(self,read):
+        """Retry only torn layout values, without repeating any UI input."""
+        start=self.clock.monotonic();retries=0;scope=None
+        def check_scope():
+            current=self.panel.snapshot()
+            if current.get('state')!='projection_unverified' or (
+                    current.get('scene_context'),current.get('view_identity'))!=scope:
+                raise ValueError('等待布局期间地图场景或面板已改变，未继续操作')
+        while True:
+            self.guard()
+            try:
+                value=read()
+                if scope:check_scope()
+                if retries:self.report('map_targeting','地图布局已稳定',map_stage=self.phase,
+                    map_layout_retries=retries,map_layout_wait_seconds=self.clock.monotonic()-start)
+                return value
+            except MapLayoutUpdating as exc:
+                pending=exc.scope or self.map_scope
+                if pending is None or (scope is not None and pending!=scope) \
+                        or (self.map_scope is not None and pending!=self.map_scope):
+                    raise ValueError('地图布局更新归属未确认，未继续操作') from exc
+                scope=pending;check_scope()
+                if self.device.keys or self.device.buttons:
+                    raise ValueError('持有输入时不等待地图布局') from exc
+                if self.clock.monotonic()-start>=self.options.action_timeout:
+                    raise _MapActionTimeout('等待地图布局稳定超过本次时限，未继续操作') from exc
+                retries+=1
+                if retries==1:self.report('map_targeting','等待地图布局稳定',map_stage=self.phase,
+                    map_layout_reason=str(exc),map_layout_retries=retries)
+                self.wait(self.options.settle_seconds)
+
+    def stable_views(self,scope=None):
+        previous=None;expected=scope or self.map_scope
+        def read():
+            nonlocal previous,expected
+            current=self.panel.geometry(self.size)
+            current.validate(self.clock.monotonic(),self.options.view_max_age)
+            observed=(current.scene,current.identity)
+            if expected is not None and observed!=expected:
+                raise ValueError('等待布局期间地图场景或面板已改变，未继续操作')
+            expected=observed;before=previous;previous=current
+            if before is not None and before.signature()==current.signature() and (
+                    0<current.captured_at-before.captured_at<=self.options.view_max_age):
+                before.validate(self.clock.monotonic(),self.options.view_max_age)
+                return before,current
+            raise MapLayoutUpdating('等待两份一致的新鲜地图布局',scope=expected)
+        return self.read_layout(read)
+
     def position_cursor(self,pixel):
         self.guard();x,y=(round(v) for v in pixel)
         if not 0<x<self.size[0]-1 or not 0<y<self.size[1]-1:
@@ -168,11 +218,11 @@ class MapTargeter:
         self.poll(self.panel.snapshot,lambda v:v['state']==expected)
 
     def dismiss_popups(self):
-        state=self.panel.overlays(self.size)
+        state=self.read_layout(lambda:self.panel.overlays(self.size))
         if not state['popups']:return
         self.stage('点击地图空白处收起弹窗',map_popups=list(state['popups']))
         for attempt in range(3):
-            state=self.panel.overlays(self.size)
+            state=self.read_layout(lambda:self.panel.overlays(self.size))
             if not state['popups']:return
             points=state['blank_points']
             if len(points)<=attempt:raise ValueError('没有确认可点击的地图空白区域，未关闭弹窗')
@@ -191,8 +241,7 @@ class MapTargeter:
             state=read()
             if state['fraction']<=1e-6:return
             if step==self.options.max_zoom_steps:break
-            a=self.panel.geometry(self.size);self.wait(self.options.settle_seconds)
-            b=self.panel.geometry(self.size)
+            a,b=self.stable_views((state['scene_context'],state['view_identity']))
             a.validate(self.clock.monotonic(),self.options.view_max_age)
             b.validate(self.clock.monotonic(),self.options.view_max_age)
             if a.signature()!=b.signature() or b.scene!=state['scene_context'] \
@@ -213,6 +262,8 @@ class MapTargeter:
             # No held input or small button-center assumption is required.
             self.device.execute({'type':'scroll','dx':0,'dy':-12})
             self.poll(read,lambda s:s['fraction']<state['fraction'])
+            self.stage('等待地图缩放布局稳定')
+            self.stable_views((state['scene_context'],state['view_identity']))
             self.dismiss_popups()
             self.stage('缩放地图至最小')
         raise ValueError('地图最低缩放未确认，未平移或设标')
@@ -263,8 +314,7 @@ class MapTargeter:
         pans=0
         for _ in range(self.options.max_pan_steps+1):
             self.dismiss_popups()
-            a=self.panel.geometry(self.size);self.wait(self.options.settle_seconds)
-            b=self.panel.geometry(self.size)
+            a,b=self.stable_views()
             try:
                 return plan_map_click(target,a,b,self.clock.monotonic(),
                     max_age=self.options.view_max_age,margin=self.options.pixel_margin)
@@ -293,12 +343,18 @@ class MapTargeter:
     def set_target(self,target):
         self.started=self.clock.monotonic()
         self.drag_retries=0
+        self.map_scope=None
         self.device.release_all();self.start_lease()
         try:
             self.stage('检查地图状态',target=list(target))
             self.guard();state=self.panel.snapshot()
             if state['state']=='closed':
                 self.change_map(True)
+            anchor=self.panel.snapshot()
+            if anchor.get('state')!='projection_unverified':raise ValueError('当前地图未展开')
+            self.map_scope=(anchor.get('scene_context'),anchor.get('view_identity'))
+            if not all(isinstance(v,str) and v for v in self.map_scope):
+                raise ValueError('地图场景或面板身份未确认')
             self.dismiss_popups()
             plan=self.prepare(target);markers=self.panel.custom_markers()
             nearby=[(math.hypot(p[0]-target[0],p[2]-target[2]),i) for i,p in markers.items()

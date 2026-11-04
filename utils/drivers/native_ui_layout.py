@@ -8,6 +8,7 @@ import struct
 
 from utils.drivers.il2cpp_scene import NativeSceneMetadata
 from utils.core.ui_projection import transform_point
+from utils.core.map_targeting import MapLayoutUpdating
 
 
 class NativeUiLayout:
@@ -76,13 +77,15 @@ class NativeUiLayout:
         # get_rect updates its cached rectangle when this dirty byte is set.
         # A read-only observer must wait, rather than calling that updater.
         if raw[0x39]:
-            raise ValueError('地图矩形布局正在更新')
+            raise MapLayoutUpdating('地图矩形布局正在更新')
         rect=struct.unpack_from('<4f',raw)
         anchored=struct.unpack_from('<2f',raw,0x20)
         if not all(math.isfinite(x) for x in (*rect,*anchored)) or min(rect[2:])<=0:
             raise ValueError('地图矩形或平移数值无效')
-        if n.data(pointer+0xb8,64)!=raw or n.pointer(target+f['offset'])!=pointer:
+        if n.pointer(target+f['offset'])!=pointer:
             raise ValueError('地图矩形或其对象归属正在变化')
+        if n.data(pointer+0xb8,64)!=raw:
+            raise MapLayoutUpdating('地图矩形布局正在更新')
         return {'rect':rect,'anchored_position':anchored,'read_only':True}
 
     def transforms(self,obj):
@@ -118,9 +121,10 @@ class NativeUiLayout:
             index=struct.unpack('<i',parent)[0]
         chain=tuple(records);transform_point((0.,0.,0.),chain)
         if n.data(pointer+0x38,12)!=access or n.data(hier+0x18,16)!=tables \
-                or n.pointer(target+field['offset'])!=pointer \
-                or any(n.data(at,len(raw))!=raw for at,raw in checks):
+                or n.pointer(target+field['offset'])!=pointer:
             raise ValueError('界面变换链正在更新')
+        if any(n.data(at,len(raw))!=raw for at,raw in checks):
+            raise MapLayoutUpdating('界面变换数值正在更新')
         return chain
 
     def button_geometry(self,component):

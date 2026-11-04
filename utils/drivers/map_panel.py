@@ -12,7 +12,7 @@ import time
 from utils.drivers.global_minerals import GlobalMineralReader
 from utils.drivers.mono_scene import SceneMetadata
 from utils.drivers.native_guidance import NativeGuidanceReader
-from utils.core.map_targeting import MapView
+from utils.core.map_targeting import MapView,MapLayoutUpdating
 from utils.core.ui_projection import rect_to_client
 
 
@@ -242,9 +242,13 @@ class MapPanelReader:
                 or any(not close(a,b) for a,b in zip(rotation,(0.,0.,0.,1.))):
             raise ValueError('地图实际画布、缩放或旋转与界面模型不符')
         last=self.snapshot()
+        if self.owner()!=owner or any(first.get(k)!=last.get(k) for k in
+                ('state','scene_context','view_identity','other_region_view')):
+            raise ValueError('地图布局读取期间场景或面板归属已改变')
         if {k:v for k,v in first.items() if k!='captured_at'} \
-                !={k:v for k,v in last.items() if k!='captured_at'} or self.owner()!=owner:
-            raise ValueError('地图布局读取期间视图发生变化')
+                !={k:v for k,v in last.items() if k!='captured_at'}:
+            raise MapLayoutUpdating('地图布局读取期间视图发生变化',
+                                    scope=(first['scene_context'],first['view_identity']))
         w,h=client_size
         # Exclude persistent top/bottom controls and the left zoom strip.
         # This is a conservative interaction ROI, not map/world coverage.

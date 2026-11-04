@@ -15,6 +15,13 @@ def _numbers(values, count):
         type(x) in (int,float) and math.isfinite(x) for x in values)
 
 
+class MapLayoutUpdating(ValueError):
+    """A torn layout read; never a usable view or permission to send input."""
+    def __init__(self,message,*,scope=None):
+        self.scope=scope
+        super().__init__(message)
+
+
 @dataclass(frozen=True)
 class MapView:
     scene: str

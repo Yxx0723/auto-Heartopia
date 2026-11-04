@@ -58,7 +58,8 @@ class FakeMap:
 
 class Panel:
     def __init__(self,game):self.g=game
-    def snapshot(self):return {'state':'projection_unverified' if self.g.opened else 'closed'}
+    def snapshot(self):return {'state':'projection_unverified' if self.g.opened else 'closed',
+                              'scene_context':'s','view_identity':'v'}
     def geometry(self,size):
         if not self.g.opened:raise ValueError('map closed')
         return MapView('s','v',tuple(size),(1000.,1000.),(0.,0.),1.,1.,self.g.time,True,True,(0.,0.,1000.,1000.))
