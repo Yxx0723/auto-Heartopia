@@ -26,6 +26,7 @@ class CollectionFollower(_Follower):
             self.keys.clear()
 
     def release(self,reason='controller'):
+        self._memory_anchor=None
         self.input_lease.release(reason,active=bool(self.keys))
         self.keys.clear()
         self._normal_movement=False

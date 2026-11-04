@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import threading
 from uuid import uuid4
+from utils.drivers.traversal_memory import TraversalMemory
 
 from utils.core.coordinate_route import valid_position
 
@@ -31,6 +32,7 @@ class PlaybackHistory:
         self.run_id = now.strftime('%Y%m%d-%H%M%S-%f')+'-'+uuid4().hex[:8]
         safe_name = re.sub(r'[^\w .-]', '_', str(name))[:40].strip(' .') or '未命名路线'
         self.path = Path(root)/(safe_name+'-'+self.run_id)
+        self.memory = None
         self.summary = {'schema': 'playback-history-v1', 'route_name': name,
                         'created_at': now.isoformat(timespec='milliseconds'),
                         'started_at': None, 'ended_at': None, 'state': 'waiting',
@@ -42,6 +44,7 @@ class PlaybackHistory:
         self.plans = self.incidents = None
         try:
             self.path.mkdir(parents=True, exist_ok=False)
+            self.memory = TraversalMemory(Path(root)/'寻路记忆库.sqlite3', self.run_id)
             self._json('route.json', route)
             self.route_digest = hashlib.sha256((self.path/'route.json').read_bytes()).hexdigest()
             self.events = (self.path/'events.jsonl').open('a', encoding='utf-8')
@@ -72,6 +75,9 @@ class PlaybackHistory:
                 'automatic_promotion': False, 'collision_contact_confirmed': False,
                 'requires_scene_and_traversal_revalidation': True,
                 'completion_is_not_loot_confirmation': True,
+                'memory_database': '../寻路记忆库.sqlite3',
+                'reusable_evidence': 'observed_directed_walk_segments_only',
+                'memory_error': self.memory.error if self.memory else None,
                 'files': {'route_snapshot': 'route.json', 'actual_trajectory': 'trajectory.jsonl',
                           'planned_paths': 'plans.jsonl', 'collision_candidates': 'incidents.jsonl',
                           'events': 'events.jsonl', 'summary': 'summary.json'},
@@ -98,7 +104,7 @@ class PlaybackHistory:
                 entry = {k: v for k, v in status.items() if k != 'navigation_path'}
                 self.events.write(json.dumps({'at': stamp, **entry}, ensure_ascii=False, allow_nan=False)+'\n')
                 self.events.flush()
-                self.context.update({k: status[k] for k in ('state', 'cycle', 'waypoint') if k in status})
+                self.context.update({k: status[k] for k in ('state', 'cycle', 'waypoint', 'traversal_scope') if k in status})
                 self._details(status, now, stamp)
                 state = status['state']
                 if state == 'playing' and self.summary['started_at'] is None:
@@ -122,6 +128,10 @@ class PlaybackHistory:
                 if previous_state != state or self.summary_at is None or now.timestamp()-self.summary_at >= 1:
                     self._json('summary.json', self.summary)
                     self.summary_at = now.timestamp()
+                    if self.memory is not None:
+                        self.memory.flush(self.path, state)
+                        if self.memory.error:
+                            self.archive_error = '寻路记忆库：'+self.memory.error
             except (OSError, ValueError, TypeError) as exc:
                 self.error = str(exc)
 
@@ -129,10 +139,10 @@ class PlaybackHistory:
         context = {k: self.context[k] for k in ('cycle', 'waypoint') if k in self.context}
         path = status.get('navigation_path')
         if isinstance(path, (list, tuple)) and 0 < len(path) <= 10000 and all(valid_position(p) for p in path):
-            signature = (context.get('cycle'), context.get('waypoint'), tuple(map(tuple, path)))
+            signature = (context.get('cycle'), context.get('waypoint'), status.get('traversal_scope'), tuple(map(tuple, path)))
             if signature != self.plan_signature:
                 self.plans.write(json.dumps({'at': stamp, **context, 'path': path,
-                                             'kind': 'planned_path_snapshot'}, ensure_ascii=False, allow_nan=False)+'\n')
+                                             'kind': 'planned_path_snapshot', 'traversal_scope': status.get('traversal_scope')}, ensure_ascii=False, allow_nan=False)+'\n')
                 self.plans.flush()
                 self.summary['planned_path_count'] += 1
                 self.plan_signature = signature
@@ -167,9 +177,15 @@ class PlaybackHistory:
                'contact_confirmed': False}
         self.incidents.write(json.dumps(row, ensure_ascii=False, allow_nan=False)+'\n')
         self.incidents.flush()
+        if self.memory is not None:
+            self.memory.failed(row)
         self.summary['incident_count'] += 1
         if kind == 'movement_stall':
             self.summary['movement_stall_count'] += 1
+
+    def record_motion(self, start, end, seconds, scope, mode='walk'):
+        if not self.closed and self.memory is not None:
+            self.memory.observe(start, end, seconds, scope, mode)
 
     def sample(self, position, monotonic):
         with self.lock:
@@ -216,6 +232,9 @@ class PlaybackHistory:
             except (OSError, ValueError, TypeError) as exc:
                 self.error = str(exc)
             finally:
+                if self.memory is not None:
+                    self.memory.flush(self.path, self.summary['state'], force=True)
+                    self.memory.close()
                 for stream in self.streams:
                     try:
                         stream.close()
@@ -233,6 +252,19 @@ class RecordingPosition:
         position = self.reader.read()
         self.history.sample(position, self.monotonic())
         return position
+
+    def read_for_playback(self):
+        method = getattr(self.reader, 'read_for_playback', self.reader.read)
+        position = method()
+        self.history.sample(position, self.monotonic())
+        return position
+
+    @property
+    def traversal_memory(self):
+        return self.history.memory
+
+    def record_motion(self, *args):
+        self.history.record_motion(*args)
 
     def __getattr__(self, name):
         return getattr(self.reader, name)

@@ -22,6 +22,7 @@ from utils.core.coordinate_route import (build_waypoints, direction_keys, distan
                                          key_vector, make_basis, rotate_basis, valid_position,
                                          validate_coordinate_route)
 from utils.drivers.coordinate_memory import ReadOnlyPosition
+from utils.core.traversal_evidence import scene_scope
 from utils.drivers.timeline_hotkeys import PlaybackControls
 from utils.drivers.town_window import TimelineInput, TownWindow
 from utils.drivers.windows_input import PreciseClock
@@ -104,6 +105,9 @@ class _Follower:
         self.collect_wait_seconds, self.collection = collect_wait_seconds, None
         self.last_collect_report = float('-inf')
         self.navigator = navigator
+        self._memory_anchor = None
+        if navigator is not None:
+            navigator.traversal_memory = getattr(reader, 'traversal_memory', None)
         self.navigation_waiting = False
         self.calibration_speed = 3.
         self.repair_box = repair_box
@@ -154,6 +158,8 @@ class _Follower:
         self.approach_attempts += 1
 
     def report(self, state, message, **extra):
+        extra.setdefault('traversal_scope', scene_scope(getattr(self.navigator, 'scene', None)))
+        extra.setdefault('traversal_mode', 'walk' if self.clock.monotonic() >= self.direction_unsafe_until else 'unknown')
         extra.setdefault('direction_source', self.direction_source)
         if 'position' not in extra and valid_position(self.position):
             extra.update(position=list(self.position), position_source='last_successful_read',
@@ -207,10 +213,37 @@ class _Follower:
                                  f'，采样窗口 {dt:.3f} 秒），已停止回放')
         if self.position_at is None or started - self.motion_at >= policy.COORD_SAMPLE_SECONDS:
             self.motion_position, self.motion_at = tuple(position), started
+        self._record_memory_motion(position, now)
         self.position, self.position_at = tuple(position), now
         return self.position
 
+    def _record_memory_motion(self, position, now):
+        record = getattr(self.reader, 'record_motion', None)
+        old, self._memory_anchor = self._memory_anchor, None
+        if not callable(record) or self.navigator is None or not self.keys \
+                or not self.keys <= {'w','a','s','d'} or now < self.direction_unsafe_until:
+            return
+        lease = getattr(self, 'input_lease', None)
+        if lease is not None:
+            with lease.lock:
+                if lease.tripped or lease.error or lease.deadline is None or now >= lease.deadline:
+                    return
+        deadline = getattr(self.navigator, 'collision_deadline', None)
+        expiry = deadline(now) if callable(deadline) else None
+        if expiry is None or expiry <= now:
+            return
+        current = self.navigator.scene_provider()
+        scope = scene_scope(current)
+        if scope is None or scope != scene_scope(self.navigator.scene):
+            return
+        self._memory_anchor = tuple(position), now, scope, frozenset(self.keys)
+        if old is not None and old[2:] == self._memory_anchor[2:] \
+                and self.navigator.motion_clear(old[0], position):
+            record(old[0], tuple(position), now-old[1], scope)
+
     def set_keys(self, keys):
+        if set(keys) != self.keys:
+            self._memory_anchor = None
         if 'space' in keys:
             discard = getattr(self.navigator, 'discard_learning', None)
             if callable(discard):
@@ -226,6 +259,7 @@ class _Follower:
             self.keys.add(key)
 
     def release(self):
+        self._memory_anchor = None
         self.device.release_all()
         self.keys.clear()
 

@@ -175,6 +175,7 @@ class GuidanceFollower(_Follower):
             if self.input_lease: self.input_lease.set_phase(previous)
 
     def release(self, reason='controller'):
+        self._memory_anchor = None
         if self.input_lease is None:
             return super().release()
         self.input_lease.release(reason, active=bool(self.keys))
