@@ -16,8 +16,8 @@ def test_owned_native_supply_is_closed_on_success_or_failure(monkeypatch,failed)
     resource={'resources':True};seen=[]
     def runner(*args,**kwargs):
         nav=kwargs['navigator'];seen.append(nav)
-        assert nav.native_map_collection is True
-        assert nav.scene_provider() is resource
+        assert nav.native_map_collection is False
+        assert nav.scene_provider()=={'native':True}
         assert nav.native_scene_provider()=={'native':True}
         args[6]('playing','checking supply')
         if failed:raise ValueError('test failure')

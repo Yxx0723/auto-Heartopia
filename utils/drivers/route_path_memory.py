@@ -3,9 +3,11 @@ from datetime import datetime
 import hashlib
 import json
 import math
+import time
 from pathlib import Path
 
 from utils.core import thresholds as policy
+from utils.core.collection_schedule import FAILED_ENTRY_SECONDS, MEMORY_ENTRY_HEIGHT
 from utils.core.memory_corridor import (append_outcome, positive, recent_times, reliability,
                                         similar, typical_seconds, valid_profile)
 from utils.core.coordinate_points import validate_points
@@ -29,6 +31,8 @@ class RoutePathMemory:
         self.learning_summary = {}
         self.rejected = set()
         self.selected = None
+        self.selected_offset = None
+        self.blocked_entries = {}
         self._rejections_applied = False
         self.legs = self._load()
 
@@ -125,10 +129,16 @@ class RoutePathMemory:
         finally:
             self._rejections_applied = False
 
-    def reject_selected(self):
+    def reject_selected(self, position=None):
         # Save penalties together with the next completed leg, never interrupt
         # gameplay with a disk write during obstacle recovery.
         if self.selected is not None:
+            if valid_position(position):
+                path=next((p for variants in self.legs.values() for p in variants
+                           if self._identity(p)==self.selected),None)
+                if path:
+                    offset=min(range(len(path)),key=lambda i:math.dist(position,path[i]))
+                    self.blocked_entries[self.selected]=(offset,time.monotonic()+FAILED_ENTRY_SECONDS)
             self.rejected.add(self.selected)
             self.selected = None
 
@@ -137,16 +147,24 @@ class RoutePathMemory:
         choices = []
         for path in self.legs.get(str(index), ()):
             nearest = min(range(len(path) - 1), key=lambda offset: math.dist(position, path[offset]))
-            for offset, point in [(nearest, path[nearest])]:
+            entries=(sorted(enumerate(path[:-1]),key=lambda item:(math.dist(position,item[1]),item[0]))
+                     if can_connect is not None else [(nearest,path[nearest])])
+            blocked=self.blocked_entries.get(self._identity(path))
+            for offset, point in entries:
+                if blocked and blocked[1]>time.monotonic() and offset<=blocked[0]:
+                    continue
                 gap = math.dist(position, point)
-                if gap <= 4. and abs(position[1] - point[1]) <= policy.COORD_MEMORY_ENTRY_HEIGHT \
+                height_limit=min(policy.COORD_MEMORY_ENTRY_HEIGHT,MEMORY_ENTRY_HEIGHT) if can_connect else policy.COORD_MEMORY_ENTRY_HEIGHT
+                if gap <= 4. and abs(position[1] - point[1]) <= height_limit \
                         and (can_connect is None or can_connect(point)):
                     cost = self._cost(path, offset)
                     choices.append((cost + gap / policy.COORD_MEMORY_ESTIMATED_SPEED, gap, offset, path))
+                    break  # Preserve the corridor; never prefer a later shortcut solely for cost.
         if not choices:
             return []
         _, _, offset, path = min(choices, key=lambda item: (item[0], item[1], item[2]))
         self.selected = self._identity(path)
+        self.selected_offset = offset
         return [tuple(p) for p in path[offset:]]
 
     def remember(self, index, points, duration=None, *, sample_times=None, collection_outcome=None):
@@ -222,6 +240,7 @@ class RoutePathMemory:
         return True
 
     def clear(self):
+        self.blocked_entries.clear()
         with PointStore(self.path).locked():
             self.path.unlink(missing_ok=True)
             self.legs = {}

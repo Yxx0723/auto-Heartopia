@@ -9,6 +9,7 @@ from utils.core.coordinate_points import (choose_start_index, ordered_waypoints,
 from utils.core.coordinate_navigation import NavigationWait, ObstacleMap
 from utils.core.direction_evidence import CalibrationBudget, DirectionEvidence
 from utils.core.navigation_progress import NavigationProgress
+from utils.core.collection_schedule import SupplementQueue, SCENE_WAIT_SECONDS
 from utils.core.special_approach import in_interaction_range, interaction_standpoint
 from utils.core.harvest_evidence import HarvestEvidence
 from utils.core import special_verdict
@@ -105,6 +106,11 @@ class _Follower:
         self.collect_wait_seconds, self.collection = collect_wait_seconds, None
         self.last_collect_report = float('-inf')
         self.navigator = navigator
+        self.supplements = (SupplementQueue() if getattr(navigator,'hybrid_collection',False) is True
+            and waypoints is not None and not any('special_resource' in p for p in waypoints)
+            and 'special_patrol' not in data else None)
+        self.failed_points = set()
+        self.scene_wait_started = None
         self._memory_anchor = None
         if navigator is not None:
             navigator.traversal_memory = getattr(reader, 'traversal_memory', None)
@@ -150,12 +156,36 @@ class _Follower:
         self.travelling = False
 
     def approach_attempt(self, index):
-        tag = self.cycle,index
+        tag = (self.cycle,index,self.supplements.retrying) if self.supplements else (self.cycle,index)
         if self.approach_tag != tag:
             self.approach_tag, self.approach_attempts = tag, 0
         if self.approach_attempts >= policy.COORD_APPROACH_POINT_ATTEMPTS:
             raise _SkipPoint('不同接近尝试仍未走通，本点本轮尝试结束')
         self.approach_attempts += 1
+
+    def _hybrid_advance(self, following, total):
+        self.scene_wait_started=None
+        was_retrying=self.supplements.retrying
+        selected=self.supplements.advance(following,total)
+        if selected is not None:
+            if self.supplements.retrying:
+                self.navigator.set_waypoint(None)
+                if not was_retrying:
+                    self.report('supplementing','本轮主流程结束，开始有限补采',navigation_path=[],
+                                skipped_count=self.skipped_count,waypoint=selected+1)
+            return selected
+        partial=any(cycle==self.cycle for cycle,_ in self.failed_points)
+        self.report('cycle_partial' if partial else 'cycle_finished',
+                    '本轮补采结束，仍有未完成点位' if partial else '本轮点位回放完成',
+                    skipped_count=self.skipped_count,waypoint=total,waypoint_count=total)
+        if self.cycle<self.loop_count:
+            self.cycle+=1
+            self.supplements=SupplementQueue()
+            self.start_index=0
+            self.active_time,self.last_tick=0.,self.clock.monotonic()
+            self.last_report=self.last_collect_report=float('-inf')
+            return 0
+        return total
 
     def report(self, state, message, **extra):
         extra.setdefault('traversal_scope', scene_scope(getattr(self.navigator, 'scene', None)))
@@ -1251,8 +1281,12 @@ class _Follower:
                     best, progress_at = math.inf, self.clock.monotonic()
                 position = self.read()
                 if self.navigator and self.waypoints is not None:
-                    self.travel_progress.bind((self.cycle, index), position,
+                    point_tag=((self.cycle,index,self.supplements.retrying) if self.supplements else (self.cycle,index))
+                    self.travel_progress.bind(point_tag, position,
                                               points[index]['position'], self.calibration_speed)
+                    if self.supplements and distance(position,points[index]['position'])>policy.COORD_REACH_RADIUS \
+                            and self.travel_progress.looping(position):
+                        raise _SkipPoint('反复回到同一区域且未走通，结束本次尝试')
                 if segment_start is None:
                     segment_start = position
                 held_keys = set(self.keys)
@@ -1309,6 +1343,11 @@ class _Follower:
                             self.wait(step)
                             dwell = max(0., dwell - step)
                             continue
+                    if self.supplements and (self.cycle,index) in self.failed_points:
+                        self.failed_points.discard((self.cycle,index))
+                        self.skipped_count=len(self.failed_points)
+                        if not any(c==self.cycle for c,_ in self.failed_points):
+                            self.skipped_cycles.discard(self.cycle)
                     index += 1
                     if self.navigator:
                         self.navigator.collection_outcome = ('action_completed_unconfirmed_loot'
@@ -1323,7 +1362,8 @@ class _Follower:
                         if self.navigator and self.navigator.memory_state == 'write_error':
                             text += '（走法记忆暂未保存）'
                         self.report('reached', f'{text} {index}/{len(points)} · F6暂停 · F9停止',
-                                    position=list(position), waypoint=index, waypoint_count=len(points))
+                                    position=list(position), waypoint=index, waypoint_count=len(points),
+                                    skipped_count=self.skipped_count)
                     self.collection = None
                     self.special_progress = None
                     dwell, anchor = None, None
@@ -1333,7 +1373,9 @@ class _Follower:
                     navigation_leg = None
                     segment_start = position
                     best, progress_at = math.inf, now
-                    if self.waypoints is not None and index == len(points):
+                    if self.supplements:
+                        index=self._hybrid_advance(index,len(points))
+                    elif self.waypoints is not None and index == len(points):
                         partial = self.cycle in self.skipped_cycles
                         self.report('cycle_partial' if partial else 'cycle_finished',
                                     '本轮有未完成点位' if partial else '本轮点位回放完成 · F6暂停 · F9停止',
@@ -1363,6 +1405,11 @@ class _Follower:
                         target = self.navigator.next_target(position, target, check=self.guard, before_plan=self.planning_release)
                     except NavigationWait as exc:
                         self.release()
+                        if self.supplements and exc.reason=='scene':
+                            if self.scene_wait_started is None:
+                                self.scene_wait_started=self.clock.monotonic()
+                            if self.clock.monotonic()-self.scene_wait_started>=SCENE_WAIT_SECONDS:
+                                raise _SkipPoint('场景数据持续不可用，本点暂缓；未记作碰撞障碍')
                         if exc.reason == 'no_path' and self.continuous_recovery and self.recovery_attempts:
                             navigation_wait_since = now if navigation_wait_since is None else navigation_wait_since
                             if now - navigation_wait_since >= policy.COORD_NAV_RECOVERY_WAIT_SECONDS:
@@ -1401,6 +1448,7 @@ class _Follower:
                     progress_at += self.clock.monotonic() - planning_at
                     now = self.clock.monotonic()
                     navigation_wait_since = None
+                    self.scene_wait_started = None
                     if navigation_leg != target:
                         navigation_leg = target
                         best, progress_at = math.inf, now
@@ -1570,7 +1618,12 @@ class _Follower:
             except _SkipPoint as exc:
                 self.release()
                 self.travelling = False
-                self.skipped_count += 1
+                if self.supplements:
+                    self.supplements.failed(index)
+                    self.failed_points.add((self.cycle,index))
+                    self.skipped_count=len(self.failed_points)
+                else:
+                    self.skipped_count += 1
                 self.skipped_cycles.add(self.cycle)
                 self.report('skipped', f'点位 {index+1}/{len(points)} 暂时跳过：{exc}',
                             waypoint=index+1, skipped_count=self.skipped_count, incident_kind='point_skipped',
@@ -1583,7 +1636,9 @@ class _Follower:
                 dwell, segment_start, navigation_leg, navigation_wait_since = None, self.position, None, None
                 best, progress_at = math.inf, self.clock.monotonic()
                 self.navigator.invalidate()
-                if index == len(points):
+                if self.supplements:
+                    index=self._hybrid_advance(index,len(points))
+                elif index == len(points):
                     self.report('cycle_partial', '本轮有未完成点位', skipped_count=self.skipped_count)
                     if self.cycle < self.loop_count:
                         self.cycle += 1
@@ -1591,6 +1646,7 @@ class _Follower:
                         self.active_time, self.last_tick = 0., self.clock.monotonic()
             except _Paused:
                 self.release()
+                self.scene_wait_started = None
                 self.direction_poll_at=float('-inf')
                 self.direction_candidate=self.direction_memory=self.direction_conflict=None
                 self.direction_bad_since=None

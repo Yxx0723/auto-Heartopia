@@ -81,7 +81,7 @@ class PointPlayback:
 
     def update(self, state, message, window=None, **extra):
         with self.result_lock:
-            if state in ('skipped', 'partial'):
+            if state in ('skipped', 'partial', 'reached', 'cycle_finished', 'cycle_partial'):
                 self.incomplete_count = extra.get('skipped_count', self.incomplete_count)
             if state == 'finished':
                 completed_at = self.wall_clock()
@@ -293,10 +293,10 @@ class PointPlayback:
             controls = self.controls_factory(window, size, self, self.stop_event.is_set)
             controls.start()
             factory = CollectionNavigator if self.navigator_factory is LocalNavigator else self.navigator_factory
-            options = {'native_map_collection': True} if factory is CollectionNavigator else {}
+            options = {'native_map_collection': False} if factory is CollectionNavigator else {}
             navigation = ({'navigator': factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic, **options)}
                           if auto_navigate else {})
-            if auto_navigate and getattr(navigation['navigator'],'native_map_collection',False) is True \
+            if auto_navigate and isinstance(navigation['navigator'],CollectionNavigator) \
                     and self.guidance_scene_factory is not None:
                 factory=(NavigationProcessScene if self.guidance_scene_factory is NavigationSceneMap
                          else self.guidance_scene_factory)
@@ -304,6 +304,8 @@ class PointPlayback:
                     diagnostics_path=self.history_root.parent/'日志'/'采集引导碰撞读取.jsonl' if self.history_root else None)
                 navigation_worker.set_pid(pid);navigation_worker.start()
                 navigation['navigator'].native_scene_provider=lambda:navigation_worker.navigation_snapshot(pid)
+                if navigation['navigator'].hybrid_collection:
+                    navigation['navigator'].scene_provider=navigation['navigator'].native_scene_provider
             if auto_navigate and self.scene_refresh is not None:
                 navigation['scene_refresh'] = lambda: self.scene_refresh(pid)
             if auto_navigate and self.path_memory is not None:
