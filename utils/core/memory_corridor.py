@@ -3,6 +3,37 @@ import math
 from statistics import median
 from utils.core import thresholds as policy
 
+# Execution/selection filters, not calibrated character capability limits.
+SHAPE_MIN_GAIN = .05
+EXECUTION_CHORD_ERROR = .35
+SHORTCUT_MIN_GAIN = .2
+SHORTCUT_MIN_METERS = 1.
+SHORTCUT_CHECK_SECONDS = 1.
+
+
+def trim_exact_returns(path, times=None):
+    """Splice only identical observed XYZ, never two nearby unconnected points.
+
+    Keep original active-time observations (including removed detour time).
+    Only a later real run can establish the faster duration of a cleaned path.
+    """
+    kept=[];seen={}
+    for i,point in enumerate(path):
+        key=tuple(point)
+        if key in seen:
+            offset=seen[key]
+            for index in kept[offset+1:]:
+                seen.pop(tuple(path[index]),None)
+            del kept[offset+1:]
+            continue
+        seen[key]=len(kept);kept.append(i)
+    result=[path[i] for i in kept]
+    profile=None
+    if times is not None and len(times)==len(path):
+        profile=[times[i] for i in kept]
+        if profile:profile[-1]=times[-1]
+    return result,profile
+
 
 def positive(value):
     return type(value) in (int, float) and math.isfinite(value) and value > 0

@@ -9,7 +9,7 @@ from pathlib import Path
 from utils.core import thresholds as policy
 from utils.core.collection_schedule import FAILED_ENTRY_SECONDS, MEMORY_ENTRY_HEIGHT
 from utils.core.memory_corridor import (append_outcome, positive, recent_times, reliability,
-                                        similar, typical_seconds, valid_profile)
+                                        similar, typical_seconds, valid_profile, trim_exact_returns, SHAPE_MIN_GAIN)
 from utils.core.coordinate_points import validate_points
 from utils.core.coordinate_route import distance, valid_position
 from utils.drivers.coordinate_point_store import PointStore, atomic_write_json
@@ -165,29 +165,14 @@ class RoutePathMemory:
         _, _, offset, path = min(choices, key=lambda item: (item[0], item[1], item[2]))
         self.selected = self._identity(path)
         self.selected_offset = offset
-        return [tuple(p) for p in path[offset:]]
+        return [tuple(p) for p in trim_exact_returns(path[offset:])[0]]
 
     def remember(self, index, points, duration=None, *, sample_times=None, collection_outcome=None):
         trace = [list(p) for p in points]
         if not self._valid_trace(index, trace) or sum(distance(a, b) for a, b in zip(trace, trace[1:])) < 1.:
             return False
-        # Remove loops that return to the same place, so a failed local probe
-        # and its backtrack do not become the preferred walk next time.
-        if sample_times is None:
-            # Exact returns join the same observed XYZ; nearby returns do not.
-            walked, first_at = [], {}
-            for point in trace:
-                key = tuple(point)
-                match = first_at.get(key)
-                if match is not None and match < len(walked)-3:
-                    for old in walked[match+1:]:
-                        old_key = tuple(old)
-                        if first_at.get(old_key, -1) > match:
-                            first_at.pop(old_key, None)
-                    del walked[match+1:]
-                first_at.setdefault(key, len(walked))
-                walked.append(point)
-            trace = walked
+        original_times = sample_times if valid_profile(sample_times, len(trace), duration) else None
+        trace, sample_times = trim_exact_returns(trace, original_times)
         if not self._valid_trace(index, trace):
             return False
         with PointStore(self.path).locked():
@@ -196,7 +181,14 @@ class RoutePathMemory:
             variants = legs.get(str(index), [])
             # Every completion is recorded. Keep successful alternatives instead
             # of replacing a faster corridor with the latest detour.
-            canonical = next((p for p in variants if similar(p, trace)), trace)
+            reference = next((p for p in variants if similar(p, trace)), None)
+            canonical = reference if reference is not None else trace
+            if reference is not None and self._length(trace) < self._length(reference)*(1-SHAPE_MIN_GAIN):
+                record = self.statistics.get(self._identity(reference), {})
+                old_seconds = typical_seconds(record, self._length(reference)/policy.COORD_MEMORY_ESTIMATED_SPEED)
+                measured = bool(recent_times(record)) or positive(record.get('best_seconds'))
+                if positive(duration) and (not measured or duration <= old_seconds*1.05):
+                    canonical = trace
             identity = self._identity(canonical)
             previous = self.statistics.get(identity, {})
             previous = previous if isinstance(previous, dict) else {}
@@ -206,7 +198,7 @@ class RoutePathMemory:
                       'last_used': datetime.now().astimezone().isoformat(timespec='seconds')}
             append_outcome(record, True)
             observed = recent_times(previous)
-            if positive(duration):
+            if trace == canonical and positive(duration):
                 record['recent_seconds'] = (observed+[float(duration)])[-policy.COORD_MEMORY_RECENT_WINDOW:]
             if trace == canonical and valid_profile(sample_times, len(trace), duration):
                 record['sample_times'] = list(sample_times)
@@ -215,7 +207,7 @@ class RoutePathMemory:
             record['collection_outcome'] = collection_outcome or 'action_completed_unconfirmed_loot'
             record['loot_confirmed'] = collection_outcome == 'confirmed_drop'
             old_time = previous.get('best_seconds')
-            times = [value for value in (old_time, duration) if type(value) in (int, float)
+            times = [value for value in (old_time, duration if trace == canonical else None) if type(value) in (int, float)
                      and math.isfinite(value) and value > 0]
             if type(previous.get('blocked')) is int:
                 record['blocked'] = previous['blocked']
