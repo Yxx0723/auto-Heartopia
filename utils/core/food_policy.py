@@ -43,9 +43,14 @@ def choose_foods(inventory, fallback_mode='fruit'):
             return result('unknown' if raw else 'unavailable',reason=(
                 '可食用份数的锁定身份未确认' if raw else '随身背包内没有确认可食用的食物'))
         state,star='fallback',None
-    if any(not isinstance(i.get('name'),str) or not 1<=len(i['name'])<=32
-           or any(ord(c)<32 for c in i['name']) for i in pool):
-        return result('unknown',reason='目标食物名称未确认，稍后自动重试')
+    # Priority was established from the complete owned metadata above. Names
+    # only select searchable members within that same tier, never promote it.
+    pool=[i for i in pool if isinstance(i.get('name'),str) and 1<=len(i['name'])<=32
+          and not any(ord(c)<32 for c in i['name'])]
+    if not pool:
+        return result('unknown',star=star,reason=(
+            '最低星级料理名称未确认，稍后自动重试' if state=='prepared'
+            else '目标食物名称未确认，稍后自动重试'))
     return result(state,pool,star)
 
 

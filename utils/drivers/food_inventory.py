@@ -25,6 +25,10 @@ EAT_ACTION = 112
 PREPARED_FOOD_TYPE = 45
 
 
+class FoodNamesPending(ValueError):
+    """The bounded name scan is incomplete; owned item metadata is retained."""
+
+
 class MemoryInfo(ctypes.Structure):
     _fields_ = [('base', ctypes.c_void_p), ('allocation', ctypes.c_void_p),
                 ('allocation_protect', wintypes.DWORD), ('partition', wintypes.WORD),
@@ -167,7 +171,7 @@ class FoodInventoryReader:
                         pass
                 offset = raw.find(vtable.to_bytes(8, 'little'), offset+8)
         if missing:
-            raise ValueError('正在核对新食物名称，稍后自动重试')
+            raise FoodNamesPending('正在核对新食物名称，稍后自动重试')
 
     def owned_rows(self, check=lambda: None):
         m = self.meta
@@ -241,10 +245,15 @@ class FoodInventoryReader:
             food['ambiguous_locked_variant'] = ((food['item_id'],food['star']) in locked_variants
                                                  or food['item_id'] in uncertain_locked)
             food['verify_star'] = food['item_id'] in locked_ids
-        self.discover_names({f['item_id'] for f in foods}, check)
+        try:
+            self.discover_names({f['item_id'] for f in foods}, check)
+        except FoodNamesPending:
+            # Keep unnamed entries: their type/star can still prohibit using
+            # a higher-tier dish or raw fallback. Other lookup failures propagate.
+            pass
         stable()
         self.context = context[:4]
-        return [dict(f, name=self.names[f['item_id']]) for f in foods]
+        return [dict(f, name=self.names.get(f['item_id'])) for f in foods]
 
     def counts_snapshot(self, check=lambda: None):
         """Owned backpack totals, including locked items; no names scan or warehouse."""
