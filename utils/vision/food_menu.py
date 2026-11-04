@@ -216,7 +216,9 @@ class FruitMenu(RepairBoxMenu):
 
     def search_dialog(self, picture):
         frame = self.frame(picture)
-        headers = self.matches(frame, self.search_header, self.scales(frame), minimum=.90)
+        # Title rasterization differs slightly across actual render modes.
+        # A looser title is only a candidate: input + submit must both agree.
+        headers = self.matches(frame, self.search_header, self.scales(frame), minimum=.88)
         targets = []
         for header in headers:
             x, y, scale = header['x'], header['y'], header['scale']
@@ -229,7 +231,14 @@ class FruitMenu(RepairBoxMenu):
             cyan = (hsv[:, :, 0] >= 75) & (hsv[:, :, 0] <= 100) & (hsv[:, :, 1] >= 70)
             if np.mean(cyan) < .65:
                 continue
-            targets.append(dict(header, x=x-43*scale, y=y+58*scale,
+            ix,iy=x-43*scale,y+58*scale
+            il,ir=round(ix-80*scale),round(ix+80*scale)
+            it,ib=round(iy-8*scale),round(iy+8*scale)
+            if il<0 or it<0 or ir>frame.shape[1] or ib>frame.shape[0]:continue
+            field=frame[it:ib,il:ir].astype(np.int16)
+            white=(field.min(axis=2)>=245)&(field.max(axis=2)-field.min(axis=2)<=12)
+            if np.mean(white)<.65:continue
+            targets.append(dict(header, x=ix, y=iy,
                                 submit={'x': bx, 'y': by},
                                 close={'x': x+171*scale, 'y': y}))
         if not targets:
