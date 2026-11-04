@@ -2,11 +2,10 @@
 import ctypes
 from ctypes import wintypes
 import struct
-import time
 
 from utils.drivers.mono_scene import SceneMetadata
 from utils.drivers.tool_durability import ToolDurabilityReader
-from utils.drivers.global_minerals import GlobalMineralReader
+from utils.drivers.item_name_table import ItemNameTable
 
 NS = 'XDTGameSystem.GameplaySystem.BackPack'
 OWNER = '<XDTGame.Core.IModule.Owner>k__BackingField'
@@ -26,7 +25,7 @@ PREPARED_FOOD_TYPE = 45
 
 
 class FoodNamesPending(ValueError):
-    """The bounded name scan is incomplete; owned item metadata is retained."""
+    """The active name table is incomplete; owned item metadata is retained."""
 
 
 class MemoryInfo(ctypes.Structure):
@@ -124,54 +123,23 @@ class FoodInventoryReader:
         return result
 
     def discover_names(self, wanted, check):
-        """Unknown foods get a cancellable, incremental name-only lookup.
+        """Resolve names through the current TableData layer and its base table.
 
-        No address found here authorizes consumption: owned stock + Eat action
-        and the actual in-game 食用 button are independently required.
+        This only names owned metadata; it never authorizes an Eat action.
         """
-        missing = wanted-self.names.keys()
-        if not missing:
+        if not wanted-self.names.keys() and getattr(self, 'name_table', None) is None:
             return
-        m = self.meta
-        finder = GlobalMineralReader(m, self.memory.base, {})
-        ci = m.cls(finder.find_class('EcsClient', 'TableBagitem', ''))
-        vtable = m.pointer(ci['address']+0xd8)
-        if not vtable or m.pointer(vtable) != ci['address'] or m.pointer(vtable+16) != m.domain:
-            raise ValueError('食物名称表尚未就绪')
-        identity, name_at = self.offset(ci, 'id', 8, 4), self.offset(ci, 'name', 14, 8)
-        if self.name_blocks is None:
-            self.name_blocks = iter(private_blocks(self.memory, check))
-        started, scanned = time.monotonic(), 0
-        while missing and time.monotonic()-started < 1. and scanned < 128*1024**2:
-            check()
-            block = next(self.name_blocks, None)
-            if block is None:
-                self.name_blocks = None
-                break
-            base, size = block
-            scanned += size
-            raw = self.memory._read(base, size)
-            if raw is None:
-                continue
-            offset = raw.find(vtable.to_bytes(8, 'little'))
-            while offset >= 0:
-                check()
-                obj = base+offset
-                if obj % 8 == 0:
-                    try:
-                        item_id = m.integer(obj+identity)
-                        if item_id in missing and m.obj(obj)['address'] == ci['address']:
-                            pointer = m.pointer(obj+name_at)
-                            name = m.managed_string(pointer)
-                            if 1 <= len(name) <= 32 and not any(ord(c) < 32 for c in name) \
-                                    and m.integer(obj+identity) == item_id and m.pointer(obj+name_at) == pointer:
-                                self.names[item_id] = name
-                                missing.remove(item_id)
-                    except (ValueError, UnicodeError):
-                        pass
-                offset = raw.find(vtable.to_bytes(8, 'little'), offset+8)
-        if missing:
-            raise FoodNamesPending('正在核对新食物名称，稍后自动重试')
+        if getattr(self, 'name_table', None) is None:
+            self.name_table = ItemNameTable(self.meta, self.memory.base)
+        resolved, scope = self.name_table.read(wanted, check)
+        if getattr(self, 'names_scope', None) is not None and scope != self.names_scope:
+            self.names.clear()
+        for identity in wanted:
+            self.names.pop(identity, None)
+        self.names.update(resolved)
+        self.names_scope = scope
+        if wanted-self.names.keys():
+            raise FoodNamesPending('当前物品名称表尚缺少目标记录，稍后自动重试')
 
     def owned_rows(self, check=lambda: None):
         m = self.meta
