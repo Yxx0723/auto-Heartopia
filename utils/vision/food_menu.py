@@ -160,7 +160,33 @@ class FruitMenu(RepairBoxMenu):
             return False
         hsv = cv2.cvtColor(frame[top:bottom, left:right], cv2.COLOR_BGR2HSV)
         cyan = (hsv[:, :, 0] >= 75) & (hsv[:, :, 0] <= 100) & (hsv[:, :, 1] >= 70) & (hsv[:, :, 2] >= 100)
-        return bool(np.mean(cyan) >= .65)
+        if np.mean(cyan) >= .65:
+            return True
+        # Eat/Share can be two separate compact buttons. Validate the entire
+        # cyan component around the matched Eat text, rather than including
+        # the white card/gap in the legacy wide-button sample. These bounds
+        # describe the observed UI geometry, not a weaker text threshold.
+        left, right = round(x-65*scale), round(x+65*scale)
+        top, bottom = round(y-25*scale), round(y+25*scale)
+        if left < 0 or top < 0 or right > frame.shape[1] or bottom > frame.shape[0]:
+            return False
+        hsv = cv2.cvtColor(frame[top:bottom, left:right], cv2.COLOR_BGR2HSV)
+        cyan = ((hsv[:, :, 0] >= 75) & (hsv[:, :, 0] <= 100)
+                & (hsv[:, :, 1] >= 70) & (hsv[:, :, 2] >= 100)).astype(np.uint8)
+        _, _, stats, _ = cv2.connectedComponentsWithStats(cyan)
+        for bx, by, width, height, area in stats[1:]:
+            if bx <= 0 or by <= 0 or bx+width >= cyan.shape[1] or by+height >= cyan.shape[0]:
+                continue
+            if not (45*scale <= width <= 80*scale and 18*scale <= height <= 40*scale
+                    and area >= .55*width*height):
+                continue
+            cx, cy = left+bx+width/2, top+by+height/2
+            if abs(cx-x) > 8*scale or abs(cy-y) > 5*scale:
+                continue
+            if (left+bx+2*scale <= x-18*scale and x+18*scale <= left+bx+width-2*scale
+                    and top+by+2*scale <= y-9*scale and y+9*scale <= top+by+height-2*scale):
+                return True
+        return False
 
     def prepare_visible(self, window, tap, wait, check, device):
         check()
@@ -211,8 +237,20 @@ class FruitMenu(RepairBoxMenu):
 
     def end_search_target(self, frame):
         targets = self.matches(frame, self.search_end, self.scales(frame),
-                               left=frame.shape[1]//2, top=frame.shape[0]*3//4, minimum=.88)
-        return targets[0] if targets else None
+                               left=frame.shape[1]//2, top=frame.shape[0]*3//4, minimum=.85)
+        confirmed=[]
+        for target in targets:
+            x,y,s=target['x'],target['y'],target['scale']
+            l,r=round(x-31*s),round(x+31*s);t,b=round(y-7*s),round(y+7*s)
+            if l<0 or t<0 or r>frame.shape[1] or b>frame.shape[0]:continue
+            hsv=cv2.cvtColor(frame[t:b,l:r],cv2.COLOR_BGR2HSV)
+            orange=(hsv[:,:,0]>=5)&(hsv[:,:,0]<=35)&(hsv[:,:,1]>=40)&(hsv[:,:,2]>=150)
+            if np.mean(orange)>=.55:confirmed.append(target)
+        if not confirmed:return None
+        first=confirmed[0]
+        if any(abs(v['x']-first['x'])>8 or abs(v['y']-first['y'])>8 for v in confirmed):
+            raise ValueError('结束搜索按钮位置存在歧义，未点击')
+        return first
 
     def search_dialog(self, picture):
         frame = self.frame(picture)
@@ -335,6 +373,19 @@ class FruitMenu(RepairBoxMenu):
         _, _, stats, _ = cv2.connectedComponentsWithStats(cream)
         headers = [r for r in stats[1:] if 110*scale <= r[2] <= 190*scale
                    and 15*scale <= r[3] <= 65*scale and r[4] >= 1800*scale**2]
+        if not headers:
+            # Some cards have a thin cream border connected to the header.
+            # The component then extends down the body. Recover only dense,
+            # contiguous header rows; the border alone cannot supply a header.
+            for hx, hy, width, height, _ in stats[1:]:
+                if not 110*scale <= width <= 190*scale:
+                    continue
+                rows = np.mean(cream[hy:hy+height, hx:hx+width], axis=1) >= .65
+                edges = np.diff(np.r_[False, rows, False].astype(np.int8))
+                for start, stop in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)):
+                    area = np.count_nonzero(cream[hy+start:hy+stop, hx:hx+width])
+                    if 15*scale <= stop-start <= 65*scale and area >= 1800*scale**2:
+                        headers.append((hx, hy+start, width, stop-start, area))
         if len(headers) != 1:
             return None
         hx, hy, width, height, _ = headers[0]
