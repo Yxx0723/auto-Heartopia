@@ -828,7 +828,7 @@ class _Follower:
             return self.finish_special(point, index, total)
         return False
 
-    def repair_pause(self, message, index, total, state='repair_paused'):
+    def repair_pause(self, message, index, total, state='repair_paused', **extra):
         self.release()
         pause_with_reason = getattr(self.controls, 'pause_with_reason', None)
         if pause_with_reason:
@@ -836,7 +836,7 @@ class _Follower:
         else:
             self.controls.pause()
         self.report(state, message+' · 处理后切回游戏按 F6 继续 · F9停止',
-                    waypoint=index+1, waypoint_count=total)
+                    waypoint=index+1, waypoint_count=total, **extra)
         raise _Paused()
 
     def repair_tap(self, key):
@@ -1087,9 +1087,11 @@ class _Follower:
         failures = {'unavailable': '自动维修暂时读不到耐久，请等待游戏恢复',
                     'not_held': '斧镐耐久偏低，请先手持斧镐再自动维修',
                     'changed': '维修期间工具数据改变，请确认正在持用斧镐',
+                    'unconfirmed': '维修效果未确认：点击后耐久没有增加，请检查 T 面板及普通维修盒',
                     'failed': '维修后耐久未恢复到20%，请检查维修盒数量或手动维修'}
         if outcome in failures:
-            self.repair_pause(failures[outcome], index, total)
+            self.repair_pause(failures[outcome], index, total, repair_phase=outcome,
+                              **self.repair_diagnostics())
         self.release()
         self.navigation_waiting = True
         try:
@@ -1099,11 +1101,19 @@ class _Follower:
                 try:
                     target = self.repair_box.prepare(self.window, self.repair_tap, self.wait, self.guard)
                     self.repair_menu_pending = True
+                    confirm = getattr(self.repair_box, 'confirm_target', None)
+                    if callable(confirm):
+                        target = confirm(self.window, target, self.device, self.guard, self.wait)
                     # Preparation takes time. Recheck the actual tool immediately
                     # before consuming anything, and retain the attempt on pause.
                     self.tool_status = self.reader.tools_snapshot()
                     if self.repair_cycle.observe(self.tool_status, self.clock.monotonic()) != 'needed':
                         return True
+                    self.report('repairing', '维修盒图标已复核，准备点击使用 · F9停止',
+                                waypoint=index+1, waypoint_count=total, repair_phase='target_verified',
+                                repair_open_requested=target.get('opened_with_t'),
+                                repair_target=[target['x'], target['y']],
+                                repair_match_score=target.get('score'), **self.repair_diagnostics())
                     self.repair_cycle.mark_used(self.tool_status, self.clock.monotonic())
                     try:
                         self.repair_box.use(target, self.device, self.guard, self.wait)
@@ -1112,7 +1122,8 @@ class _Follower:
                         # including when F6 interrupts that press.
                         self.repair_cycle.started_at = self.clock.monotonic()
                 except (ValueError, OSError) as exc:
-                    self.repair_pause(f'维修盒使用未确认：{exc}', index, total)
+                    self.repair_pause(f'维修盒使用未确认：{exc}', index, total,
+                                      repair_phase='input_unconfirmed', **self.repair_diagnostics())
                 finally:
                     self.release()
             if outcome == 'completed':
@@ -1126,15 +1137,25 @@ class _Follower:
                 return True
             remaining = self.repair_cycle.remaining(self.clock.monotonic())
             if now-self.last_repair_report >= .5:
-                self.report('repairing', f'维修盒恢复中 · 剩余 {remaining:.1f} 秒 · F6暂停 · F9停止',
-                            waypoint=index+1, waypoint_count=total, repair_phase='waiting',
-                            repair_remaining=remaining)
+                confirmed = self.repair_cycle.effect_confirmed
+                message = (f'维修效果已确认 · 剩余 {remaining:.1f} 秒' if confirmed else
+                           '维修点击已发送，正在核对耐久是否增加')
+                self.report('repairing', message+' · F6暂停 · F9停止',
+                            waypoint=index+1, waypoint_count=total,
+                            repair_phase='waiting' if confirmed else 'verifying',
+                            repair_remaining=remaining, **self.repair_diagnostics())
                 self.last_repair_report = now
             self.wait(min(.1, max(.01, remaining)))
             return True
         finally:
             self.navigation_waiting = False
             self.last_tick = self.clock.monotonic()
+
+    def repair_diagnostics(self):
+        return {'repair_before': self.repair_cycle.before,
+                'repair_current': self.tool_status.get('current'),
+                'repair_maximum': self.tool_status.get('maximum'),
+                'repair_effect_confirmed': self.repair_cycle.effect_confirmed}
 
     def follow(self):
         points = self.waypoints if self.waypoints is not None else build_waypoints(self.data['samples'])

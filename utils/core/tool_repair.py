@@ -4,6 +4,8 @@ import math
 
 REPAIR_THRESHOLD_PERCENT = 20.
 REPAIR_EFFECT_SECONDS = 17.
+# Engineering confirmation window, not a measured game timing guarantee.
+REPAIR_CONFIRM_SECONDS = 5.
 
 
 class ToolRepairCycle:
@@ -11,6 +13,7 @@ class ToolRepairCycle:
         self.started_at = None
         self.before = None
         self.maximum = None
+        self.effect_confirmed = False
 
     @property
     def active(self):
@@ -30,6 +33,11 @@ class ToolRepairCycle:
         if not isinstance(now, (int, float)) or not math.isfinite(now):
             raise ValueError('维修计时无效')
         if self.active and self.remaining(now) > 0:
+            if self.usable(tool) and tool['equipped'] and tool['maximum'] == self.maximum:
+                if tool['current'] > self.before:
+                    self.effect_confirmed = True
+                elif not self.effect_confirmed and now-self.started_at >= REPAIR_CONFIRM_SECONDS:
+                    return 'unconfirmed'
             # Effects continue while playback is paused or its window is in the
             # background. A subsequent observation must never send a second use.
             return 'waiting'
@@ -54,3 +62,4 @@ class ToolRepairCycle:
         # Record BEFORE invoking input: an interrupted/ambiguous key press must
         # not consume another box on F6 resume.
         self.started_at, self.before, self.maximum = now, tool['current'], tool['maximum']
+        self.effect_confirmed = False

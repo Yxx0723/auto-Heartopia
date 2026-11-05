@@ -90,6 +90,7 @@ class RepairBoxMenu:
     def prepare(self, window, tap, wait, check):
         check()
         first = self.locate(window.snapshot())
+        opened_with_t = first is None
         if first is None:
             tap('t')
             wait(.4)
@@ -102,7 +103,7 @@ class RepairBoxMenu:
         second = self.locate(window.snapshot())
         if second is None or abs(first['x']-second['x']) > 3 or abs(first['y']-second['y']) > 3:
             raise ValueError(f'{self.label}图标位置不稳定，请关闭其他界面后按 F6 重试')
-        return second
+        return {**second, 'opened_with_t': opened_with_t}
 
     @staticmethod
     def use(target, device, check, wait):
@@ -112,6 +113,23 @@ class RepairBoxMenu:
             wait(.1)  # Keep the press across a rendered game frame.
         finally:
             device.execute({'type': 'mouse_up', 'button': 'left'})
+
+    def confirm_target(self, window, target, device, check, wait):
+        """Reobserve after positioning; this step never consumes a repair box."""
+        check()
+        device.execute({'type': 'cursor_move', 'x': target['x'], 'y': target['y']})
+        wait(.1)
+        check()
+        x, y, _ = window.pointer()
+        # Unity can render its own cursor while the OS cursor flag is hidden.
+        # Arrival and fresh menu geometry, not that flag, authorize the click.
+        if abs(x-target['x']) > 3 or abs(y-target['y']) > 3:
+            raise ValueError('鼠标尚未到达维修盒，未点击使用')
+        current = self.locate(window.snapshot())
+        if current is None or abs(current['x']-target['x']) > 3 or abs(current['y']-target['y']) > 3:
+            raise ValueError('T 面板或维修盒图标已改变，未点击使用')
+        check()
+        return {**target, **current}
 
     def close_menu(self, window, tap, check, wait):
         check()
