@@ -5,7 +5,8 @@ only active navigation/recovery time, excluding menus, planning and pauses.
 """
 import math
 from collections import deque
-from utils.core.collection_schedule import LOOP_WINDOW_SECONDS
+from utils.core.collection_schedule import (LOOP_WINDOW_SECONDS, LOOP_RETURN_RADIUS,
+    LOOP_EXIT_RADIUS, LOOP_RETURN_HEIGHT, LOOP_RETURN_COUNT, LOOP_MIN_TRAVEL)
 
 from utils.core import thresholds as policy
 
@@ -61,7 +62,16 @@ class NavigationProgress:
         if len(self.visits)<4 or self.elapsed-self.visits[0][0]<LOOP_WINDOW_SECONDS:
             return False
         visits=list(self.visits)
-        returns=sum(math.hypot(position[0]-p[0],position[2]-p[2])<.75
-                    and abs(position[1]-p[1])<.35 for _,p in visits)
+        # Count observed departures followed by re-entry, not consecutive
+        # samples while slowing down or aligning near the collection target.
+        returns, departed = 0, False
+        for _,point in visits:
+            separation=math.hypot(position[0]-point[0],position[2]-point[2])
+            if separation >= LOOP_EXIT_RADIUS:
+                departed=True
+            elif separation < LOOP_RETURN_RADIUS and abs(position[1]-point[1]) < LOOP_RETURN_HEIGHT:
+                if departed:
+                    returns+=1
+                departed=False
         length=sum(math.hypot(a[0]-b[0],a[2]-b[2]) for (_,a),(_,b) in zip(visits,visits[1:]))
-        return returns>=4 and length>=6.
+        return returns>=LOOP_RETURN_COUNT and length>=LOOP_MIN_TRAVEL
