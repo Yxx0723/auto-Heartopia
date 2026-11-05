@@ -8,6 +8,7 @@ from utils.core.memory_corridor import (EXECUTION_CHORD_ERROR, SHORTCUT_MIN_GAIN
     SHORTCUT_MIN_METERS, SHORTCUT_CHECK_SECONDS)
 from utils.core.scene_read import navigation_quality_valid
 from utils.core import thresholds as policy
+from utils.core.local_memory_shortcut import LocalMemoryShortcut
 
 
 class CollectionNavigator(GuidanceNavigator):
@@ -28,10 +29,15 @@ class CollectionNavigator(GuidanceNavigator):
         self.short_trial=None
         self.short_rejected={}
         self.short_check_at=float('-inf')
+        self.local_shortcut=LocalMemoryShortcut()
+        self._shortcut_guard=lambda:None
         super().__init__(*args,respect_water=True,**kwargs)
 
     def blocked(self,position,target,**kwargs):
-        if self.short_trial is not None:
+        if self.local_shortcut.aim is not None:
+            self.local_shortcut.fail(self.clock())
+            if self.path_memory:self.path_memory.selected=None
+        elif self.short_trial is not None:
             self.short_rejected[self.short_trial]=self.clock()+FAILED_ENTRY_SECONDS
             if len(self.short_rejected)>64:self.short_rejected.pop(next(iter(self.short_rejected)))
             self.short_trial=None
@@ -75,6 +81,7 @@ class CollectionNavigator(GuidanceNavigator):
                 or self.risks.repeats_failed_entry(a,b,position[1]):
             return None
         check()
+        self.local_shortcut.aim=self.local_shortcut.key=None
         self._observe_saved_walk(position,target)
         if self.short_trial!=key:
             self.path=[tuple(target)];self.goal=tuple(target)
@@ -82,10 +89,15 @@ class CollectionNavigator(GuidanceNavigator):
         self.memory_state='learning'
         result=self._next_target(position,target,check,before_plan)
         self.last_decision={**self.last_decision,'kind':'checked_shortcut_trial',
-                            'requested_target':tuple(target),'success_observed':False}
+                            'requested_target':tuple(target),'success_observed':False,
+                            'memory_shortcut':{'state':'superseded_by_direct_trial'}}
         return result
 
     def _memory_target(self,position):
+        local=self.local_shortcut.choose(position,self.memory_path,scene_scope(self.scene),
+            self.waypoint,self.obstacles,self._fresh_collision(),self.clock(),
+            self._shortcut_guard,self.risks.repeats_failed_entry)
+        if local is not None:return local
         # Keep historical turns unless a fresh collision permit confirms the
         # slightly wider jitter envelope. No geometry is rewritten here.
         if not self._fresh_collision():
@@ -122,6 +134,7 @@ class CollectionNavigator(GuidanceNavigator):
                 return
 
     def next_target(self,position,target,check=lambda:None,before_plan=lambda:None):
+        self._shortcut_guard=check
         if self.last_decision.get('kind') in ('observed_partial_memory','checked_shortcut_trial'):
             self.last_decision={}
         library=getattr(self,'traversal_memory',None)
@@ -149,7 +162,8 @@ class CollectionNavigator(GuidanceNavigator):
             self.invalidate()
         if self.memory_path and self.memory_aim is not None:
             self._refresh_obstacles(position,target)
-            self._advance_memory_progress(position)
+            if self.local_shortcut.aim is None:
+                self._advance_memory_progress(position)
             if self.memory_path:
                 self.memory_aim=self._memory_target(position)
         # Complete destination-specific corridors keep their existing priority.
@@ -206,6 +220,7 @@ class CollectionNavigator(GuidanceNavigator):
         return planned if planned is not None else super().next_target(position,target,check,before_plan)
 
     def _compare_memory(self,position,target,key,planned,check,before_plan):
+        self.last_decision['memory_shortcut']=dict(self.local_shortcut.diagnostics)
         if self.memory_state!='reusing' or not self.memory_path or self.clock()<self.short_check_at:
             return planned
         self.short_check_at=self.clock()+SHORTCUT_CHECK_SECONDS
