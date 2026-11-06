@@ -75,3 +75,18 @@ class NavigationProgress:
                 departed=False
         length=sum(math.hypot(a[0]-b[0],a[2]-b[2]) for (_,a),(_,b) in zip(visits,visits[1:]))
         return returns>=LOOP_RETURN_COUNT and length>=LOOP_MIN_TRAVEL
+
+
+class HeightWaitBudget:
+    """Accumulate only actual height-wait intervals within one point attempt."""
+    def __init__(self, limit=15.):
+        self.limit, self.tag, self.elapsed = limit, None, 0.
+
+    def account(self, tag, seconds):
+        if self.tag != tag:
+            self.tag, self.elapsed = tag, 0.
+        self.elapsed += max(0., seconds)
+
+    @property
+    def exhausted(self):
+        return self.elapsed >= self.limit

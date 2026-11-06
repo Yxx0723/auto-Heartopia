@@ -154,6 +154,9 @@ class _Follower:
         self.approach_tag, self.approach_attempts = None, 0
         self.direction_unsafe_until = float('-inf')
         self.travel_progress = NavigationProgress()
+        from utils.core.navigation_progress import HeightWaitBudget
+        self.height_wait_budget = HeightWaitBudget()
+        self.height_wait_enabled = True
         self.travelling = False
 
     def approach_attempt(self, index):
@@ -1330,15 +1333,27 @@ class _Follower:
                         and (self.waypoints is None or remaining <= policy.COORD_REACH_RADIUS):
                     if self.navigator and self.continuous_recovery and self.waypoints is not None:
                         self.release()
+                        wait_tag=(self.cycle,index,bool(self.supplements and self.supplements.retrying))
+                        if self.height_wait_enabled:
+                            self.height_wait_budget.account(wait_tag,0.)
+                            if self.height_wait_budget.exhausted:
+                                self.report('navigating','高度等待超时，结束本次点位尝试',
+                                    waypoint=index+1,incident_kind='height_wait_timeout',
+                                    height_wait_seconds=self.height_wait_budget.elapsed,
+                                    position=list(position),target_height=target[1])
+                                raise _SkipPoint('height_wait_timeout：目标高度持续不匹配')
                         if self.clock.monotonic() - self.last_report >= .5:
                             self.report('navigating', f'点位 {index + 1}/{len(points)} · 已接近，等待落地或目标高度恢复 · F9停止',
                                         waypoint=index + 1, waypoint_count=len(points),
                                         position=list(position), target_height=target[1], navigation_path=[])
                             self.last_report = self.clock.monotonic()
                         self.navigation_waiting = True
+                        height_wait_at=self.clock.monotonic()
                         try:
                             self.wait(.1)
                         finally:
+                            if self.height_wait_enabled:
+                                self.height_wait_budget.account(wait_tag,self.clock.monotonic()-height_wait_at)
                             self.navigation_waiting = False
                             self.last_tick = self.clock.monotonic()
                         continue
