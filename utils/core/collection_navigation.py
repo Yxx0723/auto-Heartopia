@@ -1,4 +1,5 @@
 """Saved destinations over the proven local controller, without game guidance."""
+import time
 from utils.core.guidance_navigation import GuidanceNavigator, NavigationWait
 from utils.core.traversal_evidence import scene_scope
 from utils.core.coordinate_route import distance
@@ -31,10 +32,12 @@ class CollectionNavigator(GuidanceNavigator):
         self.short_check_at=float('-inf')
         self.local_shortcut=LocalMemoryShortcut()
         self.terminal_approach_key=None
+        self.partial_aim=None
         self._shortcut_guard=lambda:None
         super().__init__(*args,respect_water=True,**kwargs)
 
     def blocked(self,position,target,**kwargs):
+        self.partial_aim=None
         if self.terminal_approach_key is not None:
             # This leg is using a fresh A* approach. Do not penalize the saved
             # corridor that was deliberately bypassed near the destination.
@@ -54,6 +57,7 @@ class CollectionNavigator(GuidanceNavigator):
         return super().blocked(position,target,**kwargs)
 
     def arrived(self,position):
+        self.partial_aim=None
         self.terminal_approach_key=None
         return super().arrived(position)
 
@@ -163,12 +167,43 @@ class CollectionNavigator(GuidanceNavigator):
             self.memory_loaded=False
             self.memory_retry_at=self.clock()+MEMORY_REJOIN_SECONDS
         key=(self.waypoint,tuple(target),scope)
+        if self.partial_aim is not None:
+            active=self.partial_aim
+            if active['key']!=key or distance(position,active['aim'])<=policy.COORD_NAV_LEG_REACH_RADIUS:
+                self.partial_aim=None
+            elif distance(position,target)>policy.COORD_NAV_APPROACH_RADIUS:
+                previous=self.before_refresh
+                self.before_refresh=before_plan
+                started=time.perf_counter()
+                plans_before,maps_before=self.stats['plans'],self.stats['map_builds']
+                try:
+                    check()
+                    self._refresh_obstacles(position,target)
+                    if not self._fresh_collision() or scene_scope(self.scene)!=scope:
+                        raise NavigationWait('等待最新场景数据，稍后自动寻路',reason='scene')
+                    self._observe_saved_walk(position,target)
+                    result=self._next_target(position,active['aim'],check,before_plan,approach_goal=target)
+                    if not self._fresh_collision() or scene_scope(self.scene)!=scope:
+                        raise NavigationWait('等待最新场景数据，稍后自动寻路',reason='scene')
+                    self.last_decision={**self.last_decision,'kind':'observed_partial_memory',
+                        'requested_target':tuple(target),'local_target':active['aim'],'retained_aim':True}
+                    return result
+                except NavigationWait as exc:
+                    if exc.reason=='scene':raise
+                    self.partial_aim=None
+                finally:
+                    self.last_timings={'total_seconds':time.perf_counter()-started,
+                        'plans':self.stats['plans']-plans_before,
+                        'map_builds':self.stats['map_builds']-maps_before,'retained_partial_aim':True}
+                    self.before_refresh=previous
+            else:
+                self.partial_aim=None
         if self.terminal_approach_key is not None and self.terminal_approach_key!=key:
             self.terminal_approach_key=None
         has_memory_corridor = (self.memory_leg==(self.waypoint,tuple(target))
                                and bool(self.memory_path or self.memory_aim is not None))
         near_goal = distance(position,target)<=policy.COORD_NAV_APPROACH_RADIUS
-        if self.terminal_approach_key==key or (near_goal and has_memory_corridor):
+        if self.terminal_approach_key==key or (near_goal and (has_memory_corridor or (library is not None and scope is not None))):
             if distance(position,target)>policy.COORD_REACH_RADIUS:
                 # Keep the exact saved destination and interaction radius. Once
                 # a remembered corridor enters the near-goal zone, navigate to
@@ -256,6 +291,7 @@ class CollectionNavigator(GuidanceNavigator):
                 return planned if planned is not None else super().next_target(position,target,check,before_plan)
             self._observe_saved_walk(position,target)
             result=self._next_target(position,aim,check,before_plan,approach_goal=target)
+            self.partial_aim={'key':key,'aim':tuple(aim)} if self._fresh_collision() else None
             self.last_decision={**self.last_decision,'kind':'observed_partial_memory',
                                 'requested_target':tuple(target),'local_target':tuple(aim)}
             return result
