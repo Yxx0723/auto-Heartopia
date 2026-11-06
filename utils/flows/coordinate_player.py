@@ -156,7 +156,8 @@ class _Follower:
         self.travel_progress = NavigationProgress()
         from utils.core.navigation_progress import HeightWaitBudget
         self.height_wait_budget = HeightWaitBudget()
-        self.height_wait_enabled = True
+        from utils.core.navigation_options import enabled
+        self.height_wait_enabled = enabled('HEIGHT_WAIT_BUDGET')
         self.travelling = False
 
     def approach_attempt(self, index):
@@ -1532,7 +1533,7 @@ class _Follower:
                         self.approach_attempt(index)
                         self.navigator.blocked(position, target,
                                                attempt_id=(self.cycle,index,self.approach_attempts),
-                                               evidence='movement_stall' if physically_stalled else 'progress_timeout')
+                                               evidence='movement_stall' if physically_stalled and attempted_keys else 'progress_timeout')
                     try:
                         improved = False
                         # A small advance followed by another stall (or an

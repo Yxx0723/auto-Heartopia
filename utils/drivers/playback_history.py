@@ -80,7 +80,7 @@ class PlaybackHistory:
                 'automatic_promotion': False, 'collision_contact_confirmed': False,
                 'requires_scene_and_traversal_revalidation': True,
                 'completion_is_not_loot_confirmation': True,
-                'memory_database': os.path.relpath(self.memory.path,self.path) if self.memory else None,
+                'memory_database': os.path.relpath(self.memory.path,self.path).replace(os.sep,'/') if self.memory else None,
                 'reusable_evidence': 'observed_directed_walk_segments_only',
                 'memory_error': self.memory.error if self.memory else None,
                 'files': {'route_snapshot': 'route.json', 'actual_trajectory': 'trajectory.jsonl',

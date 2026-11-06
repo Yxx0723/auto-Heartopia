@@ -1,0 +1,31 @@
+{
+  "scenario": "scaled U wall; snapshot invalidation every 4 ticks; ideal steering, no game input",
+  "baseline_revision": "2072b18",
+  "wall": {
+    "baseline": {
+      "arrived": false,
+      "steps": 250,
+      "length": 125.0,
+      "plans": 215,
+      "partial_results": 68,
+      "partial_accepts": 68,
+      "cpu_seconds": 3.7102074999711476
+    },
+    "candidate": {
+      "arrived": true,
+      "steps": 204,
+      "length": 101.5,
+      "plans": 83,
+      "partial_results": 15,
+      "partial_accepts": 15,
+      "cpu_seconds": 1.186394400021527
+    }
+  },
+  "straight_seconds": {
+    "baseline": 0.0008087999885901809,
+    "candidate": 0.0009102000040002167,
+    "maximum_ratio": 1.2,
+    "ratio": 1.1253709407028878
+  },
+  "real_game_verified": false
+}

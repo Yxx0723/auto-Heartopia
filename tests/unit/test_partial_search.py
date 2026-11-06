@@ -25,6 +25,8 @@ def test_repeated_partial_upgrades_without_changing_risk_revision(monkeypatch):
         nav.next_target((0,0,0),(0,0,30))
     assert len(calls)==4 and nav.search_diagnostics['escalated']
     assert nav.risks.revision==0
+    nav.invalidate();nav.next_target((3,0,0),(0,0,30))
+    assert calls[-1]['search_radius']==calls[3]['search_radius']
 
 
 def test_planning_timeout_does_not_create_movement_risk():
@@ -32,4 +34,20 @@ def test_planning_timeout_does_not_create_movement_risk():
     for i in range(5):nav.blocked((0,0,0),(0,0,8),attempt_id=i,evidence='progress_timeout')
     assert nav.risks.revision==0
     nav.blocked((0,0,0),(0,0,8),attempt_id=6,evidence='movement_stall')
+    assert nav.risks.revision==1
+
+def test_partial_search_can_restore_first_success_behavior(monkeypatch):
+    monkeypatch.setenv('HEARTOPIA_PARTIAL_SEARCH','0')
+    nav=navigation.LocalNavigator(lambda:scene(),water_areas=(),clock=lambda:1.)
+    plan=Mock(return_value=navigation.PlannedPath([(0,0,5)],(0,10),False))
+    monkeypatch.setattr(navigation,'plan_path',plan)
+    for _ in range(4):
+        nav.invalidate();nav.next_target((0,0,0),(0,0,30))
+    assert plan.call_count==4
+
+
+def test_risk_evidence_switch_restores_legacy_timeout_risk(monkeypatch):
+    monkeypatch.setenv('HEARTOPIA_MOVEMENT_RISK_ONLY','0')
+    nav=navigation.LocalNavigator(lambda:scene(),water_areas=())
+    nav.blocked((0,0,0),(0,0,8),evidence='progress_timeout')
     assert nav.risks.revision==1

@@ -1,4 +1,3 @@
-from copy import deepcopy
 import hashlib
 import json
 import pytest

@@ -30,3 +30,10 @@ def test_manual_pause_is_excluded_from_height_wait():
     timeouts=[c for c in report.call_args_list if c.kwargs.get('incident_kind')=='height_wait_timeout']
     assert timeouts and 15. <= timeouts[0].kwargs['height_wait_seconds'] < 15.2
     assert game.time>=35.
+
+def test_height_wait_switch_restores_legacy_wait_until_stop(monkeypatch):
+    monkeypatch.setenv('HEARTOPIA_HEIGHT_WAIT_BUDGET','0')
+    game,nav=game_and_nav();game.stop_at=18.;report=Mock()
+    assert not run(game,nav,[(0,3,0)],report,continuous_recovery=True,recovery_attempts=3)
+    assert not any(c.kwargs.get('incident_kind')=='height_wait_timeout' for c in report.call_args_list)
+    assert not game.keys

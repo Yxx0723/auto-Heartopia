@@ -10,7 +10,6 @@ def positive(value):
 
 def costs_from_memory(route, memory):
     from utils.drivers.route_path_memory import RoutePathMemory
-    from utils.core.coordinate_route import distance
     import json
     points=route['points'];targets=[p['position'] for p in points]
     fingerprint=hashlib.sha256(json.dumps(targets,separators=(',',':'),allow_nan=False).encode()).hexdigest()

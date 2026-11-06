@@ -319,9 +319,12 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
 class LocalNavigator:
     def __init__(self, scene_provider, clock=time.monotonic, water_areas=WATER_AREAS, path_memory=None):
         self.scene_provider, self.clock, self.water_areas = scene_provider, clock, water_areas
-        self.partial_search_enabled = True
-        self.movement_risk_evidence_only = True
+        from utils.core.navigation_options import enabled
+        self.partial_search_enabled = enabled('PARTIAL_SEARCH')
+        self.movement_risk_evidence_only = enabled('MOVEMENT_RISK_ONLY')
+        self.search_request_id = 0
         self.partial_requests = []
+        self.partial_upgrade = None
         self.search_diagnostics = {}
         self.scene, self.obstacles, self.goal = None, None, None
         self.scene_signature = None
@@ -651,29 +654,37 @@ class LocalNavigator:
                          policy.COORD_NAV_MAX_NODES, policy.COORD_NAV_FINE_SEARCH_RADIUS),
                         (policy.COORD_NAV_WIDE_SEARCH_RADIUS, policy.COORD_NAV_WIDE_GRID_STEP,
                          policy.COORD_NAV_WIDE_MAX_NODES, policy.COORD_NAV_WIDE_HORIZON)]
+            self.search_request_id += 1
             scope = repr(((self.scene or {}).get('cache_context'),
                           (self.scene or {}).get('terrain_revision'), self.waypoint, tuple(target)))
             self.partial_requests = [r for r in self.partial_requests
                 if now-r['at'] < 12. and r['scope'] == scope
                 and abs(position[1]-r['position'][1]) < .75
                 and distance(position,r['position']) <= 2.]
-            escalate = self.partial_search_enabled and len(self.partial_requests) >= 2
+            upgraded = (self.partial_search_enabled and self.partial_upgrade is not None
+                and self.partial_upgrade['scope']==scope and now<self.partial_upgrade['until'])
+            escalate = self.partial_search_enabled and (len(self.partial_requests) >= 2 or upgraded)
+            if upgraded:
+                profiles=profiles[profiles.index(self.partial_upgrade['profile']):]
             partials, attempts = [], 0
             for radius, step, nodes, horizon in profiles:
                 check()
                 if not self.obstacles.covers_search(position, radius):
                     self.obstacles = self._build_map(self.scene, position, approach_goal, radius)
                 self.stats['plans'] += 1
+                attempts += 1
                 try:
                     candidate = plan_path(position, target, self.obstacles, check, grid_step=step,
                                           search_radius=radius, max_nodes=nodes, horizon=horizon,
                                           approach_goal=approach_goal, before_search=before_plan)
                 except NavigationWait:
                     continue
-                attempts += 1
                 if not self.partial_search_enabled or getattr(candidate,'reached_local',True):
                     self.path = candidate
                     self.search_radius = radius
+                    if escalate:
+                        self.partial_upgrade={'scope':scope,'profile':(radius,step,nodes,horizon),
+                            'until':self.partial_upgrade['until'] if upgraded else now+12.}
                     break
                 partials.append((candidate,radius))
                 if not escalate:
@@ -700,7 +711,7 @@ class LocalNavigator:
                 end = self.path[-1] if self.path else partials[0][0][-1]
                 self.partial_requests.append({'at':now,'scope':scope,'position':tuple(position),'end':end})
                 self.partial_requests=self.partial_requests[-32:]
-            self.search_diagnostics={'attempts':attempts,'partial_results':len(partials),
+            self.search_diagnostics={'request_id':self.search_request_id,'attempts':attempts,'partial_results':len(partials),
                 'escalated':escalate,'reached_local':bool(self.path and getattr(self.path,'reached_local',True))}
             if not self.path:
                 self.retry_at = now + policy.COORD_NAV_RETRY_SECONDS

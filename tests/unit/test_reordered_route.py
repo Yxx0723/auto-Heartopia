@@ -1,5 +1,3 @@
-import hashlib
-from copy import deepcopy
 import pytest
 from tests.unit.test_coordinate_player import manual_points
 from utils.drivers.coordinate_point_routes import PointRoutes
