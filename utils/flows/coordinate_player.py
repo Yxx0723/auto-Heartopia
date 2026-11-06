@@ -142,6 +142,7 @@ class _Follower:
         self.direction_poll_at = float('-inf')
         self.direction_candidate = self.direction_memory = self.direction_conflict = None
         self.direction_bad_since = None
+        self.direction_error = ''
         self.direction_safe_probe = False
         self.direction_source = 'legacy'
         self.calibration_seconds = policy.COORD_CALIBRATION_SECONDS
@@ -354,10 +355,12 @@ class _Follower:
                     <=policy.COORD_DIRECTION_STABLE_DEGREES:
                 self.direction_memory=None
                 self.direction_safe_probe=True
+                self.direction_error='镜头方向与实际移动持续不一致'
                 if self.direction_bad_since is None:self.direction_bad_since=now
                 return None
             self.direction_conflict=None
         except (OSError,ValueError,TypeError,KeyError,IndexError) as exc:
+            self.direction_error=str(exc) or type(exc).__name__
             self.direction_memory=self.direction_candidate=None
             self.direction_safe_probe=bool(getattr(exc,'safe_to_probe',False))
             if self.direction_bad_since is None:self.direction_bad_since=now
@@ -365,11 +368,14 @@ class _Follower:
         previous=self.direction_candidate
         self.direction_candidate=basis
         if previous is None or self.basis_angle(previous,basis)>policy.COORD_DIRECTION_STABLE_DEGREES:
+            self.direction_error='等待连续两次稳定的镜头方向'
+            if self.direction_bad_since is None:self.direction_bad_since=now
             self.direction_memory=None
             self.direction_safe_probe=False
             return None
         self.direction_memory=basis
         self.direction_bad_since=None
+        self.direction_error=''
         self.direction_safe_probe=False
         return basis
 
@@ -395,9 +401,14 @@ class _Follower:
 
     def wait_direction(self, index, total):
         self.release()
+        elapsed=0. if self.direction_bad_since is None else self.clock.monotonic()-self.direction_bad_since
+        reason=self.direction_error or '镜头方向尚未确认'
+        if elapsed>=15.:
+            raise ValueError(f'方向确认超过15秒：{reason}；请关闭地图和背包、恢复正常人物视角后重新启动回放')
         if self.clock.monotonic()-self.last_report>=.5:
-            self.report('navigating','等待可靠方向数据；未执行走动校准 · F6暂停 · F9停止',
-                        waypoint=index+1,waypoint_count=total,navigation_path=[],direction_source='unconfirmed')
+            self.report('navigating',f'方向确认中（{elapsed:.1f}/15秒）：{reason} · F6暂停 · F9停止',
+                        waypoint=index+1,waypoint_count=total,navigation_path=[],direction_source='unconfirmed',
+                        direction_error=reason,direction_wait_seconds=elapsed)
             self.last_report=self.clock.monotonic()
         self.navigation_waiting=True
         try:self.wait(policy.COORD_SAMPLE_SECONDS)

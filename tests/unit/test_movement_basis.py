@@ -107,6 +107,44 @@ def test_readonly_checker_replacement_during_sampling_cannot_return_stale_direct
     with pytest.raises(ValueError):reader.snapshot()
 
 
+def test_transient_direction_failure_retains_metadata_but_structural_failure_resets_it():
+    from utils.drivers.coordinate_memory import ReadOnlyPosition
+    from utils.drivers.movement_basis import DirectionUnavailable
+    reader=ReadOnlyPosition.__new__(ReadOnlyPosition)
+    reader.locator=object()
+    cached=reader.movement_reader=Mock()
+    cached.snapshot.side_effect=DirectionUnavailable('changing')
+    with pytest.raises(DirectionUnavailable):reader.movement_basis()
+    assert reader.movement_reader is cached
+    cached.snapshot.side_effect=ValueError('wrong layout')
+    with pytest.raises(ValueError):reader.movement_basis()
+    assert reader.movement_reader is None
+
+
+def test_camera_update_during_slow_identity_lookup_is_sampled_after_lookup():
+    r,c,reader=runtime()
+    original=reader.locator.snapshot
+    calls=[]
+    def snapshot():
+        calls.append(1)
+        if len(calls)==2:
+            r.write(c+16,struct.pack('<3f',.8,-.6,0.))
+        return original()
+    reader.locator.snapshot=snapshot
+    assert reader.snapshot()=={'forward':[1.,0.],'right':[0.,-1.]}
+
+
+def test_persistent_direction_failure_has_reason_and_a_finite_wait_budget():
+    game=Game();game.stop_at=20.
+    game.movement_basis=Mock(side_effect=ValueError('checker not synced'))
+    report=Mock()
+    with pytest.raises(ValueError,match='超过15秒.*checker not synced'):
+        drive_points(manual_points([(0.,0.,6.)]),game.size(),lambda:game,
+                     game,game,game,report,clock=game)
+    assert game.time<20. and not game.events and not game.keys
+    assert any(c.kwargs.get('direction_error')=='checker not synced' for c in report.call_args_list)
+
+
 @pytest.mark.parametrize('obstacle',['wall','tree','home'])
 def test_vertical_view_never_triggers_fallback_near_obstacles_or_home(obstacle,monkeypatch):
     from utils.flows.coordinate_player import _Follower

@@ -187,11 +187,14 @@ class ReadOnlyPosition:
         """Version-pinned read-only local camera direction; never sends input."""
         if self.locator is None:
             raise ValueError('当前坐标版本不支持只读方向检测')
-        from utils.drivers.movement_basis import MovementBasisReader
+        from utils.drivers.movement_basis import MovementBasisReader, DirectionUnavailable
         try:
             if getattr(self,'movement_reader',None) is None:
                 self.movement_reader=MovementBasisReader(self._read,self.locator)
             return self.movement_reader.snapshot()
+        except DirectionUnavailable:
+            # Live values are always reread. Keep only validated type metadata.
+            raise
         except (OSError,ValueError):
             self.movement_reader=None
             raise

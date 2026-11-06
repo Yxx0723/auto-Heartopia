@@ -7,7 +7,7 @@ from utils.core import thresholds as policy
 
 
 class DirectionUnavailable(ValueError):
-    """Only a typed, synced, near-vertical view can authorize safe fallback probing."""
+    """Transient observation failure; probing requires explicit synced evidence."""
     def __init__(self, message, safe_to_probe=False):
         super().__init__(message)
         self.safe_to_probe = safe_to_probe
@@ -48,6 +48,12 @@ class MovementBasisReader:
         ci = m.obj(checker)
         if (ci['name'], ci['namespace']) != ('PlayerSphereChecker', 'XDTLevelAndEntity.Gameplay.Interaction.Checker'):
             raise ValueError('镜头方向检测器类型不符')
+        # Resolve the slower position/ownership chain before sampling live vectors.
+        # Otherwise ordinary camera motion during that lookup invalidates every poll.
+        confirmed = self.locator.snapshot()
+        if confirmed['paths'][0]['trace'] != trace:
+            raise DirectionUnavailable('角色入口在读取中变化')
+        sample = confirmed
         values, raw_values = {}, {}
         for name in ('_cameraForward', '_playerPos'):
             f = m.field(ci['address'], name)
@@ -59,11 +65,10 @@ class MovementBasisReader:
             values[name] = struct.unpack('<3f',raw_values[name][1])
         position = values['_playerPos']
         if any(not math.isfinite(v) for v in position) or math.dist(position, sample['position']) > policy.COORD_DIRECTION_POSITION_TOLERANCE:
-            raise ValueError('镜头检测器与当前角色位置尚未同步')
+            raise DirectionUnavailable('镜头检测器与当前角色位置尚未同步')
         if m.ref(player,'_checker') != checker or m.ref(player,'<entity>k__BackingField') != entity \
-                or self.locator.snapshot()['paths'][0]['trace'] != trace \
                 or any(m.data(at,12)!=raw for at,raw in raw_values.values()):
-            raise ValueError('角色或镜头入口在读取中变化')
+            raise DirectionUnavailable('角色或镜头入口在读取中变化')
         forward=values['_cameraForward']
         length=math.sqrt(sum(v*v for v in forward))
         if all(math.isfinite(v) for v in forward) and abs(length-1.)<=policy.COORD_DIRECTION_CAMERA_NORM_TOLERANCE \
