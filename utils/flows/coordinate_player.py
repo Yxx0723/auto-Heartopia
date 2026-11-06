@@ -907,8 +907,10 @@ class _Follower:
         delay = min(policy.COORD_FOOD_RETRY_MAX_SECONDS,
                     policy.COORD_FOOD_RETRY_SECONDS * 2**min(self.food_retry_count-1, 3))
         self.food_retry_at = self.clock.monotonic()+delay
+        phase=getattr(self.food,'phase',None)
         self.report('eating', f'自动进食等待重试：{reason} · {delay:g}秒后再核对 · F6暂停 · F9停止',
-                    waypoint=index+1, waypoint_count=total, food_retry_count=self.food_retry_count)
+                    waypoint=index+1, waypoint_count=total, food_retry_count=self.food_retry_count,
+                    food_phase=phase if isinstance(phase,str) else 'unknown')
         return True
 
     def food_retry_wait(self):

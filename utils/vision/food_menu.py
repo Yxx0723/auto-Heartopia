@@ -84,10 +84,20 @@ class FruitMenu(RepairBoxMenu):
         matches = self.matches(frame, self.bag, self.scales(frame), left=frame.shape[1]//2, minimum=.90)
         if matches:
             return matches[0]
-        results = self.matches(frame, self.search_results, self.scales(frame), left=frame.shape[1]//2)
-        if results and self.end_search_target(frame):
+        end = self.end_search_target(frame)
+        if end is None:
+            return None
+        # Font rendering can lower this title's correlation. The independent
+        # text + orange-body end control establishes both state and UI scale;
+        # never derive grid geometry from a slightly oversized title match.
+        results = self.matches(frame, self.search_results, [end['scale']],
+                               left=frame.shape[1]//2, minimum=.85)
+        results = [r for r in results if r['y'] < frame.shape[0]*.35
+                   and end['y']-r['y'] > 80*end['scale']]
+        if results:
             result = results[0]
-            return dict(result, x=frame.shape[1]-55*result['scale'], search_results=True)
+            return dict(result, x=frame.shape[1]-55*end['scale'],
+                        scale=end['scale'], search_results=True)
         return None
 
     def locate(self, picture):
@@ -301,11 +311,17 @@ class FruitMenu(RepairBoxMenu):
         raise ValueError('背包搜索框未确认，未输入文字')
 
     def click_control(self, target, device, check, wait):
+        self.use(target, device, check, wait)
+
+    @staticmethod
+    def use(target, device, check, wait):
+        # Selection, search exit and Eat all need the same pointer-arrival
+        # frame; moving and pressing in one event can miss the Unity control.
         check()
         device.execute({'type': 'cursor_move', 'x': target['x'], 'y': target['y']})
         wait(.15)  # Let the game process pointer arrival before button input.
         check()
-        self.use(target, device, check, wait)
+        RepairBoxMenu.use(target, device, check, wait)
 
     def open_search(self, window, tap, wait, check, device):
         check()
@@ -486,6 +502,7 @@ class FruitMenu(RepairBoxMenu):
         return dict(target,**result)
 
     def prepare(self, window, tap, wait, check, device, inventory=None, query_check=None, fallback_mode='fruit'):
+        self.phase='inventory_policy'
         pool=choose_foods(inventory,fallback_mode)
         if pool['state'] not in ('prepared','fallback'):
             raise ValueError(pool['reason'])
@@ -500,7 +517,9 @@ class FruitMenu(RepairBoxMenu):
                 if any(type(v) is not int or not 0<=v<=5 for v in stars):
                     raise ValueError('同名锁定物品的目标星级未确认')
                 target_star=min(stars)
+            self.phase='open_search'
             dialog = self.open_search(window, tap, wait, check, device)
+            self.phase='focus_search_input'
             self.click_control(dialog, device, check, wait)
             if self.search_dialog(window.snapshot()) is None:
                 raise ValueError('输入前搜索窗口已关闭，未输入文字')
@@ -513,7 +532,9 @@ class FruitMenu(RepairBoxMenu):
             tap('backspace')
             device.type_text(food, check, wait)
             dialog = self.stable_dialog(window, wait, check)
+            self.phase='submit_search'
             self.click_control(dialog['submit'], device, check, wait)
+            self.phase='confirm_search_results'
             for _ in range(20):
                 wait(.15)
                 check()
@@ -545,12 +566,15 @@ class FruitMenu(RepairBoxMenu):
                                   scale=scale, food=food) for j in range(rows) for i in range(5)]
                     cells = [c for c in cells if 0 < c['x'] < frame.shape[1] and 0 < c['y'] < frame.shape[0]]
                 for cell in cells:
+                    self.phase='select_food_cell'
                     self.click_control(cell, device, check, wait)
                     wait(.35)
                     check()
+                    self.phase='confirm_food_detail'
                     confirmed=self.confirmed_cell(window,food,cell,wait,check,query_check,
                                                   target_star if requires_star else None)
                     if confirmed is not None:
+                        self.phase='food_ready'
                         proof={'cell':{k:v for k,v in cell.items() if k in ('x','y','scale')},
                                'prepared':prepared,'requires_star':requires_star}
                         if requires_star:proof['star']=target_star

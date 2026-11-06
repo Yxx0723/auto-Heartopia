@@ -59,7 +59,7 @@ def test_prepare_does_not_consume_when_the_fruit_click_was_not_registered():
     window.snapshot.return_value = frame(selected=False, button=False)
     with pytest.raises(ValueError, match='未确认'):
         menu.prepare_visible(window, Mock(), Mock(), Mock(), device)
-    assert [call.args[0]['type'] for call in device.execute.call_args_list] == ['mouse_down', 'mouse_up']
+    assert [call.args[0]['type'] for call in device.execute.call_args_list] == ['cursor_move', 'mouse_down', 'mouse_up']
 
 
 def test_closed_backpack_opens_with_b_and_closes_by_its_icon_without_other_keys():
@@ -85,10 +85,10 @@ def test_closed_backpack_opens_with_b_and_closes_by_its_icon_without_other_keys(
     device.execute.assert_not_called()
     menu.close_menu(window, tap, Mock(), Mock(), device)
     assert not opened[0] and keys == ['b']
-    assert device.execute.call_count == 2
+    assert [c.args[0]['type'] for c in device.execute.call_args_list if c.args[0]['type'] in ('mouse_down','mouse_up')] == ['mouse_down','mouse_up']
     # Closing an already closed backpack must not reopen it.
     menu.close_menu(window, tap, Mock(), Mock(), device)
-    assert keys == ['b'] and device.execute.call_count == 2
+    assert keys == ['b'] and [c.args[0]['type'] for c in device.execute.call_args_list if c.args[0]['type'] in ('mouse_down','mouse_up')] == ['mouse_down','mouse_up']
 
 
 def test_failed_backpack_open_does_not_try_vehicle_keys_or_consume_food():
@@ -106,7 +106,7 @@ def test_failed_backpack_close_reports_the_error_without_toggling_other_keys():
     with pytest.raises(ValueError, match='点击关闭后背包仍展开'):
         menu.close_menu(window, tap, Mock(), Mock(), device)
     tap.assert_not_called()
-    assert device.execute.call_count == 2
+    assert [c.args[0]['type'] for c in device.execute.call_args_list if c.args[0]['type'] in ('mouse_down','mouse_up')] == ['mouse_down','mouse_up']
 
 
 def test_backpack_close_click_dismisses_the_whole_panel_without_keyboard_toggles():
@@ -122,10 +122,10 @@ def test_backpack_close_click_dismisses_the_whole_panel_without_keyboard_toggles
 
     device.execute.side_effect = click
     assert menu.close_menu(window, tap, Mock(), Mock(), device)
-    assert not opened[0] and device.execute.call_count == 2
+    assert not opened[0] and [c.args[0]['type'] for c in device.execute.call_args_list if c.args[0]['type'] in ('mouse_down','mouse_up')] == ['mouse_down','mouse_up']
     tap.assert_not_called()
     assert not menu.close_menu(window, tap, Mock(), Mock(), device)
-    assert device.execute.call_count == 2
+    assert [c.args[0]['type'] for c in device.execute.call_args_list if c.args[0]['type'] in ('mouse_down','mouse_up')] == ['mouse_down','mouse_up']
 
 
 def test_backpack_animation_is_allowed_to_finish_without_repeated_clicks():
@@ -144,7 +144,7 @@ def test_backpack_animation_is_allowed_to_finish_without_repeated_clicks():
 
     assert menu.close_menu(window, tap, Mock(), wait, device)
     tap.assert_not_called()
-    assert device.execute.call_count == 2
+    assert [c.args[0]['type'] for c in device.execute.call_args_list if c.args[0]['type'] in ('mouse_down','mouse_up')] == ['mouse_down','mouse_up']
 
 
 @pytest.mark.parametrize('scale', [1., 1.5, 2.])
