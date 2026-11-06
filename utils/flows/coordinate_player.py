@@ -1623,7 +1623,9 @@ class _Follower:
                                    'navigation_decision': self.navigator.last_decision,
                                    'approach_attempts': self.approach_attempts} if self.navigator else {})
                     mode = '自动寻路' if self.navigator else '坐标回放'
-                    if self.navigator and self.navigator.memory_state == 'reusing':
+                    if self.navigator and self.navigator.last_decision.get('kind') == 'collection_terminal_approach':
+                        mode = '近点安全接近'
+                    elif self.navigator and self.navigator.memory_state == 'reusing':
                         mode = '复用已走路线'
                     elif self.navigator and self.navigator.path_memory:
                         mode = '自动寻路 · 记忆走法'

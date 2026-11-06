@@ -1,5 +1,5 @@
 """Saved destinations over the proven local controller, without game guidance."""
-from utils.core.guidance_navigation import GuidanceNavigator
+from utils.core.guidance_navigation import GuidanceNavigator, NavigationWait
 from utils.core.traversal_evidence import scene_scope
 from utils.core.coordinate_route import distance
 from utils.core.collection_schedule import MEMORY_REJOIN_SECONDS, FAILED_ENTRY_SECONDS
@@ -30,11 +30,17 @@ class CollectionNavigator(GuidanceNavigator):
         self.short_rejected={}
         self.short_check_at=float('-inf')
         self.local_shortcut=LocalMemoryShortcut()
+        self.terminal_approach_key=None
         self._shortcut_guard=lambda:None
         super().__init__(*args,respect_water=True,**kwargs)
 
     def blocked(self,position,target,**kwargs):
-        if self.local_shortcut.aim is not None:
+        if self.terminal_approach_key is not None:
+            # This leg is using a fresh A* approach. Do not penalize the saved
+            # corridor that was deliberately bypassed near the destination.
+            self.local_shortcut.aim=self.local_shortcut.key=None
+            if self.path_memory:self.path_memory.selected=None
+        elif self.local_shortcut.aim is not None:
             self.local_shortcut.fail(self.clock())
             if self.path_memory:self.path_memory.selected=None
         elif self.short_trial is not None:
@@ -46,6 +52,10 @@ class CollectionNavigator(GuidanceNavigator):
             self.path_memory.reject_selected(position=position)
         self.memory_retry_at=self.clock()+MEMORY_REJOIN_SECONDS
         return super().blocked(position,target,**kwargs)
+
+    def arrived(self,position):
+        self.terminal_approach_key=None
+        return super().arrived(position)
 
     def _shore_target(self,position,target,check):
         # A saved collection destination is not a disposable guidance lookahead.
@@ -141,6 +151,7 @@ class CollectionNavigator(GuidanceNavigator):
         scope=scene_scope(self.scene_provider())
         if scope is not None and scope!=self.memory_scope:
             self.memory_scope=scope
+            self.terminal_approach_key=None
             if self.path_memory:
                 self.path_memory.blocked_entries.clear()
                 self.memory_loaded=False
@@ -152,6 +163,37 @@ class CollectionNavigator(GuidanceNavigator):
             self.memory_loaded=False
             self.memory_retry_at=self.clock()+MEMORY_REJOIN_SECONDS
         key=(self.waypoint,tuple(target),scope)
+        if self.terminal_approach_key is not None and self.terminal_approach_key!=key:
+            self.terminal_approach_key=None
+        has_memory_corridor = (self.memory_leg==(self.waypoint,tuple(target))
+                               and bool(self.memory_path or self.memory_aim is not None))
+        near_goal = distance(position,target)<=policy.COORD_NAV_APPROACH_RADIUS
+        if self.terminal_approach_key==key or (near_goal and has_memory_corridor):
+            if distance(position,target)>policy.COORD_REACH_RADIUS:
+                # Keep the exact saved destination and interaction radius. Once
+                # a remembered corridor enters the near-goal zone, navigate to
+                # the destination itself instead of following samples that can
+                # carry the player back out of collection range.
+                self._refresh_obstacles(position,target)
+                if not self._fresh_collision() or scene_scope(self.scene)!=scope:
+                    raise NavigationWait('等待最新场景数据，稍后自动寻路',reason='scene')
+                self._observe_saved_walk(position,target)
+                if self.local_shortcut.aim is not None:
+                    self.local_shortcut.aim=self.local_shortcut.key=None
+                    self.local_shortcut.diagnostics={'state':'inactive','reason':'terminal_approach'}
+                self.short_trial=None
+                try:
+                    result=super().next_target(position,target,check,before_plan)
+                except NavigationWait as exc:
+                    if self.terminal_approach_key==key or exc.reason=='scene':
+                        raise
+                    self.last_decision={'kind':'terminal_approach_unavailable',
+                        'requested_target':tuple(target),'reason':exc.reason}
+                else:
+                    self.terminal_approach_key=key
+                    self.last_decision={**self.last_decision,'kind':'collection_terminal_approach',
+                        'requested_target':tuple(target),'memory_corridor_bypassed':has_memory_corridor}
+                    return result
         if self.short_trial is not None:
             self._refresh_obstacles(position,target)
             if self.short_trial==key:
