@@ -4,6 +4,7 @@ import json
 import hashlib
 import re
 import math
+import os
 from pathlib import Path
 import threading
 from uuid import uuid4
@@ -44,7 +45,11 @@ class PlaybackHistory:
         self.plans = self.incidents = None
         try:
             self.path.mkdir(parents=True, exist_ok=False)
-            self.memory = TraversalMemory(Path(root)/'寻路记忆库.sqlite3', self.run_id)
+            from utils.core.reordered_route import isolation_id
+            namespace=isolation_id(route)
+            memory_root=Path(root)/'隔离记忆'/namespace if namespace else Path(root)
+            memory_root.mkdir(parents=True,exist_ok=True)
+            self.memory = TraversalMemory(memory_root/'寻路记忆库.sqlite3', self.run_id)
             self._json('route.json', route)
             self.route_digest = hashlib.sha256((self.path/'route.json').read_bytes()).hexdigest()
             self.events = (self.path/'events.jsonl').open('a', encoding='utf-8')
@@ -75,7 +80,7 @@ class PlaybackHistory:
                 'automatic_promotion': False, 'collision_contact_confirmed': False,
                 'requires_scene_and_traversal_revalidation': True,
                 'completion_is_not_loot_confirmation': True,
-                'memory_database': '../寻路记忆库.sqlite3',
+                'memory_database': os.path.relpath(self.memory.path,self.path) if self.memory else None,
                 'reusable_evidence': 'observed_directed_walk_segments_only',
                 'memory_error': self.memory.error if self.memory else None,
                 'files': {'route_snapshot': 'route.json', 'actual_trajectory': 'trajectory.jsonl',

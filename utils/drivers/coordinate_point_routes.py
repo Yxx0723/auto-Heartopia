@@ -66,7 +66,47 @@ class PointRoutes:
         if any(existing.casefold() == name.casefold() and self.path(existing).exists()
                for existing in self.names()):
             raise ValueError('同名路线已存在，请换一个名称。')
+        if data is not None and 'reordered_route' in data:
+            from copy import deepcopy
+            from utils.core.reordered_route import isolation_id
+            isolation_id(data)
+            data=deepcopy(data)
+            data['reordered_route']['isolation_id']=uuid4().hex
         PointStore(self.path(name)).create(data)
+        return name
+
+    def create_reordered(self, source, name, order, whitelist, expected_sha256=None):
+        """Publish one atomic candidate with provenance; never select or alter source."""
+        import hashlib
+        from copy import deepcopy
+        from utils.core.reordered_route import point_digest
+        source_store=self.store(source)
+        target=self.path(name)
+        if any(n.casefold()==name.casefold() for n in self.names()):
+            raise ValueError('同名路线已存在')
+        with source_store.locked():
+            raw=source_store.path.read_bytes()
+            digest=hashlib.sha256(raw).hexdigest()
+            if expected_sha256 is not None and digest!=expected_sha256:
+                raise ValueError('原路线已变化，请重新生成排序建议')
+            data=source_store.load();points=data['points'];count=len(points)
+            if not isinstance(order,list) or any(type(i)is not int for i in order) or sorted(order)!=list(range(1,count+1)):
+                raise ValueError('重排必须是全部原点位的排列')
+            if not isinstance(whitelist,(list,set,tuple)) or any(type(i)is not int or not 1<=i<=count for i in whitelist):
+                raise ValueError('换序白名单无效')
+            duplicates={tuple(p['position']) for p in points if sum(q['position']==p['position'] for q in points)>1}
+            locked={p['id'] for p in points if p['id'] not in whitelist or 'special_resource' in p or tuple(p['position']) in duplicates}
+            # Locked anchors partition independently reorderable intervals.
+            for new,old in enumerate(order,1):
+                if old in locked and new!=old or any(min(new,old)<anchor<max(new,old) for anchor in locked):
+                    raise ValueError('换序跨越或移动了锁定锚点')
+            result=deepcopy(data)
+            result['points']=[deepcopy(points[old-1]) for old in order]
+            for new,p in enumerate(result['points'],1):p['id']=new
+            result['reordered_route']={'schema':'reordered-route-v1','isolation_id':uuid4().hex,
+                'source_sha256':digest,'source_name':source,'new_to_old':order,
+                'source_points':{str(p['id']):point_digest(p) for p in points}}
+            PointStore(target).create(result)
         return name
 
     def rename(self, source, name):

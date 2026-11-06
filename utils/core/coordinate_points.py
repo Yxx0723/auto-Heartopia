@@ -44,6 +44,8 @@ def validate_points(data):
             count = target.get('press_count', 10)
             if type(count) is not int or not 1 <= count <= 100:
                 raise ValueError('动态采集连按次数应为1～100次。')
+    from utils.core.reordered_route import isolation_id
+    isolation_id(data)
     return data
 
 

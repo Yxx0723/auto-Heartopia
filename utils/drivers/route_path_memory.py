@@ -26,7 +26,10 @@ class RoutePathMemory:
         geometry = json.dumps(self.targets, separators=(',', ':'), allow_nan=False)
         self.fingerprint = hashlib.sha256(geometry.encode()).hexdigest()
         route_path = Path(route_path)
-        self.path = route_path.parent / '路线记忆' / route_path.name
+        from utils.core.reordered_route import isolation_id
+        namespace=isolation_id(data)
+        self.path = (route_path.parent / '路线记忆' / '隔离' / namespace / route_path.name
+                     if namespace else route_path.parent / '路线记忆' / route_path.name)
         self.statistics = {}
         self.learning_summary = {}
         self.rejected = set()
