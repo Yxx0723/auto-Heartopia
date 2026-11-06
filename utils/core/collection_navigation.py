@@ -226,7 +226,7 @@ class CollectionNavigator(GuidanceNavigator):
             a,b=row['start'],row['end']
             entry=distance(position,a)
             aim=a if entry>.4 else b
-            if distance(position,aim)<.15 or distance(b,target)>=distance(position,target)-.05:
+            if distance(position,aim)<=policy.COORD_REACH_RADIUS or distance(b,target)>=distance(position,target)-.05:
                 continue
             p=(position[0],position[2]);q=(aim[0],aim[2])
             if not self.obstacles.clear(p,q,escape=True) or self.obstacles.risk_cost(p,q)>0:

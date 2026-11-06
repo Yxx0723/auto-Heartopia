@@ -549,6 +549,12 @@ class _Follower:
                     waypoint=index + 1, waypoint_count=total, recovery_phase='start',
                     recovery_attempt=self.recovery.attempts, recovery_limit=self.recovery_attempts,
                     recovery_failures=self.recovery.failures)
+        if self.navigator and distance(self.recovery.origin,target)<=policy.COORD_REACH_RADIUS:
+            self.report('recovering','临时脱困目标已在到点范围内，结束本次尝试并重新规划',
+                        waypoint=index+1,waypoint_count=total,
+                        recovery_result='degenerate_local_target',
+                        recovery_origin=list(self.recovery.origin),steering_target=list(target))
+            return False
         # Escalate an unresolved episode instead of jumping at the same wall
         # on every replan. Legacy non-navigation playback keeps its policy.
         if self.jump_on_recovery and (not self.navigator or not self.continuous_recovery
