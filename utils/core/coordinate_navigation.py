@@ -206,6 +206,14 @@ class ObstacleMap:
         return math.dist(start,end) + self.risk_cost(start,end)
 
 
+class PlannedPath(list):
+    """List-compatible geometry with explicit local completion evidence."""
+    def __init__(self, points, local_target, reached_local):
+        super().__init__(points)
+        self.local_target = tuple(local_target)
+        self.reached_local = reached_local
+
+
 def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None, search_radius=None,
               max_nodes=None, horizon=None, approach_goal=None, before_search=lambda: None):
     """A bounded A* plan to an exact local endpoint, or a useful far-goal frontier."""
@@ -305,12 +313,16 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
             x, z = (a + (b - a) * part / count for a, b in zip(raw[index], raw[end]))
             result.append((x, position[1], z))
         index = end
-    return result
+    return PlannedPath(result, local, bool(raw and math.dist(raw[-1], local) < 1e-6))
 
 
 class LocalNavigator:
     def __init__(self, scene_provider, clock=time.monotonic, water_areas=WATER_AREAS, path_memory=None):
         self.scene_provider, self.clock, self.water_areas = scene_provider, clock, water_areas
+        self.partial_search_enabled = True
+        self.movement_risk_evidence_only = True
+        self.partial_requests = []
+        self.search_diagnostics = {}
         self.scene, self.obstacles, self.goal = None, None, None
         self.scene_signature = None
         self.reference_revision = None
@@ -458,14 +470,15 @@ class LocalNavigator:
             self.water_guard_context = context
         return self.steering_keys(position, target, basis, travel, obstacles=self.water_guard)
 
-    def blocked(self, position, target, *, attempt_id=None, mode='walk'):
+    def blocked(self, position, target, *, attempt_id=None, mode='walk', evidence='movement_stall'):
         if self.path_memory:
             self.path_memory.reject_selected()
         self.memory_path = []
         self.memory_aim = None
         self.memory_state = 'learning' if self.path_memory else 'off'
-        self.risks.record(position,target,attempt_id=attempt_id,mode=mode,
-                          geometry=local_geometry(self.obstacles,position))
+        if not self.movement_risk_evidence_only or evidence == 'movement_stall':
+            self.risks.record(position,target,attempt_id=attempt_id,mode=mode,
+                              geometry=local_geometry(self.obstacles,position))
         self.last_decision = {'kind':'approach_failed', 'risk_revision':self.risks.revision,
                               'support_ref':None, 'physical_wall_confirmed':False}
         self.invalidate()
@@ -638,27 +651,66 @@ class LocalNavigator:
                          policy.COORD_NAV_MAX_NODES, policy.COORD_NAV_FINE_SEARCH_RADIUS),
                         (policy.COORD_NAV_WIDE_SEARCH_RADIUS, policy.COORD_NAV_WIDE_GRID_STEP,
                          policy.COORD_NAV_WIDE_MAX_NODES, policy.COORD_NAV_WIDE_HORIZON)]
+            scope = repr(((self.scene or {}).get('cache_context'),
+                          (self.scene or {}).get('terrain_revision'), self.waypoint, tuple(target)))
+            self.partial_requests = [r for r in self.partial_requests
+                if now-r['at'] < 12. and r['scope'] == scope
+                and abs(position[1]-r['position'][1]) < .75
+                and distance(position,r['position']) <= 2.]
+            escalate = self.partial_search_enabled and len(self.partial_requests) >= 2
+            partials, attempts = [], 0
             for radius, step, nodes, horizon in profiles:
                 check()
                 if not self.obstacles.covers_search(position, radius):
                     self.obstacles = self._build_map(self.scene, position, approach_goal, radius)
                 self.stats['plans'] += 1
                 try:
-                    self.path = plan_path(position, target, self.obstacles, check, grid_step=step,
+                    candidate = plan_path(position, target, self.obstacles, check, grid_step=step,
                                           search_radius=radius, max_nodes=nodes, horizon=horizon,
                                           approach_goal=approach_goal, before_search=before_plan)
                 except NavigationWait:
                     continue
-                self.search_radius = radius
-                break
+                attempts += 1
+                if not self.partial_search_enabled or getattr(candidate,'reached_local',True):
+                    self.path = candidate
+                    self.search_radius = radius
+                    break
+                partials.append((candidate,radius))
+                if not escalate:
+                    self.path = candidate
+                    self.search_radius = radius
+                    break
             else:
+                self.path = []
+                choices=[]
+                for candidate,radius in partials:
+                    check()
+                    if not candidate: continue
+                    if any(distance(candidate[-1],r['end']) < .75 for r in self.partial_requests):
+                        continue
+                    a=(position[0],position[2]); b=(candidate[0][0],candidate[0][2])
+                    if self.risks.repeats_failed_entry(a,b,position[1]): continue
+                    chain=[position]+list(candidate)
+                    cost=sum(self.obstacles.travel_cost((a[0],a[2]),(b[0],b[2]))
+                             for a,b in zip(chain,chain[1:]))+distance(candidate[-1],target)
+                    choices.append((cost,radius,candidate))
+                if choices:
+                    _,self.search_radius,self.path=min(choices,key=lambda row:row[0])
+            if self.partial_search_enabled and partials:
+                end = self.path[-1] if self.path else partials[0][0][-1]
+                self.partial_requests.append({'at':now,'scope':scope,'position':tuple(position),'end':end})
+                self.partial_requests=self.partial_requests[-32:]
+            self.search_diagnostics={'attempts':attempts,'partial_results':len(partials),
+                'escalated':escalate,'reached_local':bool(self.path and getattr(self.path,'reached_local',True))}
+            if not self.path:
                 self.retry_at = now + policy.COORD_NAV_RETRY_SECONDS
                 raise NavigationWait('暂未找到可通行路径，正在重新寻路')
             self.retry_at = 0.
             self.last_decision = {'kind':'alternative_approach' if self.risks.count else 'normal_plan',
                                   'risk_count':self.risks.count, 'risk_revision':self.risks.revision,
                                   'reference_revision': self.reference_revision,
-                                  'reference_triangles': len(self.obstacles.reference_risks.entries)}
+                                  'reference_triangles': len(self.obstacles.reference_risks.entries),
+                                  'search':dict(self.search_diagnostics)}
         # Follow a checked chord through temporary legs; the saved collection
         # destination and its precise arrival radius are unchanged.
         selected = self.path[0]

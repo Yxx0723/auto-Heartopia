@@ -1516,7 +1516,8 @@ class _Follower:
                     if self.navigator:
                         self.approach_attempt(index)
                         self.navigator.blocked(position, target,
-                                               attempt_id=(self.cycle,index,self.approach_attempts))
+                                               attempt_id=(self.cycle,index,self.approach_attempts),
+                                               evidence='movement_stall' if physically_stalled else 'progress_timeout')
                     try:
                         improved = False
                         # A small advance followed by another stall (or an
