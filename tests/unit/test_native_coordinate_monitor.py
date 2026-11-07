@@ -641,6 +641,15 @@ def test_stop_button_requests_stop_without_blocking_ui(tmp_path):
     assert window.playback_status['state'] == 'stopping'
 
 
+def test_cooking_page_entry_starts_only_p0_control_for_current_game(tmp_path):
+    window=capture_window(tmp_path);window.view.status['pid']=77
+    window.cooking=Mock(active=False)
+    window.start_cooking_entry()
+    window.cooking.start.assert_called_once_with(77)
+    window.playback.start.assert_not_called()
+    assert window.cooking_status['state']=='cooking_entry_wait'
+
+
 def test_nearest_mode_is_passed_to_worker_without_selecting_from_ui_cached_position(tmp_path):
     window = capture_window(tmp_path)
     window.save_point()

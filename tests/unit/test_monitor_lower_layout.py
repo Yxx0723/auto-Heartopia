@@ -13,7 +13,8 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
         window = CoordinateWindow(root, FakeMonitor(), tmp_path, point_path=tmp_path/'points.json')
         tabs = window.control_tabs
         assert [tabs.tab(tab, 'text') for tab in tabs.tabs()] == ['采集设定', '参数设定', '地图连接', '烹饪']
-        assert not tabs.nametowidget(tabs.tabs()[3]).winfo_children()
+        assert window.cooking_entry_button.master == tabs.nametowidget(tabs.tabs()[3])
+        assert window.cooking_entry_button.cget('text') == '验证灶台入口（不制作）'
         assert not hasattr(window, 'open_cooking')
         for geometry in ['490x760', '460x740']:
             root.geometry(geometry); tabs.select(0); root.update()
