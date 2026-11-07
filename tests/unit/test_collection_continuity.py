@@ -193,3 +193,71 @@ def test_resource_objects_remain_available_outside_temporary_navigation_scope():
     nav.scene_provider=lambda:original
     nav.next_target((0,0,0),(0,0,5))
     assert nav.scene_provider() is original and len(nav.scene_provider()['objects'])==1
+
+
+def walking_follower():
+    game,nav=game_and_nav();f=follower(game,nav)
+    f.steering_travel(game.position,(0,0,10))
+    f.apply_movement({'w'},game.position,(0,0,10))
+    return game,nav,f
+
+
+def test_short_cycle_sleep_does_not_release_a_healthy_permit():
+    game,nav,f=walking_follower();deadline=f.input_lease.deadline
+    game.time=.045
+    f.wait_movement(0.,10.,False)
+    assert game.time==pytest.approx(.05) and game.keys=={'w'}
+    assert f.input_lease.deadline==deadline
+    assert not f.input_lease.metrics()['release_counts']
+
+
+def test_wait_leaves_validation_time_without_extending_the_permit():
+    game,nav,f=walking_follower();deadline=f.input_lease.deadline
+    game.time=.12
+    f.wait_movement(.10,10.,False)
+    assert game.time==pytest.approx(.121) and game.keys=={'w'}
+    assert f.input_lease.deadline==deadline
+    f.read(force=True);f.steering_travel(game.position,(0,0,10))
+    f.apply_movement({'w'},game.position,(0,0,10))
+    assert f.input_lease.deadline==pytest.approx(.271)
+    assert sum(e=={'type':'key_down','key':'w'} for _,e in game.events)==1
+
+
+@pytest.mark.parametrize('reason',['map_build','path_search'])
+def test_unchanged_planning_preserves_only_the_existing_checked_permit(reason):
+    from utils.flows.coordinate_player import _MovementRetry
+    game,nav,f=walking_follower();deadline=f.input_lease.deadline
+    nav.release_reason=reason;game.time=.05
+    f.planning_release()
+    assert game.keys=={'w'} and f.input_lease.deadline==deadline
+    # Even blocked computation cannot prolong movement. The same independent
+    # watchdog used by the running program revokes the original permission.
+    game.time=.151;f.input_lease.poll()
+    assert not game.keys
+    with pytest.raises(_MovementRetry):f.guard()
+
+
+@pytest.mark.parametrize('change',['geometry','world','height','risk','reference','missing_map'])
+@pytest.mark.parametrize('reason',['map_build','path_search'])
+def test_changed_planning_context_still_releases_input(change,reason):
+    game,nav,f=walking_follower();nav.release_reason=reason
+    if change=='geometry':nav.scene_signature=('different',)
+    elif change=='world':nav.scene={**nav.scene,'cache_context':'different'}
+    elif change=='height':nav.obstacles.height+=1.
+    elif change=='risk':nav.risks.revision+=1
+    elif change=='reference':nav.reference_revision='different'
+    else:nav.obstacles=None
+    f.planning_release()
+    assert not game.keys and f.input_lease.deadline is None
+
+
+def test_slow_reads_are_attributed_without_renewing_movement():
+    game,nav,f=walking_follower();deadline=f.input_lease.deadline
+    original=game.read
+    def read():
+        assert f.input_lease.phase=='position_read'
+        game.sleep(.03)
+        return original()
+    game.read=read;game.time=.06
+    f.read(force=True)
+    assert f.input_lease.deadline==deadline

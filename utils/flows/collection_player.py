@@ -16,6 +16,7 @@ class CollectionFollower(_Follower):
         self._applying_movement=False
         self._normal_movement=False
         self.cycle_metrics={}
+        self._approved_context=None
 
     def follow(self):
         self.input_lease.start()
@@ -30,10 +31,48 @@ class CollectionFollower(_Follower):
         self.input_lease.release(reason,active=bool(self.keys))
         self.keys.clear()
         self._normal_movement=False
+        self._approved_context=None
         self.navigator.reset_steering()
 
     def planning_release(self):
-        self.release(getattr(self.navigator,'release_reason','planning_or_map_change'))
+        reason=getattr(self.navigator,'release_reason','planning_or_map_change')
+        # Continue ONLY the already checked input until its original deadline.
+        # Computation never renews permission or approves a new movement segment.
+        if reason in ('map_build','path_search'):
+            self.guard()
+            now=self.clock.monotonic()
+            expiry=self.navigator.collision_deadline(now)
+            with self.input_lease.lock:
+                deadline=self.input_lease.deadline
+                if self._normal_movement and self.keys and deadline is not None \
+                        and now < deadline and expiry is not None and now < expiry \
+                        and self._approved_context is not None \
+                        and self._approved_context==self.movement_context():
+                    return
+        self.release(reason)
+
+    def movement_context(self):
+        nav=self.navigator
+        if nav.obstacles is None:
+            return None
+        scene=nav.scene or {}
+        return (scene.get('cache_context'),scene.get('terrain_revision'),
+                nav.scene_signature,nav.reference_revision,nav.risks.revision,
+                nav.obstacles.height)
+
+    def read(self,force=False):
+        previous=self.input_lease.set_phase('position_read')
+        try:
+            return super().read(force)
+        finally:
+            self.input_lease.set_phase(previous)
+
+    def read_direction(self):
+        previous=self.input_lease.set_phase('direction_read')
+        try:
+            return super().read_direction()
+        finally:
+            self.input_lease.set_phase(previous)
 
     def recover_no_path(self,target,basis,segment_start,index,total):
         self.release('path_escape')
@@ -105,6 +144,9 @@ class CollectionFollower(_Follower):
             try:
                 self.set_keys(keys)
                 self.input_lease.observe_keys(self.keys)
+                self._approved_context=self.movement_context()
+                self.cycle_metrics['permit_remaining_at_arm']=max(0.,
+                    self.move_deadline-self.clock.monotonic())
             except BaseException:
                 self.release('input_exception')
                 raise
@@ -118,14 +160,22 @@ class CollectionFollower(_Follower):
         with self.input_lease.lock:
             deadline=self.input_lease.deadline
         if deadline is not None and delay:
-            delay=min(delay,max(0.,deadline-now-policy.COORD_GUIDANCE_INPUT_POLL_SECONDS))
-            if delay<policy.COORD_GUIDANCE_INPUT_POLL_SECONDS:
+            available=deadline-now
+            if available<=policy.COORD_GUIDANCE_INPUT_POLL_SECONDS:
                 self.release('cycle_budget_exhausted')
                 delay=policy.COORD_GUIDANCE_INPUT_POLL_SECONDS
-        self.cycle_metrics={'cycle_work_seconds':work,'cycle_sleep_requested':delay}
+            else:
+                # Leave time for the next validation, rather than waking only
+                # one watchdog poll before expiry. Short cycle sleep is fine.
+                reserve=max(policy.COORD_GUIDANCE_INPUT_POLL_SECONDS,
+                            min(policy.COORD_SAMPLE_SECONDS,work))
+                delay=min(delay,max(.001,available-reserve-policy.COORD_GUIDANCE_INPUT_POLL_SECONDS))
+        self.cycle_metrics.update(cycle_work_seconds=work,cycle_sleep_requested=delay)
         self.input_lease.set_phase('sample_sleep')
         if delay:
             self.clock.sleep(math.nextafter(now+delay,math.inf)-now)
+        self.cycle_metrics['cycle_sleep_actual']=max(0.,self.clock.monotonic()-now)
+        self.input_lease.set_phase('cycle_control')
 
     def report(self,state,message,**extra):
         extra.setdefault('input_continuity',self.input_lease.metrics())
