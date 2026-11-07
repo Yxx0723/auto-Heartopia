@@ -123,6 +123,10 @@ class _Follower:
         self.repair_cycle = ToolRepairCycle()
         self.last_tool_check = self.last_repair_report = float('-inf')
         self.tool_status = {'state': 'unavailable'}
+        self.tool_read_failures = 0
+        self.tool_read_error = self.tool_last_exception = None
+        self.tool_read_kind = 'unconfirmed'
+        self.tool_read_finished_at = None
         self.food = food
         self.stamina_status = {'state': 'unavailable'}
         self.last_stamina_check = float('-inf')
@@ -870,10 +874,74 @@ class _Follower:
     def read_tool(self):
         self.last_tool_check = self.clock.monotonic()
         try:
-            self.tool_status = self.reader.tools_snapshot()
-        except (ValueError, OSError):
+            value = self.reader.tools_snapshot()
+        except (ValueError, OSError) as exc:
+            self.tool_read_kind = 'read_failed'
+            self.tool_read_error = {'type': type(exc).__name__, 'message': str(exc)}
+            self.tool_last_exception = dict(self.tool_read_error)
             self.tool_status = {'state': 'unavailable'}
+        else:
+            self.tool_status = dict(value) if isinstance(value, dict) else {'state': 'unavailable'}
+            if self.tool_status.get('state') == 'locked':
+                self.tool_read_kind = 'locked'
+            elif ToolRepairCycle.usable(self.tool_status):
+                self.tool_read_kind = 'equipped' if self.tool_status['equipped'] else 'not_equipped'
+            else:
+                self.tool_read_kind = 'incomplete'
+            self.tool_read_error = ({'type': 'ToolStateIncomplete', 'message':
+                '斧镐状态数据不完整或未就绪（state='+str(self.tool_status.get('state'))+'）'}
+                if self.tool_read_kind == 'incomplete' else None)
+        self.tool_read_finished_at = self.clock.monotonic()
+        if self.tool_read_kind in ('read_failed', 'incomplete'):
+            self.tool_read_failures += 1
+        else:
+            self.tool_read_failures = 0
+            self.tool_last_exception = None
+        self.tool_status.update(read_kind=self.tool_read_kind, read_error=self.tool_read_error,
+            read_at=self.last_tool_check, read_finished_at=self.tool_read_finished_at,
+            consecutive_failures=self.tool_read_failures)
         return self.tool_status
+
+    def tool_read_diagnostics(self):
+        return {'tool_read_kind': self.tool_read_kind, 'tool_read_error': self.tool_read_error,
+                'tool_last_exception': self.tool_last_exception,
+                'tool_read_failures': self.tool_read_failures,
+                'tool_read_at': self.last_tool_check, 'tool_read_finished_at': self.tool_read_finished_at}
+
+    def recover_tool_state(self, index, total):
+        # The first failed read has already happened. At most four additional
+        # reads; force them directly rather than passing the 1-second throttle.
+        self.release()
+        previous = self.navigation_waiting
+        self.navigation_waiting = True
+        deadline = self.last_tool_check + 1.5
+        try:
+            for attempt in range(min(5, max(1, self.tool_read_failures)), 6):
+                self.guard()
+                if self.tool_status.get('state') == 'locked':
+                    return
+                if ToolRepairCycle.usable(self.tool_status):
+                    self.report('playing', '斧镐状态读取已恢复，继续原任务 · F9停止',
+                                waypoint=index+1, waypoint_count=total, **self.tool_read_diagnostics())
+                    return
+                if attempt == 5 or self.clock.monotonic() >= deadline:
+                    break
+                self.report('tool_retry', f'斧镐状态暂未确认，正在重试 {attempt}/5 · 按键已释放 · F9停止',
+                            waypoint=index+1, waypoint_count=total, tool_retry_attempt=attempt,
+                            **self.tool_read_diagnostics())
+                self.wait(min(.2, max(0., deadline-self.clock.monotonic())))
+                if self.clock.monotonic() >= deadline:
+                    break
+                self.read_tool()
+            error = self.tool_last_exception or self.tool_read_error or {
+                'type': 'ToolStateUnavailable', 'message': '斧镐状态未确认'}
+            self.repair_pause(f'斧镐状态持续读取失败：{error["type"]}: {error["message"]}',
+                index, total, state='equip_paused' if self.tool_selector is not None else 'repair_paused',
+                **self.tool_read_diagnostics())
+        finally:
+            self.release()
+            self.navigation_waiting = previous
+            self.last_tick = self.clock.monotonic()
 
     def read_stamina(self):
         self.last_stamina_check = self.clock.monotonic()
@@ -1096,11 +1164,13 @@ class _Follower:
         now = self.clock.monotonic()
         if now-self.last_tool_check >= 1.:
             self.read_tool()
+        if self.tool_status.get('state') != 'locked' and not ToolRepairCycle.usable(self.tool_status):
+            self.recover_tool_state(index, total)
+            now = self.clock.monotonic()
+        if self.tool_status.get('state') == 'locked':
+            self.repair_pause('斧镐尚未解锁，暂时无法自动拿出', index, total,
+                              state='equip_paused', **self.tool_read_diagnostics())
         if self.tool_selector is not None:
-            if self.tool_status.get('state') == 'locked':
-                self.repair_pause('斧镐尚未解锁，暂时无法自动拿出', index, total, state='equip_paused')
-            if not ToolRepairCycle.usable(self.tool_status):
-                self.repair_pause('暂时无法确认斧镐持用状态，请等待读取恢复', index, total, state='equip_paused')
             if not self.tool_status['equipped'] or self.equip_pending or self.equip_menu_pending:
                 return self.equip_axe_pick(index, total)
         if self.repair_box is None:
@@ -1136,7 +1206,12 @@ class _Follower:
                         target = confirm(self.window, target, self.device, self.guard, self.wait)
                     # Preparation takes time. Recheck the actual tool immediately
                     # before consuming anything, and retain the attempt on pause.
-                    self.tool_status = self.reader.tools_snapshot()
+                    self.read_tool()
+                    if self.tool_status.get('state') != 'locked' and not ToolRepairCycle.usable(self.tool_status):
+                        self.recover_tool_state(index, total)
+                    if self.tool_status.get('state') == 'locked':
+                        self.repair_pause('斧镐尚未解锁，暂时无法自动拿出', index, total,
+                                          state='equip_paused', **self.tool_read_diagnostics())
                     if self.repair_cycle.observe(self.tool_status, self.clock.monotonic()) != 'needed':
                         return True
                     self.report('repairing', '维修盒图标已复核，准备点击使用 · F9停止',

@@ -14,6 +14,8 @@ from utils.core.map_reference_roads import REFERENCE_ROADS
 
 
 @pytest.mark.parametrize('raw,expected', [
+    ('斧镐状态持续读取失败：OSError: ReadProcessMemory 0x1234',
+     '斧镐状态持续读取失败：OSError: ReadProcessMemory 0x1234'),
     ('ReadProcessMemory failed at 0x123456', '暂时无法读取角色坐标，请进入角色后重新连接。'),
     ('ReadProcessMemory failed at 0XDEADBEEF', '暂时无法读取角色坐标，请进入角色后重新连接。'),
     ('点位回放停止：ReadProcessMemory 0x123456', '角色坐标读取中断，回放已停止；请进入角色后重新开始。'),

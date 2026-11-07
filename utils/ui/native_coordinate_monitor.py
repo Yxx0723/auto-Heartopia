@@ -100,6 +100,8 @@ def configure_changed(widget, **options):
 
 def user_feedback(message):
     text = str(message or '')
+    if '斧镐状态持续读取失败：' in text:
+        return text  # Keep the tool exception; never relabel it as coordinate failure.
     folded = text.casefold()
     if '指纹' in text or '版本不匹配' in text:
         return '当前游戏版本暂不支持，请更新程序后重试。'
