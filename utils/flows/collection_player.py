@@ -17,6 +17,8 @@ class CollectionFollower(_Follower):
         self._normal_movement=False
         self.cycle_metrics={}
         self._approved_context=None
+        self.move_conditions={}
+        self.sleep_overrun=0.
 
     def follow(self):
         self.input_lease.start()
@@ -63,7 +65,9 @@ class CollectionFollower(_Follower):
     def read(self,force=False):
         previous=self.input_lease.set_phase('position_read')
         try:
-            return super().read(force)
+            # A shortened wait can start the next cycle before the old 50 ms
+            # position cache expires. Reusing that sample cannot renew its age.
+            return super().read(force or self._normal_movement)
         finally:
             self.input_lease.set_phase(previous)
 
@@ -123,19 +127,24 @@ class CollectionFollower(_Follower):
             self.release('collision_not_ready')
             raise _MovementRetry()
         speed=max(3.,self.calibration_speed)
-        self.move_deadline=min(self.position_at+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS,
-            expiry,self.position_at+distance(position,target)/speed*.5)
+        self.move_conditions={'position':self.position_at+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS,
+            'guidance':None,'collision':expiry,
+            'target_distance':self.position_at+distance(position,target)/speed*.5,
+            'input_lease':now+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS}
+        self.move_deadline=min(value for value in self.move_conditions.values() if value is not None)
         return min(max(.15,speed*(policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS
             +policy.COORD_GUIDANCE_INPUT_POLL_SECONDS)),max(.02,distance(position,target)))
 
     def apply_movement(self,keys,position,target):
+        lock_at=self.clock.monotonic()
         with self.input_lease.lock:
+            self.cycle_metrics['input_lock_wait_seconds']=max(0.,self.clock.monotonic()-lock_at)
             self.guard()
             if not keys:
                 self.release('steering_idle')
                 return
             try:
-                self.input_lease.arm(self.move_deadline)
+                self.input_lease.arm(self.move_deadline,self.move_conditions)
             except ValueError as exc:
                 self.release('permit_not_ready')
                 raise _MovementRetry() from exc
@@ -168,13 +177,15 @@ class CollectionFollower(_Follower):
                 # Leave time for the next validation, rather than waking only
                 # one watchdog poll before expiry. Short cycle sleep is fine.
                 reserve=max(policy.COORD_GUIDANCE_INPUT_POLL_SECONDS,
-                            min(policy.COORD_SAMPLE_SECONDS,work))
+                            min(policy.COORD_SAMPLE_SECONDS,work+self.sleep_overrun))
                 delay=min(delay,max(.001,available-reserve-policy.COORD_GUIDANCE_INPUT_POLL_SECONDS))
         self.cycle_metrics.update(cycle_work_seconds=work,cycle_sleep_requested=delay)
         self.input_lease.set_phase('sample_sleep')
         if delay:
             self.clock.sleep(math.nextafter(now+delay,math.inf)-now)
         self.cycle_metrics['cycle_sleep_actual']=max(0.,self.clock.monotonic()-now)
+        self.sleep_overrun=max(0.,self.cycle_metrics['cycle_sleep_actual']-delay)
+        self.cycle_metrics['cycle_sleep_overrun']=self.sleep_overrun
         self.input_lease.set_phase('cycle_control')
 
     def report(self,state,message,**extra):

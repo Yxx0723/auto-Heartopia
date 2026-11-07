@@ -261,3 +261,20 @@ def test_slow_reads_are_attributed_without_renewing_movement():
     game.read=read;game.time=.06
     f.read(force=True)
     assert f.input_lease.deadline==deadline
+
+
+def test_shortened_cycle_reacquires_position_instead_of_rearming_old_cache():
+    game,nav,f=walking_follower();deadline=f.input_lease.deadline
+    game.time=.02;f.read()
+    assert f.position_at==pytest.approx(.02)
+    assert f.input_lease.deadline==deadline  # Read alone never renews input.
+    f.steering_travel(game.position,(0,0,10));f.apply_movement({'w'},game.position,(0,0,10))
+    assert f.input_lease.deadline==pytest.approx(.17)
+    assert f.input_lease.metrics()['last_permit']['conditions']['guidance'] is None
+
+
+def test_observed_sleep_overrun_reserves_time_without_increasing_the_lease():
+    game,nav,f=walking_follower();f.sleep_overrun=.03;game.time=.08
+    f.wait_movement(.07,10.,False)
+    assert f.cycle_metrics['cycle_sleep_requested']==pytest.approx(.02)
+    assert f.input_lease.deadline==pytest.approx(.15)

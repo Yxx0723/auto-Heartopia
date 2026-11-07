@@ -59,10 +59,13 @@ class GuidanceFollower(_Follower):
             expiry = self.navigator.collision_deadline(now)
             if expiry is None:
                 raise _GuidanceRetry('碰撞许可已失效')
-            self.move_deadline = min(
-                self.position_at+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS,
-                self.cache.healthy_at+policy.COORD_GUIDANCE_MAX_AGE, expiry,
-                self.position_at+math.dist(position,target)/max(3.,self.calibration_speed)*.5)
+            self.move_conditions = {
+                'position':self.position_at+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS,
+                'guidance':self.cache.healthy_at+policy.COORD_GUIDANCE_MAX_AGE,
+                'collision':expiry,
+                'target_distance':self.position_at+math.dist(position,target)/max(3.,self.calibration_speed)*.5,
+                'input_lease':now+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS}
+            self.move_deadline = min(self.move_conditions.values())
         return travel
 
     def try_path_escape(self, position, target):
@@ -198,7 +201,7 @@ class GuidanceFollower(_Follower):
                 self.release('permit_not_ready')
                 raise _GuidanceRetry('移动许可到期，重新核对')
             try:
-                self.input_lease.arm(self.move_deadline)
+                self.input_lease.arm(self.move_deadline,getattr(self,'move_conditions',None))
             except ValueError as exc:
                 self.release('permit_not_ready')
                 raise _GuidanceRetry(str(exc)) from exc

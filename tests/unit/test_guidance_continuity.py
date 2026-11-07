@@ -39,11 +39,15 @@ def test_guidance_semantic_reads_are_recorded_but_attached_failure_is_not():
     assert history.sample.call_count==1
 
 
-def test_legacy_recording_wrapper_remains_unchanged():
+def test_collection_recording_wrapper_keeps_successful_read_and_failure_contract():
     reader=Mock();history=Mock()
+    reader.read_for_playback.return_value=(1,2,3)
     recorded=RecordingPosition(reader,history,lambda:0.)
-    recorded.read_for_playback()
-    history.sample.assert_not_called()
+    assert recorded.read_for_playback()==(1,2,3)
+    history.sample.assert_called_once_with((1,2,3),0.)
+    reader.read_for_playback.side_effect=ValueError('attached')
+    with pytest.raises(ValueError):recorded.read_for_playback()
+    assert history.sample.call_count==1
 
 
 def test_quick_guidance_navigation_does_not_release_unchanged_keys_every_tick(monkeypatch):

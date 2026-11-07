@@ -42,6 +42,20 @@ class FailedReader(SyntheticReader):
     def snapshot(self):raise ValueError('secret pointer 0xDEADBEEF')
 
 
+class ReferenceResetReader(SyntheticReader):
+    created=0
+    def __init__(self,*args):
+        super().__init__(*args)
+        type(self).created+=1
+        self.generation=type(self).created
+    def snapshot(self):
+        if self.generation==1:
+            self.last_read_stats={'failed_reader_generation':1}
+            raise SceneReadIssue('invalid',kind='invalid_reference',stage='managed_collision_array')
+        result=super().snapshot();result['reader_generation']=self.generation
+        return result
+
+
 class OversizedReader(SyntheticReader):
     def snapshot(self):return {**super().snapshot(),'oversized':'x'*10000}
 
@@ -68,6 +82,27 @@ def test_spawn_has_distinct_process_and_reuses_one_child_without_input():
     finally:source.close()
     assert not source.process.is_alive()
     source.close()  # Idempotent cleanup.
+
+
+def test_reference_failure_discards_reader_and_geometry_but_reuses_transport_process():
+    from utils.drivers.navigation_process import NavigationProcessScene
+    from utils.ui.scene_map_worker import SceneMapWorker
+    sources=[]
+    def factory(pid,profile):
+        source=NavigationProcessScene(pid,profile,reader_factory=ReferenceResetReader)
+        sources.append(source);return source
+    worker=SceneMapWorker('unused',factory=factory)
+    try:
+        worker.set_pid(123);worker.poll_once()
+        assert worker.navigation_snapshot(123) is None
+        assert worker.reader is sources[0] and sources[0].fresh_reader_discarded
+        assert sources[0].last_read_stats['failed_reader_generation']==1
+        process_id=sources[0].process.pid
+        worker.poll_once();result=worker.navigation_snapshot(123)
+        assert result['reader_generation']==2
+        assert result['source_pid']==process_id and len(sources)==1
+        assert navigation_quality_valid(result,time.monotonic())
+    finally:worker.close()
 
 
 def test_process_transfer_does_not_renew_old_observation_time():

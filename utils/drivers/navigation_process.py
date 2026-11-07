@@ -11,6 +11,12 @@ from utils.core.scene_read import SceneReadIssue, issue_summary, navigation_qual
 from utils.drivers.mono_scene import MemorySceneMap, NavigationSceneMap
 
 
+def restartable_reference(issue):
+    return (issue.get('stage') in ('managed_group_colliders','managed_collider_stream',
+        'managed_stream_collisions','managed_collision_array','managed_shape_data')
+        and (issue.get('kind')=='invalid_reference' or issue.get('code') in ('short_read','read_bounds')))
+
+
 def _child(connection, stop, game_pid, profile, factory, max_bytes):
     reader = None
     try:
@@ -33,6 +39,12 @@ def _child(connection, stop, game_pid, profile, factory, max_bytes):
                 frame['error'] = {'kind':'worker_error', 'stage':'navigation_process',
                                   'retryable':False, 'scope_verified':False}
             frame['stats'] = getattr(reader, 'last_read_stats', {}) if reader else {}
+            if reader is not None and restartable_reference(frame.get('error',{})):
+                # Discard every reader/cache after reference failure as before,
+                # but keep the owned transport process. No failed data survive.
+                reader.close()
+                reader=None
+                frame['reader_discarded']=True
             frame['child_read_seconds'] = max(0., time.monotonic()-started)
             if stop.is_set():
                 break
@@ -73,6 +85,7 @@ class NavigationProcessScene(MemorySceneMap):
         self.pid, self.timeout, self.max_bytes = pid, timeout, max_bytes
         self.cancelled = lambda: False
         self.last_read_stats, self.sequence = {}, 0
+        self.fresh_reader_discarded=False
         self.closed, self.close_lock = False, threading.Lock()
         context = multiprocessing.get_context('spawn')
         self.stop = context.Event()
@@ -92,6 +105,7 @@ class NavigationProcessScene(MemorySceneMap):
         return SceneReadIssue('独立碰撞读取暂不可用', kind=kind, stage='navigation_process')
 
     def snapshot(self):
+        self.fresh_reader_discarded=False
         if self.closed:
             raise self.failure('worker_closed')
         started = time.monotonic()
@@ -129,6 +143,8 @@ class NavigationProcessScene(MemorySceneMap):
             'worker_pid': frame.get('worker_pid'),
             'child_read_seconds': frame.get('child_read_seconds'), 'wire_bytes': len(raw),
             'request_seconds': max(0., time.monotonic()-started)}
+        self.fresh_reader_discarded=frame.get('reader_discarded') is True
+        self.last_read_stats['process']['reader_discarded']=self.fresh_reader_discarded
         if 'error' in frame:
             error = frame['error']
             if not isinstance(error, dict) or any(key not in error for key in ('kind','stage','retryable','scope_verified')):

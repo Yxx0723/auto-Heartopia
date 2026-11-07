@@ -14,12 +14,14 @@ class _FrozenDict(dict):
 
 
 def _freeze(value):
+    # Geometry is dominated by scalar coordinates. Avoid container dispatch
+    # for every vertex; still visit/copy every mutable container in this scan.
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
     if isinstance(value, dict):
         return _FrozenDict({k: _freeze(v) for k, v in value.items()})
     if isinstance(value, (list, tuple)):
         return tuple(_freeze(v) for v in value)
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
     raise ValueError('Unsupported navigation geometry value')
 
 

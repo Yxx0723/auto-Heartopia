@@ -3,7 +3,7 @@
 No TTL extension or old-snapshot fallback. Call under the worker's lock.
 The bounded latency window is instrumentation, not a game capability model.
 """
-from collections import deque
+from collections import deque, Counter
 import math
 
 from utils.core import thresholds as policy
@@ -20,6 +20,24 @@ def navigation_expiry(scene, published_at):
                for key in ('managed_collisions', 'native_collisions')) + policy.COORD_NAV_SCENE_MAX_AGE
 
 
+def navigation_unusable_reason(scene):
+    if not scene:
+        return 'not_published'
+    issue=scene.get('issue') or {}
+    if issue:
+        return str(issue.get('kind','unknown'))+':'+str(issue.get('stage','snapshot'))
+    quality=scene.get('quality')
+    parts=quality.get('parts',{}) if isinstance(quality,dict) else {}
+    parts=parts if isinstance(parts,dict) else {}
+    native=parts.get('native_collisions')
+    managed=parts.get('managed_collisions')
+    if scene.get('world_state','ready')!='ready' or isinstance(native,dict) and native.get('state')=='unavailable':
+        return 'native_unavailable'
+    if isinstance(managed,dict) and managed.get('state')=='partial':
+        return 'managed_partial'
+    return 'quality_or_state_invalid'
+
+
 class SnapshotSupply:
     def __init__(self):
         self.started = self.at = self.deadline = self.gap_since = None
@@ -28,6 +46,8 @@ class SnapshotSupply:
         self.previous_deadline = self.overlap = self.remaining = None
         self.scans = deque(maxlen=256)
         self.scan_count = 0
+        self.unusable_reason='not_published'
+        self.unusable_by_reason, self.invalid_publications=Counter(), Counter()
 
     def start(self, now):
         if not self.active:
@@ -52,6 +72,7 @@ class SnapshotSupply:
         valid_to = self.at if self.deadline is None else max(self.at, min(now, self.deadline))
         self.usable += valid_to-self.at
         if valid_to < now:
+            self.unusable_by_reason[self.unusable_reason]+=now-valid_to
             if self.gap_since is None:
                 self.gap_since = valid_to
             self.longest_gap = max(self.longest_gap, now-self.gap_since)
@@ -77,6 +98,9 @@ class SnapshotSupply:
         elif self.active and self.gap_since is None:
             self.gap_since = now  # An explicit failure revokes even an unexpired snapshot.
         self.deadline = deadline
+        self.unusable_reason='expired' if deadline is not None else navigation_unusable_reason(scene)
+        if deadline is None:
+            self.invalid_publications[self.unusable_reason]+=1
         self.scans.append(max(0., duration))
         self.scan_count += 1
 
@@ -93,6 +117,8 @@ class SnapshotSupply:
                 'snapshot_current_gap_seconds': 0. if self.gap_since is None else now-self.gap_since,
                 'snapshot_longest_gap_seconds': self.longest_gap,
                 'snapshot_unusable_seconds': max(0., demand-self.usable),
+                'snapshot_unusable_by_reason':dict(self.unusable_by_reason),
+                'snapshot_invalid_publications':dict(self.invalid_publications),
                 'snapshot_remaining_ttl': self.remaining,
                 'snapshot_overlap_margin': self.overlap,
                 'scan_count': self.scan_count, 'scan_window_count': len(durations),

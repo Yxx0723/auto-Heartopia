@@ -118,7 +118,7 @@ class SceneMapWorker:
                      or issue.get('code') in ('short_read', 'read_bounds')))
             if isinstance(self.reader, MemorySceneMap):
                 read_stats = self.reader.last_read_stats
-            if not transient:
+            if not transient and not (fresh_retry and getattr(self.reader,'fresh_reader_discarded',False) is True):
                 self.close_reader()
             result = {'state': 'error', 'objects': [], 'colliders': [],
                       'message': '场景正在更新，稍后自动重试', 'diagnostic': str(exc), 'issue': issue}

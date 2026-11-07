@@ -171,14 +171,53 @@ def test_collision_expiry_caps_input_permit_without_extending_source_ttl(monkeyp
     game=cached_game();game.time=5.75;game.stop_at=6.5
     source=ready(0.,0.);deadlines=[]
     original=GuidanceInputLease.arm
-    def arm(self,deadline):
-        deadlines.append(deadline);return original(self,deadline)
+    def arm(self,deadline,conditions=None):
+        deadlines.append(deadline);return original(self,deadline,conditions)
     monkeypatch.setattr(GuidanceInputLease,'arm',arm)
     nav=GuidanceNavigator(lambda:source,clock=game.monotonic,water_areas=(),scene_clock=game.monotonic)
     run(game,navigator=nav)
     assert deadlines and max(deadlines)<=6.
     assert not [(t,e) for t,e in game.events if t>=6. and e['type']=='key_down']
     assert not game.keys
+
+
+@pytest.mark.parametrize('limiting',['position','guidance','collision','target_distance','input_lease'])
+def test_expiry_retains_the_actual_limiting_deadline_and_confirmed_margin(limiting):
+    game=guide_game();lease=GuidanceInputLease(game,game,game,game.size(),game.monotonic)
+    deadlines={key:.15 for key in ['position','guidance','collision','target_distance','input_lease']}
+    deadlines[limiting]=.04
+    lease.arm(.15,deadlines)
+    game.execute({'type':'key_down','key':'w'});game.sleep(.006)
+    lease.observe_keys({'w'})
+    assert lease.metrics()['last_permit']['remaining_at_confirmation']==pytest.approx(.034)
+    game.time=.05;lease.poll()
+    metrics=lease.metrics()
+    assert metrics['expired_limit_counts']=={limiting:1}
+    assert metrics['recent_releases'][-1]['permit']['conditions']==deadlines
+    assert not game.keys
+
+
+def test_stage_accounting_does_not_renew_or_hide_a_blocked_read():
+    game=guide_game();lease=GuidanceInputLease(game,game,game,game.size(),game.monotonic)
+    lease.arm(.15);game.execute({'type':'key_down','key':'w'})
+    lease.set_phase('direction_read');game.time=.16;lease.poll()
+    lease.set_phase('cycle_control')
+    assert lease.metrics()['phase_max_seconds']['direction_read']==pytest.approx(.16)
+    assert lease.metrics()['recent_releases'][-1]['phase']=='direction_read'
+    assert not game.keys
+
+
+def test_permit_confirmation_history_is_bounded_and_counts_every_approval():
+    game=guide_game();lease=GuidanceInputLease(game,game,game,game.size(),game.monotonic)
+    for _ in range(1000):
+        lease.arm(.15,{'position':.15,'guidance':None,'collision':6.,
+                        'target_distance':1.,'input_lease':.15})
+        lease.observe_keys({'w'})
+        lease.observe_keys({'w'})  # Same permit is confirmed only once.
+    metrics=lease.metrics()
+    assert metrics['permit_arm_count']==metrics['permit_confirmed_count']==1000
+    assert len(metrics['recent_permits'])==32 and metrics['permit_margin_window_count']==256
+    assert metrics['permit_confirmed_margin_p50']==pytest.approx(.15)
 
 
 @pytest.mark.parametrize('origin', [-400., .433, 90000.])

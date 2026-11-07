@@ -82,6 +82,7 @@ class SceneMetadata:
         self.stage = 'metadata'
         self.read_counts = None
         self.batch_object_headers = False
+        self.field_cache = {}
 
     def data(self, address, size):
         if not 0x10000 <= address < 0x7fffffffffff or not 0 < size <= policy.COORD_SCENE_MAX_BYTES:
@@ -168,6 +169,9 @@ class SceneMetadata:
         return self.cls(klass)
 
     def field(self, klass, name):
+        key=(klass,name)
+        if key in self.field_cache:
+            return self.field_cache[key]
         seen = set()
         while klass and klass not in seen and len(seen) < policy.MONO_PARENT_LIMIT:
             seen.add(klass)
@@ -176,6 +180,9 @@ class SceneMetadata:
                 field = info['fields'][name]
                 if field['offset'] < 0 or field['offset'] >= policy.MONO_OBJECT_LIMIT:
                     raise ValueError('场景字段偏移无效')
+                # Same lifetime/domain as the existing immutable class cache.
+                # Object identity, ownership, enabled and transforms stay live.
+                self.field_cache[key]=field
                 return field
             klass = info['parent']
         raise ValueError('场景对象缺少字段：' + name)

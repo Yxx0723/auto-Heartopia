@@ -58,6 +58,35 @@ def test_expired_on_publish_and_error_are_counted_as_unusable_time():
     assert metrics['snapshot_current_gap_seconds'] == pytest.approx(1.)
 
 
+def test_outage_reasons_account_elapsed_time_without_retaining_failed_geometry():
+    from utils.core.navigation_supply import SnapshotSupply
+    supply=SnapshotSupply();supply.publish(ready(0.,1.),1.,1.);supply.start(1.)
+    supply.publish({'state':'error','issue':{'kind':'invalid_reference','stage':'managed_collision_array'}},2.,1.)
+    partial=ready(3.,3.);partial['quality']['parts']['managed_collisions']['state']='partial'
+    supply.publish(partial,3.,1.)
+    assert supply.deadline is None
+    supply.publish(ready(4.,4.),4.,1.)
+    metrics=supply.metrics(7.)
+    assert metrics['snapshot_unusable_by_reason']=={
+        'invalid_reference:managed_collision_array':1.,'managed_partial':1.}
+    assert sum(metrics['snapshot_unusable_by_reason'].values())==metrics['snapshot_unusable_seconds']
+
+
+def test_expiry_is_classified_separately_from_explicit_read_failure():
+    from utils.core.navigation_supply import SnapshotSupply
+    supply=SnapshotSupply();supply.publish(ready(0.,1.),1.,1.);supply.start(1.)
+    assert supply.metrics(8.)['snapshot_unusable_by_reason']=={'expired':2.}
+
+
+def test_metadata_field_cache_reuses_layout_but_not_object_references():
+    from tests.unit.test_mono_scene import dictionary
+    runtime,obj=dictionary();meta=SceneMetadata(runtime.read,runtime.domain)
+    info=meta.obj(obj)
+    first=meta.field(info['address'],'_entries')
+    meta.cls=Mock(side_effect=AssertionError('immutable field layout should be cached'))
+    assert meta.field(info['address'],'_entries') is first
+
+
 def test_expiry_uses_oldest_required_source_and_rejects_partial_or_future():
     from utils.core.navigation_supply import navigation_expiry
     assert navigation_expiry(ready(1., 3., native_start=2.), 3.) == 7.
