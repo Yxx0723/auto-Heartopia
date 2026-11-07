@@ -314,9 +314,9 @@ class PointPlayback:
             from utils.vision.axe_pick import LazyToolSelector
             navigation['tool_selector'] = LazyToolSelector(self.profile.parent/'axe_pick_icon.png', self.tool_factory)
             if auto_eat:
-                from utils.vision.food_menu import FruitMenu
+                from utils.vision.first_slot_food import FirstSlotFoodMenu
                 navigation['food_fallback'] = self.food_fallback
-                navigation['food'] = LazyToolSelector(self.profile.parent/'food_bag_marker.png', self.food_factory or FruitMenu)
+                navigation['food'] = LazyToolSelector(self.profile.parent/'food_bag_marker.png', self.food_factory or FirstSlotFoodMenu)
             if auto_repair:
                 from utils.vision.repair_box import RepairBoxMenu
                 navigation['repair_box'] = (self.repair_factory or RepairBoxMenu)(self.profile.parent/'repair_box_menu.png')

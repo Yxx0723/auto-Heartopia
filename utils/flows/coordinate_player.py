@@ -968,7 +968,12 @@ class _Follower:
             if not self.meal_pending and status['current'] < 100:
                 self.meal_menu_pending = True
                 inventory_reader = getattr(self.reader, 'food_inventory_snapshot', None)
-                if callable(inventory_reader):
+                first_slot=getattr(self.food,'direct_first_slot',False) is True
+                if first_slot:
+                    target=self.food.prepare(self.window,self.repair_tap,self.wait,self.guard,self.device)
+                    self.report('eating','正在食用背包第一格，补充至100 · F6暂停 · F9停止',
+                                waypoint=index+1,waypoint_count=total,food_mode='first_slot')
+                elif callable(inventory_reader):
                     inventory = inventory_reader(check=self.guard)
                     target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device,
                                                inventory=inventory,
@@ -979,7 +984,9 @@ class _Follower:
                 else:  # Simulation adapters retain their previous contract.
                     target = self.food.prepare(self.window, self.repair_tap, self.wait, self.guard, self.device)
                 confirm = getattr(self.food, 'confirm', None)
-                if callable(confirm) and callable(inventory_reader):
+                if callable(confirm) and first_slot:
+                    target=confirm(target,self.window,self.wait,self.guard)
+                elif callable(confirm) and callable(inventory_reader):
                     fresh = inventory_reader(check=self.guard)
                     confirm_inventory(target, fresh, self.food_fallback)
                     target = confirm(target, self.window, self.wait, self.guard,
