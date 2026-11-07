@@ -662,6 +662,20 @@ def test_path_memory_switch_is_passed_to_playback_worker(tmp_path):
     assert window.playback.start.call_args.kwargs['remember_paths'] is False
 
 
+@pytest.mark.parametrize('enabled',[False,True])
+def test_path_memory_choice_survives_restart_without_changing_routes(tmp_path,enabled):
+    window=capture_window(tmp_path)
+    window.save_point()
+    before=window.point_store.path.read_bytes()
+    window.path_memory_var=Mock()
+    window.path_memory_var.get.return_value=enabled
+    window.save_path_memory_option()
+    restarted=capture_window(tmp_path)
+    assert restarted.load_path_memory_option() is enabled
+    assert window.point_store.path.read_bytes()==before
+    assert '.采集设置' not in window.routes.names()
+
+
 @pytest.mark.parametrize('confirm', [False, True])
 def test_clear_path_memory_preserves_saved_collection_points(tmp_path, monkeypatch, confirm):
     from utils.drivers.route_path_memory import RoutePathMemory

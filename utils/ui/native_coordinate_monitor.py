@@ -19,6 +19,7 @@ from utils.core.coordinate_points import ordered_waypoints, validate_collect_wai
 from utils.core import thresholds as policy
 from utils.core.special_patrol import make_patrol_data
 from utils.drivers.coordinate_point_routes import PointRoutes
+from utils.drivers.coordinate_point_store import atomic_write_json
 from utils.drivers.input_task_gate import InputTaskGate
 from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
@@ -490,12 +491,13 @@ class CoordinateWindow:
             activeforeground=COLORS['text'], selectcolor=COLORS['button'],
             font=('Microsoft YaHei UI', -12), bd=0, highlightthickness=0)
         self.navigation_check.pack(side='left', padx=(0, 12))
-        self.path_memory_var = tk.BooleanVar(self.root, value=True)
-        self.path_memory_check = tk.Checkbutton(navigationbar, text='记忆走法', variable=self.path_memory_var,
+        self.path_memory_var = tk.BooleanVar(self.root, value=self.load_path_memory_option())
+        self.path_memory_check = tk.Checkbutton(waitbar, text='使用路线记忆', variable=self.path_memory_var,
+            command=self.save_path_memory_option,
             bg=COLORS['bg'], fg=COLORS['text'], activebackground=COLORS['bg'],
             activeforeground=COLORS['text'], selectcolor=COLORS['button'],
             font=('Microsoft YaHei UI', -12), bd=0, highlightthickness=0)
-        self.path_memory_check.pack(side='left', padx=(0, 5))
+        self.path_memory_check.pack(side='right', padx=(5, 0))
         self.path_memory_label = self.label(navigationbar, '0 段', color='muted', font=('Microsoft YaHei UI', -11))
         self.path_memory_label.pack(side='left', padx=(0, 5))
         self.clear_path_memory_button = self.button(navigationbar, '清除记忆', self.clear_path_memory, small=True)
@@ -1459,6 +1461,21 @@ class CoordinateWindow:
 
     def collection_wait(self):
         return validate_collect_wait(float(self.collect_wait_var.get()))
+
+    def load_path_memory_option(self):
+        try:
+            data=json.loads((self.routes.root/'.采集设置.json').read_text(encoding='utf-8-sig'))
+            value=data.get('remember_paths') if isinstance(data,dict) else None
+            return value if type(value) is bool else True
+        except (OSError,ValueError):
+            return True
+
+    def save_path_memory_option(self):
+        try:
+            atomic_write_json(self.routes.root/'.采集设置.json',
+                              {'remember_paths':bool(self.path_memory_var.get())})
+        except OSError as exc:
+            messagebox.showerror('无法保存路线记忆选项',str(exc),parent=self.root)
 
     def refresh_path_memory_info(self):
         if not hasattr(self, 'path_memory_label'):
