@@ -1,6 +1,8 @@
 """P1 selects a single explicit recipe, verifies readback and stops."""
 import math
+import traceback
 from utils.core.cooking_catalog import material_status
+from utils.core.scene_read import SceneReadIssue
 
 
 def select_recipe(*, recipe, reader, window, controls, device, inventory, clock, report, timeout=30.):
@@ -22,7 +24,31 @@ def select_recipe(*, recipe, reader, window, controls, device, inventory, clock,
         guard()
     def observe():
         nonlocal scope, stove
-        guard(); value = reader.selection(size)
+        # A just-opened recipe list can replace its card references while it
+        # initializes. Discard the whole failed read; never act on part of it.
+        read_deadline = min(deadline, clock.monotonic()+2.)
+        for attempt in range(1, 6):
+            guard()
+            try:
+                value = reader.selection(size)
+                break
+            except SceneReadIssue as exc:
+                if exc.kind != 'invalid_reference':
+                    raise
+                device.release_all()
+                frames = traceback.extract_tb(exc.__traceback__)
+                location = [{'function': f.name, 'line': f.lineno, 'source': f.line}
+                            for f in frames[-4:]]
+                report('recipe_read_retry', '料理控件引用未就绪，正在重新读取',
+                       attempt=attempt, last_read_error={'type': type(exc).__name__,
+                       'message': str(exc), 'kind': exc.kind, 'stage': exc.stage,
+                       'location': location})
+                if attempt == 5 or clock.monotonic()+.2 >= read_deadline:
+                    raise ValueError('料理控件引用连续读取失败，已停止；最后异常：'
+                                     +type(exc).__name__+': '+str(exc)) from exc
+                wait(.2)
+        if attempt > 1:
+            report('recipe_read_recovered', '料理控件读取已恢复，继续核对所选料理', attempts=attempt)
         if scope is None:
             scope, stove = value['scope'], value['stove_identity']
         if value['scope'] != scope or value['stove_identity'] != stove:
