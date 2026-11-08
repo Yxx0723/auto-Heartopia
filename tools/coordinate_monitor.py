@@ -46,5 +46,7 @@ if __name__ == '__main__':
     from utils.flows.cooking import run_cooking
     from utils.flows.cooking_entry import run_stove_entry
     from utils.flows.cooking_selection import select_recipe
+    from utils.flows.cooking_single_pot import run_single_pot
     main(playback_runner=drive_points, cooking_runner=run_cooking, guidance_runner=drive_guidance,
-         cooking_entry_runner=run_stove_entry, cooking_selection_runner=select_recipe)
+         cooking_entry_runner=run_stove_entry, cooking_selection_runner=select_recipe,
+         single_pot_runner=run_single_pot)

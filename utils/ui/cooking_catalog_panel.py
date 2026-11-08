@@ -31,6 +31,8 @@ class CookingCatalogPanel:
         self.stock_button.pack(side='left',fill='x',expand=True,padx=(0,3))
         self.select_button = owner.button(actions,'确认料理并选菜',self.confirm,primary=True)
         self.select_button.pack(side='left',fill='x',expand=True)
+        self.pot_button=owner.button(self.frame,'P2：核对当前料理并制作一锅',self.make_one_pot)
+        self.pot_button.pack(fill='x',pady=(3,0))
         self.list.bind('<<TreeviewSelect>>',self.changed)
         self.category.trace_add('write',self.filter);self.query.trace_add('write',self.filter)
         self.filter()
@@ -93,3 +95,14 @@ class CookingCatalogPanel:
         self.active = active
         self.select_button.configure(state='disabled' if active else 'normal')
         self.stock_button.configure(state='disabled' if active else 'normal')
+        self.pot_button.configure(state='disabled' if active else 'normal')
+
+    def make_one_pot(self):
+        if self.recipe is None:
+            messagebox.showerror('未选择料理','请先完成 P1 料理选择并保持游戏食谱面板打开',parent=self.owner.root);return
+        try:
+            self.owner.cooking.start_pot(self.owner.view.status.get('pid'),self.recipe)
+            self.owner.cooking_status={'state':'single_pot_wait','message':'单锅待开始：切回游戏按 F6；F9停止'}
+            self.owner.render()
+        except (ValueError,OSError) as exc:
+            messagebox.showerror('无法制作单锅',str(exc),parent=self.owner.root)

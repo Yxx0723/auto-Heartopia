@@ -23,7 +23,7 @@ from utils.drivers.coordinate_point_store import atomic_write_json
 from utils.drivers.input_task_gate import InputTaskGate
 from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
-from utils.ui.cooking_selection_control import CookingSelectionControl
+from utils.ui.cooking_single_pot_control import CookingSinglePotControl
 from utils.ui.cooking_catalog_panel import CookingCatalogPanel
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
@@ -173,7 +173,7 @@ class MonitorWorker:
 class CoordinateWindow:
     def __init__(self, root, monitor, resources, clock=time.monotonic, point_path=None, wall_clock=None,
                  playback_runner=None, scene_factory=None, cooking_runner=None, guidance_runner=None,
-                 cooking_entry_runner=None, cooking_selection_runner=None):
+                 cooking_entry_runner=None, cooking_selection_runner=None, single_pot_runner=None):
         self.root, self.resources, self.clock = root, Path(resources), clock
         self.wall_clock = wall_clock or (lambda: datetime.now().astimezone())
         data_dir = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) \
@@ -198,9 +198,10 @@ class CoordinateWindow:
                                       guidance_scene_factory=NavigationSceneMap if scene_factory is MemorySceneMap else None,
                                       scene_provider=self.navigation_scene, scene_refresh=self.refresh_scene,
                                       diagnostics_path=diagnostics_dir / '日志' / '点位回放.jsonl', input_gate=self.input_gate)
-        self.cooking = CookingSelectionControl(self.resources/'profile.json', data_dir/'烹饪记录',
+        self.cooking = CookingSinglePotControl(self.resources/'profile.json', data_dir/'烹饪记录',
                                       busy=lambda: self.playback.active, input_gate=self.input_gate,
-                                      runner=cooking_entry_runner, selection_runner=cooking_selection_runner)
+                                      runner=cooking_entry_runner, selection_runner=cooking_selection_runner,
+                                      single_pot_runner=single_pot_runner)
         self.cooking_status = {'state':'idle','message':'选择料理并刷新背包；确认后到灶台旁按 F6，仅选菜不制作'}
         self.playback.input_busy = lambda: self.cooking.active
         self.cooking_dialog = None
@@ -1705,7 +1706,7 @@ class CoordinateWindow:
 
 
 def main(playback_runner=None, cooking_runner=None, guidance_runner=None, cooking_entry_runner=None,
-         cooking_selection_runner=None):
+         cooking_selection_runner=None, single_pot_runner=None):
     parser = argparse.ArgumentParser(description='心动小镇原生坐标监视窗口')
     parser.add_argument('--check-output', type=Path)
     parser.add_argument('--check-scene-output', type=Path)
@@ -1750,5 +1751,6 @@ def main(playback_runner=None, cooking_runner=None, guidance_runner=None, cookin
     root = tk.Tk()
     CoordinateWindow(root, monitor, resources, playback_runner=playback_runner, scene_factory=MemorySceneMap,
                      cooking_runner=cooking_runner, guidance_runner=guidance_runner,
-                     cooking_entry_runner=cooking_entry_runner, cooking_selection_runner=cooking_selection_runner)
+                     cooking_entry_runner=cooking_entry_runner, cooking_selection_runner=cooking_selection_runner,
+                     single_pot_runner=single_pot_runner)
     root.mainloop()
