@@ -161,7 +161,8 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                     if (fresh['status'],fresh['status_started'])!=(state['status'],state['status_started']):
                         raise ValueError('翻锅或收菜事件在派发前改变，未误点')
                     events.reserve(kind,key)
-                    save(kind+'_reserved','翻锅事件已登记，等待解除确认' if kind=='stir' else '游戏已成功完成，收菜操作已登记',native_state=fresh)
+                    save(kind+'_reserved','翻锅事件已登记，等待解除确认' if kind=='stir' else '游戏已成功完成，收菜操作已登记',
+                         native_state=fresh,hud_diagnostics=getattr(reader,'hud_diagnostics',None))
                 click(lambda:reader.hud_target(size,kind,state),reserve_action)
                 if kind=='collect':collect_at=clock.monotonic()
             if collect_at is not None:
@@ -175,7 +176,8 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                     raise ValueError('收菜后未同时取得灶台复位和指定产物增量，未判成功或重复收菜')
             wait(.03)
     except Exception as exc:
-        save('unconfirmed','单锅停止：'+type(exc).__name__+': '+str(exc))
+        save('unconfirmed','单锅停止：'+type(exc).__name__+': '+str(exc),
+             hud_diagnostics=getattr(exc,'diagnostics',None) or getattr(reader,'hud_diagnostics',None))
         raise
     finally:
         device.release_all()
