@@ -31,7 +31,11 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
     def wait(seconds):
         end=clock.monotonic()+seconds
         while clock.monotonic()<end:
-            guard();clock.sleep(min(.02,end-clock.monotonic()))
+            guard()
+            remaining=end-clock.monotonic()
+            if remaining<=0:
+                break
+            clock.sleep(min(.02,remaining))
         guard()
     def read(source):
         until=clock.monotonic()+1.
