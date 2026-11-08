@@ -23,7 +23,8 @@ from utils.drivers.coordinate_point_store import atomic_write_json
 from utils.drivers.input_task_gate import InputTaskGate
 from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
-from utils.ui.cooking_entry_control import CookingEntryControl
+from utils.ui.cooking_selection_control import CookingSelectionControl
+from utils.ui.cooking_catalog_panel import CookingCatalogPanel
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
 from utils.ui.scene_map_worker import SceneMapWorker
@@ -172,7 +173,7 @@ class MonitorWorker:
 class CoordinateWindow:
     def __init__(self, root, monitor, resources, clock=time.monotonic, point_path=None, wall_clock=None,
                  playback_runner=None, scene_factory=None, cooking_runner=None, guidance_runner=None,
-                 cooking_entry_runner=None):
+                 cooking_entry_runner=None, cooking_selection_runner=None):
         self.root, self.resources, self.clock = root, Path(resources), clock
         self.wall_clock = wall_clock or (lambda: datetime.now().astimezone())
         data_dir = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) \
@@ -197,10 +198,10 @@ class CoordinateWindow:
                                       guidance_scene_factory=NavigationSceneMap if scene_factory is MemorySceneMap else None,
                                       scene_provider=self.navigation_scene, scene_refresh=self.refresh_scene,
                                       diagnostics_path=diagnostics_dir / '日志' / '点位回放.jsonl', input_gate=self.input_gate)
-        self.cooking = CookingEntryControl(self.resources/'profile.json', data_dir/'烹饪记录',
+        self.cooking = CookingSelectionControl(self.resources/'profile.json', data_dir/'烹饪记录',
                                       busy=lambda: self.playback.active, input_gate=self.input_gate,
-                                      runner=cooking_entry_runner)
-        self.cooking_status = {'state':'idle','message':'P0 入口验证：只打开默认食谱，不开始制作'}
+                                      runner=cooking_entry_runner, selection_runner=cooking_selection_runner)
+        self.cooking_status = {'state':'idle','message':'选择料理并刷新背包；确认后到灶台旁按 F6，仅选菜不制作'}
         self.playback.input_busy = lambda: self.cooking.active
         self.cooking_dialog = None
         self.playback_status = {'state': 'idle', 'message': '按保存顺序回放 · F6开始/暂停 · F9停止'}
@@ -386,16 +387,14 @@ class CoordinateWindow:
         for page, title in ((route_page, '采集设定'), (parameter_page, '参数设定'),
                             (map_page, '地图连接'), (cooking_page, '烹饪')):
             self.control_tabs.add(page, text=title)
-        self.label(cooking_page,'灶台入口验证 · P0',font=('Microsoft YaHei UI',-15)).pack(
-            anchor='w',padx=12,pady=(12,8))
-        self.label(cooking_page,'先站到灶台旁，关闭食谱。点击验证后切回游戏按 F6。\n'
-                   '仅发送一次主键区 1，核对默认食谱和材料后停止；不会投料或开始制作。',
-                   color='muted',wraplength=395,justify='left').pack(fill='x',padx=12,pady=(0,10))
+        self.label(cooking_page,'离线料理库 · P1（只选菜，不制作）',font=('Microsoft YaHei UI',-14)).pack(
+            anchor='w',padx=10,pady=(5,2))
+        self.cooking_catalog=CookingCatalogPanel(self,cooking_page)
         self.cooking_entry_button=self.button(cooking_page,'验证灶台入口（不制作）',
                                               self.start_cooking_entry,primary=True)
-        self.cooking_entry_button.pack(fill='x',padx=12,pady=(0,6))
+        self.cooking_entry_button.pack(fill='x',padx=12,pady=(2,3))
         self.cooking_entry_stop=self.button(cooking_page,'停止验证 · F9',self.stop_cooking_entry)
-        self.cooking_entry_stop.pack(fill='x',padx=12,pady=(0,10))
+        self.cooking_entry_stop.pack(fill='x',padx=12,pady=(0,3))
         self.cooking_entry_status=self.field(cooking_page,'cooking_entry',self.cooking_status['message'],
             color='muted',wraplength=395,justify='left',anchor='w')
         self.cooking_entry_status.pack(fill='x',padx=12,pady=(0,8))
@@ -864,6 +863,8 @@ class CoordinateWindow:
         cooking = cooking_owner.take_latest() if cooking_owner else None
         if cooking is not None:
             self.cooking_status = cooking
+            if hasattr(self,'cooking_catalog'):
+                self.cooking_catalog.apply_result(cooking)
         self.render()
         # One pending callback only; a slow frame never queues catch-up frames.
         elapsed = max(0., self.clock()-frame_started)
@@ -880,6 +881,8 @@ class CoordinateWindow:
             configure_changed(self.cooking_entry_button,state='normal' if live and not playing else 'disabled')
             configure_changed(self.cooking_entry_stop,state='normal' if self.cooking.active else 'disabled')
             self.fields['cooking_entry'].set(self.cooking_status['message'])
+        if hasattr(self,'cooking_catalog'):
+            self.cooking_catalog.set_active(playing)
         if hasattr(self, 'guidance_button'):
             configure_changed(self.guidance_button, state='normal' if live and not playing else 'disabled')
         patrol = getattr(self, 'patrol_route_selected', False)
@@ -1701,7 +1704,8 @@ class CoordinateWindow:
         self.root.destroy()
 
 
-def main(playback_runner=None, cooking_runner=None, guidance_runner=None, cooking_entry_runner=None):
+def main(playback_runner=None, cooking_runner=None, guidance_runner=None, cooking_entry_runner=None,
+         cooking_selection_runner=None):
     parser = argparse.ArgumentParser(description='心动小镇原生坐标监视窗口')
     parser.add_argument('--check-output', type=Path)
     parser.add_argument('--check-scene-output', type=Path)
@@ -1746,5 +1750,5 @@ def main(playback_runner=None, cooking_runner=None, guidance_runner=None, cookin
     root = tk.Tk()
     CoordinateWindow(root, monitor, resources, playback_runner=playback_runner, scene_factory=MemorySceneMap,
                      cooking_runner=cooking_runner, guidance_runner=guidance_runner,
-                     cooking_entry_runner=cooking_entry_runner)
+                     cooking_entry_runner=cooking_entry_runner, cooking_selection_runner=cooking_selection_runner)
     root.mainloop()

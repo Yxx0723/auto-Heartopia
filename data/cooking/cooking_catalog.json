@@ -1,0 +1,7025 @@
+{
+  "schema_version": 1,
+  "source": {
+    "kind": "local_game_tables",
+    "captured_on": "2026-11-08",
+    "recipe_table": "TableCookingRecipes",
+    "name_table": "LevelTableBagitems (base + current level 4)",
+    "ingredient_table": "LevelTableIngredientss (base + current level 4)",
+    "material_group_table": "TableFoodMaterials",
+    "product_table": "TableFoods",
+    "category_rule": {
+      "日常料理": {
+        "cooker_type": 1
+      },
+      "近幽集": {
+        "cooker_type": 17
+      }
+    },
+    "game_assembly_sha256": "8e44137ad5536b87fe46cc150980305bc866d12666cdbde9f0c59331cf0d8b0d",
+    "note": "材料组保留原生组 ID，item_id 为 null；候选物品取当前客户端实际可烹饪配置。未确认字段不授权自动选择。"
+  },
+  "recipes": [
+    {
+      "name": "田园沙拉",
+      "recipe_id": 45101,
+      "product_id": 45101,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蔬菜",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 0,
+          "allowed_item_ids": [
+            40601,
+            40602,
+            40603,
+            750101,
+            750201,
+            750301,
+            750401,
+            769001,
+            769002,
+            769003,
+            769005,
+            769006,
+            769007,
+            769008,
+            769009,
+            769010,
+            769101,
+            769102,
+            769103,
+            769201,
+            769203,
+            769302,
+            769303,
+            769402,
+            769403,
+            769407
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "什锦果酱",
+      "recipe_id": 45102,
+      "product_id": 45102,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 2,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "果酱材料",
+          "quantity": 4,
+          "item_id": null,
+          "material_group_id": 6,
+          "allowed_item_ids": [
+            40101,
+            40201,
+            40301,
+            40501,
+            40502,
+            750201,
+            769004,
+            769012,
+            769101,
+            769202,
+            769203,
+            769301,
+            769302,
+            769401,
+            769405
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "树莓果酱",
+      "recipe_id": 45103,
+      "product_id": 45103,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 3,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "树莓",
+          "quantity": 4,
+          "item_id": 40502,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40502
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "番茄酱",
+      "recipe_id": 45104,
+      "product_id": 45104,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 4,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "番茄",
+          "quantity": 4,
+          "item_id": 769101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "蓝莓果酱",
+      "recipe_id": 45105,
+      "product_id": 45105,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 5,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蓝莓",
+          "quantity": 4,
+          "item_id": 40501,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40501
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "苹果酱",
+      "recipe_id": 45106,
+      "product_id": 45106,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 6,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "苹果",
+          "quantity": 4,
+          "item_id": 40101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "橘子果酱",
+      "recipe_id": 45107,
+      "product_id": 45107,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 7,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "橘子",
+          "quantity": 4,
+          "item_id": 40201,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40201
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "咖啡",
+      "recipe_id": 45108,
+      "product_id": 45108,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1001,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "咖啡豆",
+          "quantity": 2,
+          "item_id": 46106,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46106
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "咖啡材料",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 7,
+          "allowed_item_ids": [
+            46103,
+            46106
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "拿铁咖啡",
+      "recipe_id": 45109,
+      "product_id": 45109,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1002,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "咖啡豆",
+          "quantity": 2,
+          "item_id": 46106,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46106
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "熏鱼贝果",
+      "recipe_id": 45110,
+      "product_id": 45110,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1003,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鱼",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 2,
+          "allowed_item_ids": [
+            10001,
+            10002,
+            10003,
+            10005,
+            10101,
+            10102,
+            10103,
+            10104,
+            10107,
+            10109,
+            10111,
+            10113,
+            10114,
+            10115,
+            10116,
+            10117,
+            10118,
+            10120,
+            10121,
+            10123,
+            10124,
+            10126,
+            10127,
+            10128,
+            10129,
+            10131,
+            10132,
+            10133,
+            10135,
+            10136,
+            10137,
+            10138,
+            10204,
+            10205,
+            10207,
+            10208,
+            10209,
+            10210,
+            10212,
+            10213,
+            10215,
+            10222,
+            10223,
+            10236,
+            10237,
+            10238,
+            10239,
+            10240,
+            10301,
+            10302,
+            10303,
+            10304,
+            10305,
+            10306,
+            10307,
+            10308,
+            10311,
+            10313,
+            10314,
+            10315,
+            10316,
+            10318,
+            10321,
+            10323,
+            10328,
+            10329,
+            10330,
+            10331,
+            10335,
+            10339,
+            10341,
+            10343,
+            10344,
+            10345,
+            10361,
+            10365,
+            10366,
+            10385,
+            10388,
+            10391,
+            10395,
+            10407,
+            10410
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "奶酪",
+          "quantity": 1,
+          "item_id": 46104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46104
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "蔬菜",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 0,
+          "allowed_item_ids": [
+            40601,
+            40602,
+            40603,
+            750101,
+            750201,
+            750301,
+            750401,
+            769001,
+            769002,
+            769003,
+            769005,
+            769006,
+            769007,
+            769008,
+            769009,
+            769010,
+            769101,
+            769102,
+            769103,
+            769201,
+            769203,
+            769302,
+            769303,
+            769402,
+            769403,
+            769407
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "炸鱼薯条",
+      "recipe_id": 45111,
+      "product_id": 45111,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 14,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鱼",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 2,
+          "allowed_item_ids": [
+            10001,
+            10002,
+            10003,
+            10005,
+            10101,
+            10102,
+            10103,
+            10104,
+            10107,
+            10109,
+            10111,
+            10113,
+            10114,
+            10115,
+            10116,
+            10117,
+            10118,
+            10120,
+            10121,
+            10123,
+            10124,
+            10126,
+            10127,
+            10128,
+            10129,
+            10131,
+            10132,
+            10133,
+            10135,
+            10136,
+            10137,
+            10138,
+            10204,
+            10205,
+            10207,
+            10208,
+            10209,
+            10210,
+            10212,
+            10213,
+            10215,
+            10222,
+            10223,
+            10236,
+            10237,
+            10238,
+            10239,
+            10240,
+            10301,
+            10302,
+            10303,
+            10304,
+            10305,
+            10306,
+            10307,
+            10308,
+            10311,
+            10313,
+            10314,
+            10315,
+            10316,
+            10318,
+            10321,
+            10323,
+            10328,
+            10329,
+            10330,
+            10331,
+            10335,
+            10339,
+            10341,
+            10343,
+            10344,
+            10345,
+            10361,
+            10365,
+            10366,
+            10385,
+            10388,
+            10391,
+            10395,
+            10407,
+            10410
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "土豆",
+          "quantity": 2,
+          "item_id": 769102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769102
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "海鲜披萨",
+      "recipe_id": 45112,
+      "product_id": 45112,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1013,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "奶酪",
+          "quantity": 1,
+          "item_id": 46104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46104
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "番茄酱",
+          "quantity": 1,
+          "item_id": 45104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45104
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鱼",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 2,
+          "allowed_item_ids": [
+            10001,
+            10002,
+            10003,
+            10005,
+            10101,
+            10102,
+            10103,
+            10104,
+            10107,
+            10109,
+            10111,
+            10113,
+            10114,
+            10115,
+            10116,
+            10117,
+            10118,
+            10120,
+            10121,
+            10123,
+            10124,
+            10126,
+            10127,
+            10128,
+            10129,
+            10131,
+            10132,
+            10133,
+            10135,
+            10136,
+            10137,
+            10138,
+            10204,
+            10205,
+            10207,
+            10208,
+            10209,
+            10210,
+            10212,
+            10213,
+            10215,
+            10222,
+            10223,
+            10236,
+            10237,
+            10238,
+            10239,
+            10240,
+            10301,
+            10302,
+            10303,
+            10304,
+            10305,
+            10306,
+            10307,
+            10308,
+            10311,
+            10313,
+            10314,
+            10315,
+            10316,
+            10318,
+            10321,
+            10323,
+            10328,
+            10329,
+            10330,
+            10331,
+            10335,
+            10339,
+            10341,
+            10343,
+            10344,
+            10345,
+            10361,
+            10365,
+            10366,
+            10385,
+            10388,
+            10391,
+            10395,
+            10407,
+            10410
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "提拉米苏",
+      "recipe_id": 45113,
+      "product_id": 45113,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1021,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "咖啡豆",
+          "quantity": 1,
+          "item_id": 46106,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46106
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "奶酪",
+          "quantity": 1,
+          "item_id": 46104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46104
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "海鲜烩饭",
+      "recipe_id": 45114,
+      "product_id": 45114,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1009,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "海鲜",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 4,
+          "allowed_item_ids": [
+            10004,
+            10006,
+            10301,
+            10302,
+            10303,
+            10304,
+            10305,
+            10306,
+            10307,
+            10308,
+            10311,
+            10313,
+            10314,
+            10315,
+            10316,
+            10317,
+            10318,
+            10319,
+            10321,
+            10323,
+            10326,
+            10328,
+            10329,
+            10330,
+            10331,
+            10333,
+            10335,
+            10339,
+            10340,
+            10341,
+            10343,
+            10344,
+            10345,
+            10347,
+            10365,
+            10366,
+            10388,
+            10391,
+            10392,
+            10395,
+            10407,
+            10410,
+            40601,
+            40602,
+            40603
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "番茄",
+          "quantity": 1,
+          "item_id": 769101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "苹果派",
+      "recipe_id": 45115,
+      "product_id": 45115,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1015,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "苹果",
+          "quantity": 1,
+          "item_id": 40101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40101
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "烛光晚餐",
+      "recipe_id": 45116,
+      "product_id": 45116,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1031,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "田园沙拉",
+          "quantity": 1,
+          "item_id": 45101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45101
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "熏鱼贝果",
+          "quantity": 1,
+          "item_id": 45110,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45110
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "海鲜烩饭",
+          "quantity": 1,
+          "item_id": 45114,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45114
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "提拉米苏",
+          "quantity": 1,
+          "item_id": 45113,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45113
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "豪华海鲜拼盘",
+      "recipe_id": 45117,
+      "product_id": 45117,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1020,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "北欧鳌虾",
+          "quantity": 2,
+          "item_id": 10202,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            10202
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鱼",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 2,
+          "allowed_item_ids": [
+            10001,
+            10002,
+            10003,
+            10005,
+            10101,
+            10102,
+            10103,
+            10104,
+            10107,
+            10109,
+            10111,
+            10113,
+            10114,
+            10115,
+            10116,
+            10117,
+            10118,
+            10120,
+            10121,
+            10123,
+            10124,
+            10126,
+            10127,
+            10128,
+            10129,
+            10131,
+            10132,
+            10133,
+            10135,
+            10136,
+            10137,
+            10138,
+            10204,
+            10205,
+            10207,
+            10208,
+            10209,
+            10210,
+            10212,
+            10213,
+            10215,
+            10222,
+            10223,
+            10236,
+            10237,
+            10238,
+            10239,
+            10240,
+            10301,
+            10302,
+            10303,
+            10304,
+            10305,
+            10306,
+            10307,
+            10308,
+            10311,
+            10313,
+            10314,
+            10315,
+            10316,
+            10318,
+            10321,
+            10323,
+            10328,
+            10329,
+            10330,
+            10331,
+            10335,
+            10339,
+            10341,
+            10343,
+            10344,
+            10345,
+            10361,
+            10365,
+            10366,
+            10385,
+            10388,
+            10391,
+            10395,
+            10407,
+            10410
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "奶酪蛋糕",
+      "recipe_id": 45120,
+      "product_id": 45120,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 15,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "奶酪",
+          "quantity": 1,
+          "item_id": 46104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46104
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "乡村炖菜",
+      "recipe_id": 45121,
+      "product_id": 45121,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1010,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "番茄",
+          "quantity": 1,
+          "item_id": 769101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769101
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "土豆",
+          "quantity": 1,
+          "item_id": 769102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "生菜",
+          "quantity": 1,
+          "item_id": 769201,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769201
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "英式下午茶",
+      "recipe_id": 45122,
+      "product_id": 45122,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1025,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "提拉米苏",
+          "quantity": 1,
+          "item_id": 45113,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45113
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "果酱材料",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 6,
+          "allowed_item_ids": [
+            40101,
+            40201,
+            40301,
+            40501,
+            40502,
+            750201,
+            769004,
+            769012,
+            769101,
+            769202,
+            769203,
+            769301,
+            769302,
+            769401,
+            769405
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "肉酱意面",
+      "recipe_id": 45123,
+      "product_id": 45123,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1014,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "肉",
+          "quantity": 1,
+          "item_id": 46101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46101
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "番茄",
+          "quantity": 1,
+          "item_id": 769101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769101
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "奶酪",
+          "quantity": 1,
+          "item_id": 46104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46104
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "露营套餐",
+      "recipe_id": 45124,
+      "product_id": 45124,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1024,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "咖啡",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 9,
+          "allowed_item_ids": [
+            45108,
+            45109
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "海鲜披萨",
+          "quantity": 1,
+          "item_id": 45112,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45112
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "苹果派",
+          "quantity": 1,
+          "item_id": 45115,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45115
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "炸鱼薯条",
+          "quantity": 1,
+          "item_id": 45111,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45111
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "鳌虾冷盘",
+      "recipe_id": 45125,
+      "product_id": 45125,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1028,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鳌虾",
+          "quantity": 3,
+          "item_id": null,
+          "material_group_id": 10,
+          "allowed_item_ids": [
+            10202,
+            10214,
+            10333
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "生菜",
+          "quantity": 1,
+          "item_id": 769201,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769201
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "蓝色北欧鳌虾冷盘",
+      "recipe_id": 45126,
+      "product_id": 45126,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1029,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蓝色北欧鳌虾",
+          "quantity": 3,
+          "item_id": 10214,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            10214
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "生菜",
+          "quantity": 1,
+          "item_id": 769201,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769201
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "清蒸帝王蟹",
+      "recipe_id": 45127,
+      "product_id": 45127,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1032,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "帝王蟹",
+          "quantity": 3,
+          "item_id": null,
+          "material_group_id": 11,
+          "allowed_item_ids": [
+            10003,
+            10319,
+            10347,
+            10392
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "清蒸黄金帝王蟹",
+      "recipe_id": 45128,
+      "product_id": 45128,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1033,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "黄金帝王蟹",
+          "quantity": 3,
+          "item_id": 10003,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            10003
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "原味浮云卷",
+      "recipe_id": 45153,
+      "product_id": 45153,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 16,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "彩虹糖",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 16,
+          "allowed_item_ids": [
+            46107,
+            46108,
+            46109,
+            46110,
+            46111,
+            46112,
+            46113
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "红色浮云卷",
+      "recipe_id": 45154,
+      "product_id": 45154,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 17,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红色糖",
+          "quantity": 2,
+          "item_id": 46107,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46107
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "橙色浮云卷",
+      "recipe_id": 45155,
+      "product_id": 45155,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 18,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "橙色糖",
+          "quantity": 2,
+          "item_id": 46108,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46108
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "黄色浮云卷",
+      "recipe_id": 45156,
+      "product_id": 45156,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 19,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄色糖",
+          "quantity": 2,
+          "item_id": 46109,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46109
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "紫色浮云卷",
+      "recipe_id": 45157,
+      "product_id": 45157,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 20,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "紫色糖",
+          "quantity": 2,
+          "item_id": 46113,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46113
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "绿色浮云卷",
+      "recipe_id": 45158,
+      "product_id": 45158,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 21,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "绿色糖",
+          "quantity": 2,
+          "item_id": 46110,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46110
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "青色浮云卷",
+      "recipe_id": 45159,
+      "product_id": 45159,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 22,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "青色糖",
+          "quantity": 2,
+          "item_id": 46111,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46111
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "蓝色浮云卷",
+      "recipe_id": 45160,
+      "product_id": 45160,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 23,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "蓝色糖",
+          "quantity": 2,
+          "item_id": 46112,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46112
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "草莓果酱",
+      "recipe_id": 45161,
+      "product_id": 45161,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 8,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "草莓",
+          "quantity": 4,
+          "item_id": 769301,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769301
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "胡萝卜蛋糕",
+      "recipe_id": 45162,
+      "product_id": 45162,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1016,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "胡萝卜",
+          "quantity": 2,
+          "item_id": 769203,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769203
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "玉米浓汤",
+      "recipe_id": 45163,
+      "product_id": 45163,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1018,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "玉米",
+          "quantity": 2,
+          "item_id": 769302,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769302
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "菠萝酱",
+      "recipe_id": 45164,
+      "product_id": 45164,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 9,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "菠萝",
+          "quantity": 4,
+          "item_id": 769202,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769202
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "葡萄酱",
+      "recipe_id": 45165,
+      "product_id": 45165,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 10,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "葡萄",
+          "quantity": 4,
+          "item_id": 769401,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769401
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "什锦蔬菜泥",
+      "recipe_id": 45172,
+      "product_id": 45172,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1006,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蔬菜",
+          "quantity": 4,
+          "item_id": null,
+          "material_group_id": 0,
+          "allowed_item_ids": [
+            40601,
+            40602,
+            40603,
+            750101,
+            750201,
+            750301,
+            750401,
+            769001,
+            769002,
+            769003,
+            769005,
+            769006,
+            769007,
+            769008,
+            769009,
+            769010,
+            769101,
+            769102,
+            769103,
+            769201,
+            769203,
+            769302,
+            769303,
+            769402,
+            769403,
+            769407
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "土豆泥",
+      "recipe_id": 45173,
+      "product_id": 45173,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1007,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "土豆",
+          "quantity": 4,
+          "item_id": 769102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769102
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "豌豆泥",
+      "recipe_id": 45174,
+      "product_id": 45174,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1008,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "豌豆",
+          "quantity": 4,
+          "item_id": 769303,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769303
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "什锦蔬菜浓汤",
+      "recipe_id": 45175,
+      "product_id": 45175,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1017,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "蔬菜",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 0,
+          "allowed_item_ids": [
+            40601,
+            40602,
+            40603,
+            750101,
+            750201,
+            750301,
+            750401,
+            769001,
+            769002,
+            769003,
+            769005,
+            769006,
+            769007,
+            769008,
+            769009,
+            769010,
+            769101,
+            769102,
+            769103,
+            769201,
+            769203,
+            769302,
+            769303,
+            769402,
+            769403,
+            769407
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "豌豆浓汤",
+      "recipe_id": 45176,
+      "product_id": 45176,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1019,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "豌豆",
+          "quantity": 2,
+          "item_id": 769303,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769303
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "意面",
+      "recipe_id": 45177,
+      "product_id": 45177,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1022,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "蔬菜",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 0,
+          "allowed_item_ids": [
+            40601,
+            40602,
+            40603,
+            750101,
+            750201,
+            750301,
+            750401,
+            769001,
+            769002,
+            769003,
+            769005,
+            769006,
+            769007,
+            769008,
+            769009,
+            769010,
+            769101,
+            769102,
+            769103,
+            769201,
+            769203,
+            769302,
+            769303,
+            769402,
+            769403,
+            769407
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "茄子意面",
+      "recipe_id": 45178,
+      "product_id": 45178,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1023,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "茄子",
+          "quantity": 2,
+          "item_id": 769403,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769403
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "奶酪烤茄片",
+      "recipe_id": 45179,
+      "product_id": 45179,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1026,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "奶酪",
+          "quantity": 2,
+          "item_id": 46104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46104
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "茄子",
+          "quantity": 2,
+          "item_id": 769403,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769403
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "月饼",
+      "recipe_id": 45180,
+      "product_id": 45180,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 101,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "小麦",
+          "quantity": 2,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "月饼食材",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 44,
+          "allowed_item_ids": [
+            46102,
+            46141,
+            769405
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "奶黄流心大月饼",
+      "recipe_id": 45181,
+      "product_id": 45181,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 102,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "月饼",
+          "quantity": 3,
+          "item_id": null,
+          "material_group_id": 43,
+          "allowed_item_ids": [
+            45180,
+            45391,
+            45587
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "乳品",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 5,
+          "allowed_item_ids": [
+            46103,
+            46104,
+            46105
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "奶昔",
+      "recipe_id": 45188,
+      "product_id": 45188,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1037,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "奶昔食材",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 20,
+          "allowed_item_ids": [
+            40101,
+            40201,
+            40501,
+            40502,
+            46103,
+            46119,
+            769202,
+            769301,
+            769401,
+            769405
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "可可奶昔",
+      "recipe_id": 45189,
+      "product_id": 45189,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1038,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "可可豆",
+          "quantity": 2,
+          "item_id": 769405,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769405
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "树莓奶昔",
+      "recipe_id": 45190,
+      "product_id": 45190,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1039,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "树莓",
+          "quantity": 2,
+          "item_id": 40502,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40502
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "蓝莓奶昔",
+      "recipe_id": 45191,
+      "product_id": 45191,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1040,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "蓝莓",
+          "quantity": 2,
+          "item_id": 40501,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40501
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "苹果奶昔",
+      "recipe_id": 45192,
+      "product_id": 45192,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1041,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "苹果",
+          "quantity": 2,
+          "item_id": 40101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "橘子奶昔",
+      "recipe_id": 45193,
+      "product_id": 45193,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1042,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "橘子",
+          "quantity": 2,
+          "item_id": 40201,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40201
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "林里手打柠檬茶",
+      "recipe_id": 45222,
+      "product_id": 45222,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 301,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "林里精选茶叶",
+          "quantity": 2,
+          "item_id": 46116,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46116
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "林里香水柠檬",
+          "quantity": 1,
+          "item_id": 46117,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46117
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "林里食材",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 18,
+          "allowed_item_ids": [
+            46117,
+            769301
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "林里草莓柠檬茶",
+      "recipe_id": 45223,
+      "product_id": 45223,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 302,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "林里精选茶叶",
+          "quantity": 2,
+          "item_id": 46116,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46116
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "林里香水柠檬",
+          "quantity": 1,
+          "item_id": 46117,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46117
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "草莓",
+          "quantity": 1,
+          "item_id": 769301,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769301
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "马尔济斯可露丽",
+      "recipe_id": 45224,
+      "product_id": 45224,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 303,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "草莓",
+          "quantity": 1,
+          "item_id": 769301,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769301
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "小金毛可露丽",
+      "recipe_id": 45225,
+      "product_id": 45225,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 304,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "咖啡豆",
+          "quantity": 1,
+          "item_id": 46106,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46106
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "马尔济斯康宝蓝",
+      "recipe_id": 45226,
+      "product_id": 45226,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 305,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 3,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "咖啡",
+          "quantity": 1,
+          "item_id": 45108,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45108
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "小金毛康宝蓝",
+      "recipe_id": 45227,
+      "product_id": 45227,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 306,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "咖啡豆",
+          "quantity": 1,
+          "item_id": 46106,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46106
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "咖啡",
+          "quantity": 1,
+          "item_id": 45108,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45108
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "爱心小狗康宝蓝",
+      "recipe_id": 45228,
+      "product_id": 45228,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 307,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "咖啡",
+          "quantity": 2,
+          "item_id": 45108,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45108
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "圣诞节庆小蛋糕",
+      "recipe_id": 45229,
+      "product_id": 45229,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 107,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "草莓",
+          "quantity": 1,
+          "item_id": 769301,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769301
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "巧克力酱",
+      "recipe_id": 45230,
+      "product_id": 45230,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 11,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "可可豆",
+          "quantity": 4,
+          "item_id": 769405,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769405
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "醇香红茶饮",
+      "recipe_id": 45231,
+      "product_id": 45231,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1034,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "红茶",
+          "quantity": 2,
+          "item_id": 46118,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46118
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红茶饮食材",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 19,
+          "allowed_item_ids": [
+            46103,
+            46118,
+            769405
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "香浓奶茶",
+      "recipe_id": 45232,
+      "product_id": 45232,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1035,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "红茶",
+          "quantity": 2,
+          "item_id": 46118,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46118
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "可可奶茶",
+      "recipe_id": 45233,
+      "product_id": 45233,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1036,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "红茶",
+          "quantity": 2,
+          "item_id": 46118,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46118
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "可可豆",
+          "quantity": 1,
+          "item_id": 769405,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769405
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "菠萝奶昔",
+      "recipe_id": 45234,
+      "product_id": 45234,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1043,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "菠萝",
+          "quantity": 2,
+          "item_id": 769202,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769202
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "草莓奶昔",
+      "recipe_id": 45235,
+      "product_id": 45235,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1044,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "草莓",
+          "quantity": 2,
+          "item_id": 769301,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769301
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "葡萄奶昔",
+      "recipe_id": 45236,
+      "product_id": 45236,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1045,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "葡萄",
+          "quantity": 2,
+          "item_id": 769401,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769401
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "抹茶奶昔",
+      "recipe_id": 45237,
+      "product_id": 45237,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1046,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "抹茶粉",
+          "quantity": 2,
+          "item_id": 46119,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46119
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "清新绿茶饮",
+      "recipe_id": 45238,
+      "product_id": 45238,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1047,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "茶叶",
+          "quantity": 2,
+          "item_id": 769404,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769404
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "绿茶饮食材",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 21,
+          "allowed_item_ids": [
+            46103,
+            46119,
+            730201,
+            730202,
+            730203,
+            730204,
+            730205,
+            730206,
+            730901,
+            730902,
+            730903,
+            730904,
+            730905,
+            730906,
+            730907,
+            730908,
+            730909,
+            730910,
+            730911,
+            769404
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "清新奶绿",
+      "recipe_id": 45239,
+      "product_id": 45239,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1048,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "茶叶",
+          "quantity": 2,
+          "item_id": 769404,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769404
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "抹茶奶绿",
+      "recipe_id": 45240,
+      "product_id": 45240,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1049,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "茶叶",
+          "quantity": 2,
+          "item_id": 769404,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769404
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "抹茶粉",
+          "quantity": 1,
+          "item_id": 46119,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46119
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "精致下午茶宴",
+      "recipe_id": 45241,
+      "product_id": 45241,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1054,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "奶酪蛋糕",
+          "quantity": 2,
+          "item_id": 45120,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45120
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "醇香红茶饮",
+          "quantity": 2,
+          "item_id": 45231,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45231
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "雏菊花茶",
+      "recipe_id": 45242,
+      "product_id": 45242,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1050,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "茶叶",
+          "quantity": 2,
+          "item_id": 769404,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769404
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "白色雏菊",
+          "quantity": 2,
+          "item_id": 730202,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            730202
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "玫瑰花茶",
+      "recipe_id": 45243,
+      "product_id": 45243,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1052,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "茶叶",
+          "quantity": 2,
+          "item_id": 769404,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769404
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红色玫瑰",
+          "quantity": 2,
+          "item_id": 730901,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            730901
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "豆沙汤圆",
+      "recipe_id": 45253,
+      "product_id": 45253,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 108,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "米粉包",
+          "quantity": 2,
+          "item_id": 46120,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46120
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红豆",
+          "quantity": 2,
+          "item_id": 46121,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46121
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "阿鼠珍珠奶茶",
+      "recipe_id": 45303,
+      "product_id": 45303,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 308,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "阿鼠特供牛乳",
+          "quantity": 1,
+          "item_id": 46125,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46125
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红茶",
+          "quantity": 1,
+          "item_id": 46118,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46118
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "米粉包",
+          "quantity": 1,
+          "item_id": 46120,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46120
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "阿鼠布丁奶茶",
+      "recipe_id": 45304,
+      "product_id": 45304,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 309,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "阿鼠特供牛乳",
+          "quantity": 1,
+          "item_id": 46125,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46125
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红茶",
+          "quantity": 1,
+          "item_id": 46118,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46118
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "奶酪",
+          "quantity": 1,
+          "item_id": 46104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46104
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "阿鼠红豆奶茶",
+      "recipe_id": 45305,
+      "product_id": 45305,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 310,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "阿鼠特供牛乳",
+          "quantity": 1,
+          "item_id": 46125,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46125
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红茶",
+          "quantity": 1,
+          "item_id": 46118,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46118
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红豆",
+          "quantity": 1,
+          "item_id": 46121,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46121
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "阿鼠拿铁奶盖",
+      "recipe_id": 45306,
+      "product_id": 45306,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 311,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "阿鼠特供牛乳",
+          "quantity": 1,
+          "item_id": 46125,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46125
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红茶",
+          "quantity": 1,
+          "item_id": 46118,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46118
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "咖啡豆",
+          "quantity": 1,
+          "item_id": 46106,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46106
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "阿鼠蓝莓奶盖",
+      "recipe_id": 45307,
+      "product_id": 45307,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 312,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "阿鼠特供牛乳",
+          "quantity": 1,
+          "item_id": 46125,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46125
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "蓝莓",
+          "quantity": 2,
+          "item_id": 40501,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40501
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "阿鼠树莓奶盖",
+      "recipe_id": 45308,
+      "product_id": 45308,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 313,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "阿鼠特供牛乳",
+          "quantity": 1,
+          "item_id": 46125,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46125
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "树莓",
+          "quantity": 2,
+          "item_id": 40502,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40502
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "阿鼠抹茶奶盖",
+      "recipe_id": 45309,
+      "product_id": 45309,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 314,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "阿鼠特供牛乳",
+          "quantity": 1,
+          "item_id": 46125,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46125
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "抹茶粉",
+          "quantity": 2,
+          "item_id": 46119,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46119
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "阿鼠苹果奶茶",
+      "recipe_id": 45310,
+      "product_id": 45310,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 315,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "阿鼠特供牛乳",
+          "quantity": 1,
+          "item_id": 46125,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46125
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红茶",
+          "quantity": 1,
+          "item_id": 46118,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46118
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "苹果",
+          "quantity": 1,
+          "item_id": 40101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "火龙果酱",
+      "recipe_id": 45326,
+      "product_id": 45326,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 12,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "白心火龙果",
+          "quantity": 4,
+          "item_id": 769004,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769004
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "蘑菇派",
+      "recipe_id": 45352,
+      "product_id": 45352,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 24,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蘑菇",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 41,
+          "allowed_item_ids": [
+            48001,
+            48002,
+            48003,
+            48004,
+            48005,
+            48006,
+            48007
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "平菇派",
+      "recipe_id": 45353,
+      "product_id": 45353,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 25,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "平菇",
+          "quantity": 2,
+          "item_id": 48001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "香菇派",
+      "recipe_id": 45354,
+      "product_id": 45354,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 26,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "香菇",
+          "quantity": 2,
+          "item_id": 48002,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48002
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "口蘑派",
+      "recipe_id": 45355,
+      "product_id": 45355,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 27,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "口蘑",
+          "quantity": 2,
+          "item_id": 48003,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48003
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "牛肝菌派",
+      "recipe_id": 45356,
+      "product_id": 45356,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 28,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛肝菌",
+          "quantity": 2,
+          "item_id": 48004,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48004
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "黑松露派",
+      "recipe_id": 45357,
+      "product_id": 45357,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 29,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "黑松露",
+          "quantity": 2,
+          "item_id": 48005,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48005
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "烤蘑菇",
+      "recipe_id": 45358,
+      "product_id": 45358,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 30,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蘑菇",
+          "quantity": 4,
+          "item_id": null,
+          "material_group_id": 41,
+          "allowed_item_ids": [
+            48001,
+            48002,
+            48003,
+            48004,
+            48005,
+            48006,
+            48007
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "烤平菇",
+      "recipe_id": 45359,
+      "product_id": 45359,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 31,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "平菇",
+          "quantity": 4,
+          "item_id": 48001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48001
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "烤香菇",
+      "recipe_id": 45360,
+      "product_id": 45360,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 32,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "香菇",
+          "quantity": 4,
+          "item_id": 48002,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48002
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "烤口蘑",
+      "recipe_id": 45361,
+      "product_id": 45361,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 33,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "口蘑",
+          "quantity": 4,
+          "item_id": 48003,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48003
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "烤牛肝菌",
+      "recipe_id": 45362,
+      "product_id": 45362,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 34,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛肝菌",
+          "quantity": 4,
+          "item_id": 48004,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48004
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "黑松露奶油意面",
+      "recipe_id": 45363,
+      "product_id": 45363,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1011,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "黑松露",
+          "quantity": 1,
+          "item_id": 48005,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48005
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 2,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "玉兔冰皮月饼",
+      "recipe_id": 45389,
+      "product_id": 45389,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 103,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "米粉包",
+          "quantity": 2,
+          "item_id": 46120,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46120
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红豆",
+          "quantity": 1,
+          "item_id": 46121,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46121
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "大份玉兔冰皮月饼",
+      "recipe_id": 45390,
+      "product_id": 45390,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 104,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "玉兔冰皮月饼",
+          "quantity": 4,
+          "item_id": 45389,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45389
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "巧克力月饼",
+      "recipe_id": 45391,
+      "product_id": 45391,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 105,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "小麦",
+          "quantity": 2,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "可可豆",
+          "quantity": 1,
+          "item_id": 769405,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769405
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "大份巧克力月饼",
+      "recipe_id": 45392,
+      "product_id": 45392,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 106,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "巧克力月饼",
+          "quantity": 3,
+          "item_id": 45391,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45391
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "乳品",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 5,
+          "allowed_item_ids": [
+            46103,
+            46104,
+            46105
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "白绷带奇灵饮料",
+      "recipe_id": 45421,
+      "product_id": 45421,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 109,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "彩虹糖",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 16,
+          "allowed_item_ids": [
+            46107,
+            46108,
+            46109,
+            46110,
+            46111,
+            46112,
+            46113
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "黑绷带奇灵饮料",
+      "recipe_id": 45422,
+      "product_id": 45422,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 110,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "紫色糖",
+          "quantity": 1,
+          "item_id": 46113,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46113
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "木乃伊猫饮料",
+      "recipe_id": 45423,
+      "product_id": 45423,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 111,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄色糖",
+          "quantity": 1,
+          "item_id": 46109,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46109
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "鲜肉汉堡",
+      "recipe_id": 45424,
+      "product_id": 45424,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1027,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "生菜",
+          "quantity": 1,
+          "item_id": 769201,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769201
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉",
+          "quantity": 1,
+          "item_id": 46101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46101
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "番茄酱",
+          "quantity": 1,
+          "item_id": 45104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45104
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "肉酱焗茄子",
+      "recipe_id": 45425,
+      "product_id": 45425,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1030,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "茄子",
+          "quantity": 1,
+          "item_id": 769403,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769403
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉",
+          "quantity": 1,
+          "item_id": 46101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46101
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "食用油",
+          "quantity": 1,
+          "item_id": 46140,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46140
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "番茄酱",
+          "quantity": 1,
+          "item_id": 45104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45104
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "鲜虾牛油果杯",
+      "recipe_id": 45426,
+      "product_id": 45426,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1081,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鳌虾",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 10,
+          "allowed_item_ids": [
+            10202,
+            10214,
+            10333
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛油果",
+          "quantity": 2,
+          "item_id": 769406,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769406
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "芝士鲜虾炸蟹钳",
+      "recipe_id": 45427,
+      "product_id": 45427,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1082,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "帝王蟹",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 11,
+          "allowed_item_ids": [
+            10003,
+            10319,
+            10347,
+            10392
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鳌虾",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 10,
+          "allowed_item_ids": [
+            10202,
+            10214,
+            10333
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "青草蛋糕",
+      "recipe_id": 45462,
+      "product_id": 45462,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 316,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "抹茶粉",
+          "quantity": 1,
+          "item_id": 46119,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46119
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "杂草",
+          "quantity": 1,
+          "item_id": 770601,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            770601
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "复苏蛋",
+      "recipe_id": 45463,
+      "product_id": 45463,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 112,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "复苏蛋食材",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 53,
+          "allowed_item_ids": [
+            40101,
+            46103,
+            769201,
+            769401
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "复苏紫纹蛋",
+      "recipe_id": 45464,
+      "product_id": 45464,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 113,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "葡萄",
+          "quantity": 1,
+          "item_id": 769401,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769401
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "复苏绿纹蛋",
+      "recipe_id": 45465,
+      "product_id": 45465,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 114,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "生菜",
+          "quantity": 1,
+          "item_id": 769201,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769201
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "复苏橙纹蛋",
+      "recipe_id": 45466,
+      "product_id": 45466,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 115,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "苹果",
+          "quantity": 1,
+          "item_id": 40101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "复苏彩蛋宴",
+      "recipe_id": 45467,
+      "product_id": 45467,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 116,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "复苏蛋",
+          "quantity": 1,
+          "item_id": 45463,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45463
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "复苏紫纹蛋",
+          "quantity": 1,
+          "item_id": 45464,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45464
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "复苏绿纹蛋",
+          "quantity": 1,
+          "item_id": 45465,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45465
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "复苏橙纹蛋",
+          "quantity": 1,
+          "item_id": 45466,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45466
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "遇见彩虹心动软糖",
+      "recipe_id": 45497,
+      "product_id": 45497,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 317,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "水果",
+          "quantity": 4,
+          "item_id": null,
+          "material_group_id": 1,
+          "allowed_item_ids": [
+            40101,
+            40201,
+            40301,
+            40501,
+            40502,
+            769004,
+            769012,
+            769013,
+            769202,
+            769301,
+            769401,
+            769406
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "吃定彩虹爱心软糖",
+      "recipe_id": 45498,
+      "product_id": 45498,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 318,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "水果",
+          "quantity": 4,
+          "item_id": null,
+          "material_group_id": 1,
+          "allowed_item_ids": [
+            40101,
+            40201,
+            40301,
+            40501,
+            40502,
+            769004,
+            769012,
+            769013,
+            769202,
+            769301,
+            769401,
+            769406
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "三角白米粽",
+      "recipe_id": 45499,
+      "product_id": 45499,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 117,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "粽叶",
+          "quantity": 1,
+          "item_id": 46148,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46148
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "稻谷",
+          "quantity": 1,
+          "item_id": 769407,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769407
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "粽子食材",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 57,
+          "allowed_item_ids": [
+            46101,
+            46102,
+            46121,
+            769407
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "三角红豆粽",
+      "recipe_id": 45500,
+      "product_id": 45500,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 118,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "粽叶",
+          "quantity": 1,
+          "item_id": 46148,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46148
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "稻谷",
+          "quantity": 1,
+          "item_id": 769407,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769407
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红豆",
+          "quantity": 2,
+          "item_id": 46121,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46121
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "三角蛋黄肉粽",
+      "recipe_id": 45501,
+      "product_id": 45501,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 119,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "粽叶",
+          "quantity": 1,
+          "item_id": 46148,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46148
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "稻谷",
+          "quantity": 1,
+          "item_id": 769407,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769407
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉",
+          "quantity": 1,
+          "item_id": 46101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "枕形白米粽",
+      "recipe_id": 45502,
+      "product_id": 45502,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 120,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "粽叶",
+          "quantity": 1,
+          "item_id": 46148,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46148
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "稻谷",
+          "quantity": 1,
+          "item_id": 769407,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769407
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "粽子食材",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 57,
+          "allowed_item_ids": [
+            46101,
+            46102,
+            46121,
+            769407
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "枕形豆沙粽",
+      "recipe_id": 45503,
+      "product_id": 45503,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 121,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "粽叶",
+          "quantity": 1,
+          "item_id": 46148,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46148
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "稻谷",
+          "quantity": 1,
+          "item_id": 769407,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769407
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红豆",
+          "quantity": 2,
+          "item_id": 46121,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46121
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "枕形蛋黄肉粽",
+      "recipe_id": 45504,
+      "product_id": 45504,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 122,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "粽叶",
+          "quantity": 1,
+          "item_id": 46148,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46148
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "稻谷",
+          "quantity": 1,
+          "item_id": 769407,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769407
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉",
+          "quantity": 1,
+          "item_id": 46101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "杨桃果酱",
+      "recipe_id": 45531,
+      "product_id": 45531,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 13,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "杨桃",
+          "quantity": 4,
+          "item_id": 769012,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769012
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "海葡萄香菇茶碗蒸",
+      "recipe_id": 45547,
+      "product_id": 45547,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1004,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "海葡萄",
+          "quantity": 2,
+          "item_id": 40602,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40602
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "香菇",
+          "quantity": 1,
+          "item_id": 48002,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48002
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "无菌蛋",
+          "quantity": 1,
+          "item_id": 46141,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46141
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "裙带菜肉丸汤",
+      "recipe_id": 45548,
+      "product_id": 45548,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1005,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "裙带菜",
+          "quantity": 2,
+          "item_id": 40603,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40603
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉",
+          "quantity": 2,
+          "item_id": 46101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "海芦笋虾仁炒饭",
+      "recipe_id": 45549,
+      "product_id": 45549,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 1012,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "稻谷",
+          "quantity": 1,
+          "item_id": 769407,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769407
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "海芦笋",
+          "quantity": 2,
+          "item_id": 40601,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40601
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "海虾",
+          "quantity": 1,
+          "item_id": 10317,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            10317
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "班乔力荐炸虾寿司",
+      "recipe_id": 45550,
+      "product_id": 45550,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 319,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "稻谷",
+          "quantity": 1,
+          "item_id": 769407,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769407
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "食用油",
+          "quantity": 1,
+          "item_id": 46140,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46140
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "青虾",
+          "quantity": 1,
+          "item_id": 10217,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            10217
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "海虾",
+          "quantity": 1,
+          "item_id": 10317,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            10317
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "班乔力荐鸡蛋盖饭",
+      "recipe_id": 45551,
+      "product_id": 45551,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 320,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "稻谷",
+          "quantity": 2,
+          "item_id": 769407,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769407
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "海葡萄",
+          "quantity": 1,
+          "item_id": 40602,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40602
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "巧果",
+      "recipe_id": 45552,
+      "product_id": 45552,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 123,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "小麦",
+          "quantity": 2,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "食用油",
+          "quantity": 1,
+          "item_id": 46140,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46140
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "大耳狗可丽饼",
+      "recipe_id": 45553,
+      "product_id": 45553,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 321,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "咖啡豆",
+          "quantity": 1,
+          "item_id": 46106,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46106
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "酷洛米可丽饼",
+      "recipe_id": 45554,
+      "product_id": 45554,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 322,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "树莓",
+          "quantity": 1,
+          "item_id": 40502,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40502
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "美乐蒂可丽饼",
+      "recipe_id": 45555,
+      "product_id": 45555,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 323,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "鸡蛋",
+          "quantity": 1,
+          "item_id": 46102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46102
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "灯笼果香热可可",
+      "recipe_id": 45556,
+      "product_id": 45556,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 786,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "灯笼果",
+          "quantity": 1,
+          "item_id": 769013,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769013
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉桂可可粉",
+          "quantity": 1,
+          "item_id": 46154,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46154
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "水果",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 1,
+          "allowed_item_ids": [
+            40101,
+            40201,
+            40301,
+            40501,
+            40502,
+            769004,
+            769012,
+            769013,
+            769202,
+            769301,
+            769401,
+            769406
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "灯笼苹果热可可",
+      "recipe_id": 45557,
+      "product_id": 45557,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 787,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "灯笼果",
+          "quantity": 1,
+          "item_id": 769013,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769013
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉桂可可粉",
+          "quantity": 1,
+          "item_id": 46154,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46154
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "苹果",
+          "quantity": 1,
+          "item_id": 40101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "灯笼橘子热可可",
+      "recipe_id": 45558,
+      "product_id": 45558,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 788,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "灯笼果",
+          "quantity": 1,
+          "item_id": 769013,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769013
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉桂可可粉",
+          "quantity": 1,
+          "item_id": 46154,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46154
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "橘子",
+          "quantity": 1,
+          "item_id": 40201,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40201
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "灯笼蓝莓热可可",
+      "recipe_id": 45559,
+      "product_id": 45559,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 789,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "灯笼果",
+          "quantity": 1,
+          "item_id": 769013,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769013
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉桂可可粉",
+          "quantity": 1,
+          "item_id": 46154,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46154
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "蓝莓",
+          "quantity": 1,
+          "item_id": 40501,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40501
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "灯笼树莓热可可",
+      "recipe_id": 45560,
+      "product_id": 45560,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 790,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "灯笼果",
+          "quantity": 1,
+          "item_id": 769013,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769013
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉桂可可粉",
+          "quantity": 1,
+          "item_id": 46154,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46154
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "树莓",
+          "quantity": 1,
+          "item_id": 40502,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            40502
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "灯笼草莓热可可",
+      "recipe_id": 45561,
+      "product_id": 45561,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 791,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "灯笼果",
+          "quantity": 1,
+          "item_id": 769013,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769013
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉桂可可粉",
+          "quantity": 1,
+          "item_id": 46154,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46154
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "草莓",
+          "quantity": 1,
+          "item_id": 769301,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769301
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "灯笼葡萄热可可",
+      "recipe_id": 45562,
+      "product_id": 45562,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 792,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "灯笼果",
+          "quantity": 1,
+          "item_id": 769013,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769013
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉桂可可粉",
+          "quantity": 1,
+          "item_id": 46154,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46154
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "葡萄",
+          "quantity": 1,
+          "item_id": 769401,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769401
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "灯笼菠萝热可可",
+      "recipe_id": 45563,
+      "product_id": 45563,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 793,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "灯笼果",
+          "quantity": 1,
+          "item_id": 769013,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769013
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "肉桂可可粉",
+          "quantity": 1,
+          "item_id": 46154,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46154
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "菠萝",
+          "quantity": 1,
+          "item_id": 769202,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769202
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "南瓜奶油蘑菇浓汤",
+      "recipe_id": 45567,
+      "product_id": 45567,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 794,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蜜环菌",
+          "quantity": 1,
+          "item_id": 48007,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48007
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "蔬菜",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 0,
+          "allowed_item_ids": [
+            40601,
+            40602,
+            40603,
+            750101,
+            750201,
+            750301,
+            750401,
+            769001,
+            769002,
+            769003,
+            769005,
+            769006,
+            769007,
+            769008,
+            769009,
+            769010,
+            769101,
+            769102,
+            769103,
+            769201,
+            769203,
+            769302,
+            769303,
+            769402,
+            769403,
+            769407
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "南瓜奶油土豆浓汤",
+      "recipe_id": 45568,
+      "product_id": 45568,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 795,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蜜环菌",
+          "quantity": 1,
+          "item_id": 48007,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48007
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "土豆",
+          "quantity": 1,
+          "item_id": 769102,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769102
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "南瓜奶油玉米浓汤",
+      "recipe_id": 45569,
+      "product_id": 45569,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 796,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蜜环菌",
+          "quantity": 1,
+          "item_id": 48007,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48007
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "玉米",
+          "quantity": 1,
+          "item_id": 769302,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769302
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "南瓜奶油番茄浓汤",
+      "recipe_id": 45570,
+      "product_id": 45570,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 797,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蜜环菌",
+          "quantity": 1,
+          "item_id": 48007,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48007
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "番茄",
+          "quantity": 1,
+          "item_id": 769101,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769101
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "南瓜奶油胡萝卜浓汤",
+      "recipe_id": 45571,
+      "product_id": 45571,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 798,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蜜环菌",
+          "quantity": 1,
+          "item_id": 48007,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48007
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "胡萝卜",
+          "quantity": 1,
+          "item_id": 769203,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769203
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "南瓜奶油茄子浓汤",
+      "recipe_id": 45572,
+      "product_id": 45572,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 799,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "蜜环菌",
+          "quantity": 1,
+          "item_id": 48007,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            48007
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "茄子",
+          "quantity": 1,
+          "item_id": 769403,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769403
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "冬阴功乌贼面",
+      "recipe_id": 45575,
+      "product_id": 45575,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 800,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "冬阴功酱",
+          "quantity": 1,
+          "item_id": 46155,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46155
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "乌贼",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 63,
+          "allowed_item_ids": [
+            10340,
+            10410,
+            10435,
+            10436,
+            10437
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "冬阴功无针乌贼面",
+      "recipe_id": 45576,
+      "product_id": 45576,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 801,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "冬阴功酱",
+          "quantity": 1,
+          "item_id": 46155,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46155
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "无针乌贼",
+          "quantity": 1,
+          "item_id": 10435,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            10435
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "冬阴功虎斑乌贼面",
+      "recipe_id": 45577,
+      "product_id": 45577,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 802,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "冬阴功酱",
+          "quantity": 1,
+          "item_id": 46155,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46155
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "虎斑乌贼",
+          "quantity": 1,
+          "item_id": 10436,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            10436
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "冬阴功金乌贼面",
+      "recipe_id": 45578,
+      "product_id": 45578,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 803,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "冬阴功酱",
+          "quantity": 1,
+          "item_id": 46155,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46155
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "金乌贼",
+          "quantity": 1,
+          "item_id": 10437,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            10437
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "幽林奇妙餐",
+      "recipe_id": 45579,
+      "product_id": 45579,
+      "category": "近幽集",
+      "cooker_type": 17,
+      "sort_order": 804,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "灯笼热可可",
+          "quantity": 2,
+          "item_id": null,
+          "material_group_id": 64,
+          "allowed_item_ids": [
+            45556,
+            45557,
+            45558,
+            45559,
+            45560,
+            45561,
+            45562,
+            45563,
+            45564,
+            45565,
+            45566
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "南瓜奶油浓汤",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 65,
+          "allowed_item_ids": [
+            45567,
+            45568,
+            45569,
+            45570,
+            45571,
+            45572,
+            45573,
+            45574
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "冬阴功乌贼面",
+          "quantity": 1,
+          "item_id": null,
+          "material_group_id": 66,
+          "allowed_item_ids": [
+            45575,
+            45576,
+            45577,
+            45578
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "七层大皇堡",
+      "recipe_id": 45580,
+      "product_id": 45580,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 324,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "王牌好牛",
+          "quantity": 2,
+          "item_id": 46157,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46157
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "生菜",
+          "quantity": 1,
+          "item_id": 769201,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769201
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "酱酱脆鸡翅",
+      "recipe_id": 45581,
+      "product_id": 45581,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 325,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "王牌好鸡",
+          "quantity": 3,
+          "item_id": 46156,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46156
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "食用油",
+          "quantity": 1,
+          "item_id": 46140,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46140
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "双层厚鸡堡",
+      "recipe_id": 45582,
+      "product_id": 45582,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 326,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "小麦",
+          "quantity": 2,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "王牌好鸡",
+          "quantity": 1,
+          "item_id": 46156,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46156
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "生菜",
+          "quantity": 1,
+          "item_id": 769201,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769201
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "幽幽芝士南瓜面",
+      "recipe_id": 45583,
+      "product_id": 45583,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 124,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "南瓜",
+          "quantity": 2,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "奶酪",
+          "quantity": 1,
+          "item_id": 46104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46104
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "食用油",
+          "quantity": 1,
+          "item_id": 46140,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46140
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "南瓜喵曲奇",
+      "recipe_id": 45584,
+      "product_id": 45584,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 125,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "奶酪",
+          "quantity": 1,
+          "item_id": 46104,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46104
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "怪笑南瓜挞",
+      "recipe_id": 45585,
+      "product_id": 45585,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 126,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 1,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "黄油",
+          "quantity": 1,
+          "item_id": 46105,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46105
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "小麦",
+          "quantity": 1,
+          "item_id": 769103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769103
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "幽幽南瓜朱古力",
+      "recipe_id": 45586,
+      "product_id": 45586,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 127,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "巧克力酱",
+          "quantity": 1,
+          "item_id": 45230,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45230
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "玉兔流心月饼",
+      "recipe_id": 45587,
+      "product_id": 45587,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 128,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "米粉包",
+          "quantity": 2,
+          "item_id": 46120,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46120
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "无菌蛋",
+          "quantity": 1,
+          "item_id": 46141,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46141
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "桂花酱",
+          "quantity": 1,
+          "item_id": 46158,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46158
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "桂花烤奶茶",
+      "recipe_id": 45588,
+      "product_id": 45588,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 129,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "红茶",
+          "quantity": 1,
+          "item_id": 46118,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46118
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "桂花酱",
+          "quantity": 1,
+          "item_id": 46158,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46158
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "紫悦纸杯蛋糕",
+      "recipe_id": 45589,
+      "product_id": 45589,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 327,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "巧克力酱",
+          "quantity": 1,
+          "item_id": 45230,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45230
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "柔柔纸杯蛋糕",
+      "recipe_id": 45590,
+      "product_id": 45590,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 328,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "巧克力酱",
+          "quantity": 1,
+          "item_id": 45230,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45230
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "云宝纸杯蛋糕",
+      "recipe_id": 45591,
+      "product_id": 45591,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 329,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "巧克力酱",
+          "quantity": 1,
+          "item_id": 45230,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45230
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "珍奇纸杯蛋糕",
+      "recipe_id": 45592,
+      "product_id": 45592,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 330,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "巧克力酱",
+          "quantity": 1,
+          "item_id": 45230,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45230
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "碧琪纸杯蛋糕",
+      "recipe_id": 45593,
+      "product_id": 45593,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 331,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "巧克力酱",
+          "quantity": 1,
+          "item_id": 45230,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45230
+          ],
+          "status": "confirmed"
+        }
+      ]
+    },
+    {
+      "name": "苹果嘉儿纸杯蛋糕",
+      "recipe_id": 45594,
+      "product_id": 45594,
+      "category": "日常料理",
+      "cooker_type": 1,
+      "sort_order": 332,
+      "status": "confirmed",
+      "ingredients": [
+        {
+          "name": "南瓜",
+          "quantity": 1,
+          "item_id": 769001,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            769001
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "牛奶",
+          "quantity": 2,
+          "item_id": 46103,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            46103
+          ],
+          "status": "confirmed"
+        },
+        {
+          "name": "巧克力酱",
+          "quantity": 1,
+          "item_id": 45230,
+          "material_group_id": null,
+          "allowed_item_ids": [
+            45230
+          ],
+          "status": "confirmed"
+        }
+      ]
+    }
+  ]
+}

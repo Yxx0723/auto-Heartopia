@@ -14,7 +14,7 @@ from utils.drivers.coordinate_point_store import atomic_write_json
 
 def run_stove_entry(*, window, controls, device, read_menu, read_recipe, inventory,
                     clock, report, input_gate, journal, binding, stove_ready=False,
-                    reserve=0, max_star=5, timeout=5.):
+                    reserve=0, max_star=5, timeout=5., validate_default=True):
     """Open once with top-row 1, validate default slots, then STOP before cooking.
 
     read_menu -> {state: 'ready', open: bool, scope: str}. Its producer must
@@ -101,6 +101,14 @@ def run_stove_entry(*, window, controls, device, read_menu, read_recipe, invento
                                 return dict(record)
                             finally:
                                 device.release_all()
+                        if not wait(.1):return dict(record)
+                        continue
+                    if not validate_default:
+                        evidence=(menu,view.get('selected'))
+                        if stable==evidence:
+                            save('MENU_OPEN','灶台食谱面板已确认；尚未选择料理或开始制作')
+                            return dict(record)
+                        stable=deepcopy(evidence)
                         if not wait(.1):return dict(record)
                         continue
                     bag=inventory()
