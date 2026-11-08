@@ -201,6 +201,22 @@ class SinglePotReader(CookingSelectionReader):
             raise CookingObservationUpdating('当前灶台的原生烹饪 HUD 身份尚未唯一稳定对应')
         return matches[0],stable
 
+    def _hud_callback_method(self,callback,target,owner,name):
+        """Observe the verified Mono delegate binding; never invoke its method."""
+        m=self.ui.meta;info=m.obj(callback)
+        if (info['name'],info['namespace'])!=('WidgetTrigger`1','XDTGUI.Core.Statics') \
+                or m.ref(callback,'_target')!=target or m.ref(callback,'delegates'):
+            raise CookingObservationUpdating('翻锅按钮回调不是已确认的单一绑定')
+        method=self.integer(callback,'method',24,'Q',8)
+        raw=m.data(method,32);klass=struct.unpack_from('<Q',raw,8)[0]
+        ci=m.cls(klass);token=struct.unpack_from('<I',raw,4)[0]
+        actual=m.text(struct.unpack_from('<Q',raw,24)[0])
+        if token>>24!=6 or (ci['name'],ci['namespace'],actual)!=(owner[0],owner[1],name) \
+                or self.integer(callback,'method',24,'Q',8)!=method or m.data(method,32)!=raw:
+            raise CookingObservationUpdating('翻锅按钮回调方法尚未稳定对应')
+        return {'pointer':method,'owner_type':ci['name'],'namespace':ci['namespace'],
+                'name':actual,'token':token}
+
     def hud_target(self, size, kind, expected):
         current=self.state()
         status=3 if kind=='stir' else 5 if kind=='collect' else -1
@@ -275,11 +291,41 @@ class SinglePotReader(CookingSelectionReader):
             diagnostic.update(match_stage='owner_bar',match_count=len(owner_bars),match_result='multiple')
             raise CookingObservationUpdating('事件模型对应多个灶台提示条，未选择任一控件',diagnostic)
         owner_bar=next(iter(owner_bars))
-        cell=next(iter(cells));ui=m.ref(bar_widget,'ui');matches=[]
+        cell=next(iter(cells));ui=m.ref(bar_widget,'ui');matches=[];direct_bindings=[]
+        diagnostic['ui_candidates']=[]
         for name,f in m.obj(ui)['fields'].items():
             if not name.startswith('tracking_') or not name.endswith('_list') or f['flags']&16:continue
-            group=m.ref(ui,name)
-            for icons_bar in m.list_refs(m.ref(group,'_children')):
+            group=m.ref(ui,name);group_children=m.list_refs(m.ref(group,'_children'))
+            for icons_bar in group_children:
+                wi=m.obj(icons_bar)
+                diagnostic['ui_candidates'].append({'ui_list':name,'parent_list':group,
+                    'widget':icons_bar,'type':wi['name'],'namespace':wi['namespace']})
+                # CookDanger is rendered directly by CommonTrackingBar, not
+                # inside IconsBarWidget.cells_list. This exact branch was
+                # verified against both live Danger phases and native UI IL.
+                if kind=='stir' and name=='tracking_cook_danger_list' \
+                        and (wi['name'],wi['namespace'])==('CommonIconForCookDanger','XDTGame.UI.Widget'):
+                    icon=icons_bar;iui=m.ref(icon,'ui');callback=m.ref(icon,'_clickHandler')
+                    target=m.ref(callback,'_target') if callback else None
+                    go=m.ref(iui,'<gameObject>k__BackingField');visible=m.ref(iui,'root_visible_go')
+                    active=self.layout.active(go);shown=self.layout.active(visible)
+                    row={'icon':icon,'icon_type':wi['name'],'ui_list':name,'parent_list':group,
+                        'callback_target':target,'callback_type':m.obj(target)['name'] if target else None,
+                        'event_model_match':target==cell,'root_active':active,'root_visible':shown}
+                    diagnostic['widgets'].append(row)
+                    if target!=cell or not active or not shown:continue
+                    row['callback_method']=self._hud_callback_method(callback,cell,
+                        ('CookDangerTrackCellModel','XDTGUI.Module.Track.Cells'),'TriggerOnClickByView')
+                    button=m.ref(iui,'icon_btn');button_callback=m.ref(button,'_clickHandler')
+                    self.ui.expected(button,'CustomButton','XDTGUI.View.Components')
+                    row['button_callback_method']=self._hud_callback_method(button_callback,icon,
+                        ('CommonIcon','XDTGame.UI.Widget'),'OnIconClicked')
+                    rect=self._rect(button,stack,panel,nodes,size)
+                    row.update(button=button,rect=rect,button_interactable=True)
+                    matches.append(rect)
+                    direct_bindings.append((name,group,group_children,icon,iui,callback,
+                        button,button_callback,go,visible,rect,
+                        row['callback_method'],row['button_callback_method']))
                 if m.obj(icons_bar)['name']!='IconsBarWidget':continue
                 widget_active=self.integer(icons_bar,'active',2,'B',1)==1
                 widget_shown=self.integer(icons_bar,'_show',2,'B',1)==1
@@ -324,6 +370,26 @@ class SinglePotReader(CookingSelectionReader):
             and cell in m.list_refs(m.ref(owner_bar,'_cells')) and self.integer(cell,'_valid',2,'B',1)==1)
         diagnostic['phase_stable']=(after['status'],after['status_started'])==(status,current['status_started'])
         diagnostic['binding_stable']=all(diagnostic[k] for k in ('mapping_stable','ui_stack_stable','bars_stable','model_binding_stable','phase_stable'))
+        if direct_bindings:
+            def direct_stable(binding):
+                (name,group,children,icon,iui,callback,button,button_callback,
+                    go,visible,rect,callback_method,button_method)=binding
+                return (m.ref(bar_widget,'ui')==ui and m.ref(ui,name)==group
+                    and m.list_refs(m.ref(group,'_children'))==children and m.ref(icon,'ui')==iui
+                    and m.ref(icon,'_clickHandler')==callback and m.ref(callback,'_target')==cell
+                    and m.ref(iui,'icon_btn')==button and m.ref(button,'_clickHandler')==button_callback
+                    and m.ref(button_callback,'_target')==icon
+                    and m.ref(iui,'<gameObject>k__BackingField')==go and self.layout.active(go)
+                    and m.ref(iui,'root_visible_go')==visible and self.layout.active(visible)
+                    and self._hud_callback_method(callback,cell,
+                        ('CookDangerTrackCellModel','XDTGUI.Module.Track.Cells'),'TriggerOnClickByView')
+                        ==callback_method
+                    and self._hud_callback_method(button_callback,icon,
+                        ('CommonIcon','XDTGame.UI.Widget'),'OnIconClicked')
+                        ==button_method
+                    and self._rect(button,stack,panel,nodes,size)==rect)
+            diagnostic['direct_widget_binding_stable']=all(direct_stable(b) for b in direct_bindings)
+            diagnostic['binding_stable'] &= diagnostic['direct_widget_binding_stable']
         if len(matches)!=1 or not diagnostic['binding_stable']:
             raise CookingObservationUpdating('当前翻锅或收菜控件未唯一稳定绑定',diagnostic)
         return {'kind':kind,'rect':matches[0],'stove_identity':current['stove_identity'],
