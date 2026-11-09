@@ -9,6 +9,27 @@ from utils.core.scene_read import SceneReadIssue
 from utils.core.map_targeting import MapLayoutUpdating
 from utils.drivers.coordinate_point_store import atomic_write_json
 from utils.drivers.cooking_single_pot import CookingObservationUpdating
+from utils.drivers.cooking_mouse_diagnostics import begin_move, execute_move, finish_move
+from utils.drivers.cooking_alt_interaction import cooking_alt, release_cooking_inputs
+from utils.drivers.cooking_click_diagnostics import ClickDiagnostics, danger_timing, now
+from utils.drivers.cooking_ui_click_ack import CookingUiClickAck
+
+
+def collect_with_key(*, reader, state, guard, device, wait, reserve):
+    """One main-row 1 input for the same owned Succeed phase; never retry."""
+    guard()
+    fresh=reader.state()
+    if fresh!=state or fresh['status']!=5 or fresh['owner_net_id']!=fresh['local_net_id']:
+        raise ValueError('收菜锅次或归属改变，未发送数字1')
+    reserve()
+    guard()
+    try:
+        device.execute({'type':'key_down','key':'1'})
+        wait(.04)
+    finally:
+        # Explicit key-up before general cleanup, including F9/focus failures.
+        try:device.execute({'type':'key_up','key':'1'})
+        finally:release_cooking_inputs(device)
 
 
 def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock, report, journal):
@@ -16,7 +37,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
     record={'schema':'cooking-single-pot-v1','pot_id':uuid4().hex,'recipe_id':recipe['recipe_id'],
             'product_id':recipe['product_id'],'recipe_name':recipe['name'],'state':'checking',
             'started_pots':0,'confirmed_products':0}
-    task_deadline=clock.monotonic()+600.; stock_scope=None
+    task_deadline=clock.monotonic()+600.; stock_scope=None;alt_interaction_active=False;danger_times={}
     def save(state,message,**extra):
         record.update(state=state,message=message,**events.record(),**extra)
         atomic_write_json(journal,record)
@@ -43,7 +64,8 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             guard()
             try:return source()
             except (SceneReadIssue,MapLayoutUpdating,CookingObservationUpdating,OSError) as exc:
-                device.release_all()
+                release_cooking_inputs(device)
+                if alt_interaction_active:raise
                 if isinstance(exc,SceneReadIssue) and exc.kind not in ('invalid_reference','mutation'):
                     raise
                 if clock.monotonic()>=until:raise
@@ -54,29 +76,74 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
         if stock_scope is None:stock_scope=value['scope']
         if value['scope']!=stock_scope:raise ValueError('本锅背包归属改变')
         return value
-    def click(read_target, before_input=None):
+    def click(read_target, before_input=None, *, hold_alt=False):
+        nonlocal alt_interaction_active
+        if not hold_alt:
+            return click_body(read_target,before_input)
+        initial=read(read_target)
+        try:
+            with cooking_alt(device,window,guard,wait,report):
+                alt_interaction_active=True
+                return click_body(read_target,before_input,initial)
+        finally:alt_interaction_active=False
+    def click_body(read_target, before_input=None, expected=None):
         def same_target(a,b):
             return ({k:v for k,v in a.items() if k!='rect'}=={k:v for k,v in b.items() if k!='rect'}
                     and len(a['rect'])==len(b['rect'])==4
                     and max(abs(x-y) for x,y in zip(a['rect'],b['rect']))<=1.5)
         target=read(read_target);wait(.04);fresh=read(read_target)
+        if expected is not None and {k:v for k,v in target.items() if k!='rect'}!={k:v for k,v in expected.items() if k!='rect'}:
+            raise ValueError('按下 ALT 后翻锅事件或按钮身份变化，未移动或点击')
         if not same_target(fresh,target):raise ValueError('烹饪交互目标在点击前变化，未发送点击')
         target=fresh
         rect=target['rect'];l,t,r,b=rect
         if not 0<=l<r<=size[0] or not 0<=t<b<=size[1]:
             raise ValueError('烹饪交互控件不在可见客户区内')
         point=(round((l+r)/2),round((t+b)/2))
-        guard();device.execute({'type':'cursor_move','x':point[0],'y':point[1]})
+        guard();mouse_diagnostic=begin_move(window,point)
+        try:execute_move(device,{'type':'cursor_move','x':point[0],'y':point[1]},mouse_diagnostic)
+        except Exception:
+            report('mouse_diagnostic','鼠标移动调用异常，未派发本次点击',mouse_diagnostic=mouse_diagnostic)
+            raise
         wait(.02);pointer=window.pointer()
+        mouse_diagnostic=finish_move(window,point,pointer,mouse_diagnostic,size)
+        report('mouse_diagnostic','烹饪鼠标到位诊断',mouse_diagnostic=mouse_diagnostic)
         if len(pointer)!=3 or not pointer[2] or math.dist(pointer[:2],point)>2:
             raise ValueError('鼠标未到达实际烹饪控件，未点击')
         if not same_target(read(read_target),target):raise ValueError('烹饪控件绑定在派发前改变')
         guard()
         if before_input:before_input()
         guard()
-        try:
-            device.execute({'type':'mouse_down','button':'left'});wait(.04)
-        finally:device.release_all()
+        if expected is not None:
+            ui_ack=CookingUiClickAck(reader,target)
+            diagnostic=ClickDiagnostics(device,window,danger_times.get(target.get('event_id')))
+            diagnostic.data['ui_click_before']=ui_ack.before
+            try:
+                with diagnostic:
+                    try:
+                        device.execute({'type':'mouse_down','button':'left'});wait(.04)
+                        device.execute({'type':'mouse_up','button':'left'})
+                        diagnostic.data['mouse_up_returned_at']=now()
+                        ack_until=clock.monotonic()+1.
+                        while True:
+                            guard();sample=ui_ack.observe()
+                            diagnostic.data['ui_click_after']=sample
+                            if sample['last_click_time']>ui_ack.before['last_click_time']:
+                                diagnostic.data['ui_first_update_observed_at']=sample['observed_at']
+                                diagnostic.data['ui_click_confirmed']=True
+                                break
+                            if sample['last_click_time']<ui_ack.before['last_click_time']:
+                                raise ValueError('原按钮点击时钟回退，未重试点击')
+                            if clock.monotonic()>=ack_until:
+                                diagnostic.data['ui_click_confirmed']=False
+                                raise ValueError('左键已释放但 UI 在限定时间内未确认点击，已停止且不重复点击')
+                            wait(.01)
+                    finally:release_cooking_inputs(device)
+            finally:report('stir_left_diagnostic','翻锅左键原始派发诊断；游戏确认另行核对',left_diagnostic=diagnostic.data)
+        else:
+            try:
+                device.execute({'type':'mouse_down','button':'left'});wait(.04)
+            finally:release_cooking_inputs(device)
     def await_slots(predicate,seconds=2.):
         end=clock.monotonic()+seconds
         while clock.monotonic()<end:
@@ -142,9 +209,14 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             save('start_reserved','启动单锅操作已登记，等待游戏确认，不重发',
                  inventory_scope=latest['scope'],inventory_before=deepcopy(latest['counts']),material_slots=now_view['slots'])
         click(lambda:reader.menu_target(size,'start'),reserve_start)
-        start_at=clock.monotonic();collect_at=None;last_signature=None
+        start_at=clock.monotonic();collect_at=None;last_signature=None;observed_phase=None
         while True:
             state=read(reader.state)
+            if state['status']==3 and str(state['status_started']) not in danger_times:
+                danger_times[str(state['status_started'])]=danger_timing(state)
+            if (state['status'],state['status_started'])!=observed_phase:
+                report('native_observation','烹饪原始状态观测',native_state=state)
+                observed_phase=(state['status'],state['status_started'])
             action=events.observe(state)
             if events.cooking_seen:
                 record['started_pots']=1
@@ -163,7 +235,13 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                     events.reserve(kind,key)
                     save(kind+'_reserved','翻锅事件已登记，等待解除确认' if kind=='stir' else '游戏已成功完成，收菜操作已登记',
                          native_state=fresh,hud_diagnostics=getattr(reader,'hud_diagnostics',None))
-                click(lambda:reader.hud_target(size,kind,state),reserve_action)
+                if kind=='collect':
+                    collect_with_key(reader=reader,state=state,guard=guard,device=device,
+                                     wait=wait,reserve=reserve_action)
+                    report('collect_key_dispatched','主键区数字1已派发一次，等待灶台复位及背包增量',
+                           native_state=state,key='1',repeat=False)
+                else:
+                    click(lambda:reader.hud_target(size,kind,state),reserve_action,hold_alt=kind=='stir')
                 if kind=='collect':collect_at=clock.monotonic()
             if collect_at is not None:
                 if state['status']==0:
@@ -180,4 +258,4 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
              hud_diagnostics=getattr(exc,'diagnostics',None) or getattr(reader,'hud_diagnostics',None))
         raise
     finally:
-        device.release_all()
+        release_cooking_inputs(device)

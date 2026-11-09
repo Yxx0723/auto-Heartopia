@@ -291,7 +291,7 @@ class SinglePotReader(CookingSelectionReader):
             diagnostic.update(match_stage='owner_bar',match_count=len(owner_bars),match_result='multiple')
             raise CookingObservationUpdating('事件模型对应多个灶台提示条，未选择任一控件',diagnostic)
         owner_bar=next(iter(owner_bars))
-        cell=next(iter(cells));ui=m.ref(bar_widget,'ui');matches=[];direct_bindings=[]
+        cell=next(iter(cells));ui=m.ref(bar_widget,'ui');matches=[];direct_bindings=[];collect_bindings=[]
         diagnostic['ui_candidates']=[]
         for name,f in m.obj(ui)['fields'].items():
             if not name.startswith('tracking_') or not name.endswith('_list') or f['flags']&16:continue
@@ -344,6 +344,34 @@ class SinglePotReader(CookingSelectionReader):
                     if target!=cell and target_type not in ('CookDangerTrackCellModel','CookResultTrackCellModel'):continue
                     iui=m.ref(icon,'ui');visible=m.ref(iui,'root_visible_go')
                     root_visible=self.layout.active(visible)
+                    # Live Succeed uses CommonIconForInteract in the common
+                    # list. IconsBarWidget._show remains false even while its
+                    # instantiated result icon is visible; verify the actual
+                    # native icon and button instead of that presentation flag.
+                    if kind=='collect' and name=='tracking_common_list' \
+                            and (m.obj(icon)['name'],m.obj(icon)['namespace'])==('CommonIconForInteract','XDTGame.UI.Widget'):
+                        go=m.ref(iui,'<gameObject>k__BackingField')
+                        active=self.layout.active(go)
+                        row={'icon':icon,'icon_type':m.obj(icon)['name'],'ui_list':name,
+                            'callback_target':target,'callback_type':target_type,'event_model_match':target==cell,
+                            'bar_active':widget_active,'bar_shown':widget_shown,'root_active':active,
+                            'root_visible':root_visible,'level_object_id':current['level_object_id'],
+                            'hud_cook_net_id':hud_net_id}
+                        diagnostic['widgets'].append(row)
+                        if target!=cell or not widget_active or not active or not root_visible:continue
+                        method=self._hud_callback_method(callback,cell,
+                            ('CookResultTrackCellModel','XDTGUI.Module.Track.Cells'),'TriggerOnClickByView')
+                        button=m.ref(iui,'icon_btn');self.ui.expected(button,'CustomButton','XDTGUI.View.Components')
+                        button_callback=m.ref(button,'_clickHandler')
+                        button_method=self._hud_callback_method(button_callback,icon,
+                            ('CommonIcon','XDTGame.UI.Widget'),'OnIconClicked')
+                        rect=self._rect(button,stack,panel,nodes,size)
+                        row.update(button=button,rect=rect,button_interactable=True,
+                            callback_method=method,button_callback_method=button_method)
+                        matches.append(rect)
+                        collect_bindings.append((group,group_children,icons_bar,bui,children,
+                            icon,iui,callback,button,button_callback,go,visible,rect,method,button_method))
+                        continue
                     diagnostic['widgets'].append({'icon':icon,'icon_type':m.obj(icon)['name'],'ui_list':name,
                         'callback_target':target,'callback_type':target_type,'event_model_match':target==cell,
                         'bar_active':widget_active,'bar_shown':widget_shown,'root_visible':root_visible,
@@ -390,6 +418,27 @@ class SinglePotReader(CookingSelectionReader):
                     and self._rect(button,stack,panel,nodes,size)==rect)
             diagnostic['direct_widget_binding_stable']=all(direct_stable(b) for b in direct_bindings)
             diagnostic['binding_stable'] &= diagnostic['direct_widget_binding_stable']
+        if collect_bindings:
+            def collect_stable(binding):
+                (group,group_children,bar,bui,children,icon,iui,callback,button,
+                    button_callback,go,visible,rect,method,button_method)=binding
+                return (m.ref(bar_widget,'ui')==ui and m.ref(ui,'tracking_common_list')==group
+                    and m.list_refs(m.ref(group,'_children'))==group_children
+                    and m.ref(bar,'ui')==bui and self.integer(bar,'active',2,'B',1)==1
+                    and m.list_refs(m.ref(m.ref(bui,'cells_list'),'_children'))==children
+                    and m.ref(icon,'ui')==iui and m.ref(icon,'_clickHandler')==callback
+                    and m.ref(callback,'_target')==cell and m.ref(iui,'icon_btn')==button
+                    and m.ref(button,'_clickHandler')==button_callback
+                    and m.ref(button_callback,'_target')==icon
+                    and m.ref(iui,'<gameObject>k__BackingField')==go and self.layout.active(go)
+                    and m.ref(iui,'root_visible_go')==visible and self.layout.active(visible)
+                    and self._hud_callback_method(callback,cell,
+                        ('CookResultTrackCellModel','XDTGUI.Module.Track.Cells'),'TriggerOnClickByView')==method
+                    and self._hud_callback_method(button_callback,icon,
+                        ('CommonIcon','XDTGame.UI.Widget'),'OnIconClicked')==button_method
+                    and self._rect(button,stack,panel,nodes,size)==rect)
+            diagnostic['collect_widget_binding_stable']=all(collect_stable(b) for b in collect_bindings)
+            diagnostic['binding_stable'] &= diagnostic['collect_widget_binding_stable']
         if len(matches)!=1 or not diagnostic['binding_stable']:
             raise CookingObservationUpdating('当前翻锅或收菜控件未唯一稳定绑定',diagnostic)
         return {'kind':kind,'rect':matches[0],'stove_identity':current['stove_identity'],
