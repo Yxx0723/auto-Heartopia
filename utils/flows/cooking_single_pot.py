@@ -37,7 +37,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
     record={'schema':'cooking-single-pot-v1','pot_id':uuid4().hex,'recipe_id':recipe['recipe_id'],
             'product_id':recipe['product_id'],'recipe_name':recipe['name'],'state':'checking',
             'started_pots':0,'confirmed_products':0}
-    task_deadline=clock.monotonic()+600.; stock_scope=None;alt_interaction_active=False;danger_times={}
+    task_deadline=clock.monotonic()+600.; stock_scope=None;alt_interaction_active=False;danger_times={};pending_ack=None;ack_succeeded=False
     def save(state,message,**extra):
         record.update(state=state,message=message,**events.record(),**extra)
         atomic_write_json(journal,record)
@@ -77,16 +77,28 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
         if value['scope']!=stock_scope:raise ValueError('本锅背包归属改变')
         return value
     def click(read_target, before_input=None, *, hold_alt=False):
-        nonlocal alt_interaction_active
+        nonlocal alt_interaction_active,pending_ack,ack_succeeded
         if not hold_alt:
             return click_body(read_target,before_input)
+        pending_ack=None;ack_succeeded=False
         initial=read(read_target)
         try:
             with cooking_alt(device,window,guard,wait,report):
                 alt_interaction_active=True
                 return click_body(read_target,before_input,initial)
-        finally:alt_interaction_active=False
+        finally:
+            alt_interaction_active=False
+            if pending_ack is not None:
+                try:
+                    held_buttons=getattr(device,'buttons',None)
+                    held_keys=getattr(device,'keys',None)
+                    inputs_released=(isinstance(held_buttons,(set,frozenset)) and
+                        isinstance(held_keys,(set,frozenset)) and not held_buttons and not held_keys)
+                    report('ack_post_diagnostic','UI 确认事后诊断；原输入清理已执行',
+                        ack_diagnostic=pending_ack.finalize(failed=not ack_succeeded and inputs_released))
+                except Exception:pass
     def click_body(read_target, before_input=None, expected=None):
+        nonlocal pending_ack,ack_succeeded
         def same_target(a,b):
             return ({k:v for k,v in a.items() if k!='rect'}=={k:v for k,v in b.items() if k!='rect'}
                     and len(a['rect'])==len(b['rect'])==4
@@ -118,6 +130,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             ui_ack=CookingUiClickAck(reader,target)
             diagnostic=ClickDiagnostics(device,window,danger_times.get(target.get('event_id')))
             diagnostic.data['ui_click_before']=ui_ack.before
+            pending_ack=ui_ack;ack_succeeded=False
             try:
                 with diagnostic:
                     try:
@@ -131,6 +144,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                             if sample['last_click_time']>ui_ack.before['last_click_time']:
                                 diagnostic.data['ui_first_update_observed_at']=sample['observed_at']
                                 diagnostic.data['ui_click_confirmed']=True
+                                ack_succeeded=True
                                 break
                             if sample['last_click_time']<ui_ack.before['last_click_time']:
                                 raise ValueError('原按钮点击时钟回退，未重试点击')
