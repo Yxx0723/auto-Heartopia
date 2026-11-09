@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+from types import SimpleNamespace
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from utils.core.coordinate_monitor_view import MonitorView
@@ -525,15 +526,13 @@ class CoordinateWindow:
                                          color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1,
                                          wraplength=360, justify='left')
         self.playback_label.pack(fill='x', pady=(6, 0))
-        footer = self.frame(body)
-        footer.grid(row=2, column=0, sticky='ew', pady=(5, 0))
-        self.label(footer, '路线自动保存至程序旁「点位」文件夹。', color='muted', font=('Microsoft YaHei UI', -10)).pack(anchor='w')
-        self.hint = self.label(footer, '切换场景后请等待重新连接', color='muted', font=('Microsoft YaHei UI', -10))
-        self.hint.pack(anchor='w')
+        # Keep existing status-update calls valid without a footer or text widget.
+        self._hint_state={}
+        self.hint=SimpleNamespace(configure=self._hint_state.update)
         self.save_point_button.configure(state='disabled')
         self.play_button.configure(state='disabled')
         self.stop_button.configure(state='disabled')
-        self.map_expand_widgets = (lower_panel, footer)
+        self.map_expand_widgets = (lower_panel,)
         self.expanded_status = self.label(plotcard, textvariable=self.fields['playback'],
             color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1)
         self.expanded_status.grid(row=4, column=0, sticky='ew', padx=14, pady=6)
