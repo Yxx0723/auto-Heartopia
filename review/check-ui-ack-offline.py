@@ -1,6 +1,6 @@
 from pathlib import Path
-import sys,ast,textwrap,types,math,json
-root=Path(__file__).parent.parent/'collection-plan-20261106';sys.path.insert(0,str(root))
+import sys,ast,textwrap,types,math,json,os,subprocess,hashlib,argparse
+root=Path(__file__).resolve().parents[1];sys.path.insert(0,str(root))
 from utils.drivers.windows_input import WindowsInput
 from utils.drivers.town_window import TimelineInput
 from utils.drivers.cooking_click_diagnostics import ClickDiagnostics,now
@@ -110,6 +110,26 @@ def check_diagnostic_values():
         assert tagged['original_type']=='float' and tagged['meaning']==meaning
         assert a.raw_observations[0][2][0][1] is value
         assert r['confirmation_observed_values'][0]['error']['message']=='business error'
+    import utils.drivers.cooking_ui_click_ack as module
+    original_dumps=module.json.dumps
+    def failed_encoder(*args,**kwargs):raise TypeError('injected JSON encoder failure')
+    try:
+        module.json.dumps=failed_encoder
+        raw_reads=[('last_click_time',float('nan'),None,0.001)]
+        a.raw_observations=[(0.,0.01,raw_reads,None)]
+        minimal=a.finalize()
+        assert a.raw_observations[0][2] is raw_reads and math.isnan(raw_reads[0][1])
+        assert minimal['event_id']=='E'
+        assert minimal['state']=='diagnostic_encoding_failed'
+        assert minimal['diagnostic_serialization_errors'][0]['error_type']=='TypeError'
+        assert minimal['diagnostic_serialization_errors'][0]['error']=='injected JSON encoder failure'
+        try:
+            try:raise ValueError('original business exception')
+            finally:a.finalize()
+        except ValueError as exc:assert str(exc)=='original business exception'
+        else:raise AssertionError('original business exception lost')
+    finally:module.json.dumps=original_dumps
+    json.dumps(minimal,allow_nan=False)
     raw={'finite':1.25,'unsupported':object()};safe,errors=_diagnostic_json_copy(raw)
     assert safe['finite']==1.25 and errors and raw['unsupported'] is not safe['unsupported']
     cycle=[];cycle.append(cycle);safe,errors=_diagnostic_json_copy(cycle);assert errors;json.dumps(safe,allow_nan=False)
@@ -182,10 +202,12 @@ def check_boundaries(original_class):
         for update in (.90,.95,.99,.995,1.,1.05):
             a,b=run(original_class,cost,update),run(CookingUiClickAck,cost,update)
             assert a==b,(cost,update,a,b)
-            results.append({'cost_ms':cost*1000,'update_at':update,'result':a[0],'end':a[1],'read_calls':len(a[2]),'passed':True})
+            results.append({'cost_ms':cost*1000,'update_at':update,'a':{'result':a[0],'end':a[1],'read_sequence':a[2]},'b':{'result':b[0],'end':b[1],'read_sequence':b[2]},'passed':True})
     return results
 
 if __name__=='__main__':
+    try:subprocess.check_output(['git','-C',str(root),'cat-file','-e',BASELINE+'^{commit}'],stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as exc:raise RuntimeError('Required baseline commit missing: '+BASELINE) from exc
     original={}
     source=subprocess.check_output(['git','-C',str(root),'show',BASELINE+':utils/drivers/cooking_ui_click_ack.py']).decode('utf-8')
     exec(source,original)
@@ -197,6 +219,10 @@ if __name__=='__main__':
     ev=SinglePotEvents({'product_id':45557});ev.started=True
     state={'status':3,'status_started':1,'previous_status':2,'owner_net_id':1,'local_net_id':1,'food_id':45557}
     assert ev.observe(state)==('stir','1');ev.reserve('stir','1');assert ev.observe(state) is None
-    result={'baseline':BASELINE,'input_chain_ab':b,'diagnostic_values':check_diagnostic_values(),'callback_cases':check_callbacks(),'boundaries':check_boundaries(original['CookingUiClickAck']),'danger_dedup_passed':True}
+    result={'baseline':BASELINE,'input_chain_a':a,'input_chain_b':b,'input_chain_comparisons':[{'case':x['case'],'equal':x==y} for x,y in zip(a,b)],'diagnostic_values':check_diagnostic_values(),'callback_cases':check_callbacks(),'boundaries':check_boundaries(original['CookingUiClickAck']),'danger_dedup_passed':True}
     print(json.dumps({'baseline':BASELINE,'input_chain_cases':len(b),'callback_cases':len(result['callback_cases']),'boundary_cases':len(result['boundaries']),'diagnostic_values':result['diagnostic_values'],'danger_dedup_passed':True},indent=2))
-    (Path(__file__).parent/'ui-ack-offline-results.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
+    result['tested_sources']={name:hashlib.sha256((root/name).read_bytes()).hexdigest() for name in ('utils/drivers/cooking_ui_click_ack.py','utils/flows/cooking_single_pot.py')}
+    result['script_sha256']=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    result['encoder_fault_injection_passed']=True
+    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,default=Path(__file__).parent/'ui-ack-offline-results.json');args=parser.parse_args()
+    args.output.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
