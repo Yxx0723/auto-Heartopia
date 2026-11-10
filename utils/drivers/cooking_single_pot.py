@@ -217,11 +217,14 @@ class SinglePotReader(CookingSelectionReader):
         return {'pointer':method,'owner_type':ci['name'],'namespace':ci['namespace'],
                 'name':actual,'token':token}
 
-    def hud_target(self, size, kind, expected):
+    def hud_target(self, size, kind, expected, *, _revalidate=None):
         current=self.state()
         status=3 if kind=='stir' else 5 if kind=='collect' else -1
         if current['status']!=status or current['status_started']!=expected['status_started']:
             raise ValueError('翻锅或收菜原生事件已经变化')
+        if kind=='stir' and _revalidate is None:
+            guard_key=(current['scope'],tuple(current['stove_identity']),str(current['status_started']))
+            _revalidate=getattr(self,'_danger_revalidated_context',{}).get(guard_key)
         m=self.ui.meta;stack=self.ui.ui_views()
         panels=[p for p in stack[3] if (m.obj(p)['name'],m.obj(p)['namespace'])==('TrackingPanel','XDTGame.UI.Panel')]
         if len(panels)!=1 or any(m.obj(p)['name']=='CookPanel' for p in stack[3]):
@@ -240,6 +243,8 @@ class SinglePotReader(CookingSelectionReader):
                     'burner_raw_net_id':self.entity_net(self.bound[5]),
                     'mapping_source':'TrackModule._levelObjectNetIdToEntityNetId',
                     'bar_count':len(bars),'candidates':[],'widgets':[]}
+        if _revalidate is not None and _revalidate.get('record'):
+            diagnostic['callback_revalidation']=_revalidate['record']
         wanted='CookDangerTrackCellModel' if kind=='stir' else 'CookResultTrackCellModel'
         for bar in bars:
             info=m.obj(bar);bar_type=info['name'];visible=self.integer(bar,'_visible',2,'B',1)==1
@@ -291,7 +296,11 @@ class SinglePotReader(CookingSelectionReader):
             diagnostic.update(match_stage='owner_bar',match_count=len(owner_bars),match_result='multiple')
             raise CookingObservationUpdating('事件模型对应多个灶台提示条，未选择任一控件',diagnostic)
         owner_bar=next(iter(owner_bars))
-        cell=next(iter(cells));ui=m.ref(bar_widget,'ui');matches=[];direct_bindings=[];collect_bindings=[]
+        cell=next(iter(cells))
+        danger_token=self.integer(cell,'<token>k__BackingField') if kind=='stir' else None
+        if _revalidate is not None and (current!=_revalidate['native'] or cell!=_revalidate['model'] or danger_token!=_revalidate['token']):
+            raise ValueError('回调重新验证时灶台、Danger 或 Token 已改变，未点击')
+        ui=m.ref(bar_widget,'ui');matches=[];direct_bindings=[];collect_bindings=[]
         diagnostic['ui_candidates']=[]
         for name,f in m.obj(ui)['fields'].items():
             if not name.startswith('tracking_') or not name.endswith('_list') or f['flags']&16:continue
@@ -310,7 +319,7 @@ class SinglePotReader(CookingSelectionReader):
                     go=m.ref(iui,'<gameObject>k__BackingField');visible=m.ref(iui,'root_visible_go')
                     active=self.layout.active(go);shown=self.layout.active(visible)
                     row={'icon':icon,'icon_type':wi['name'],'ui_list':name,'parent_list':group,
-                        'callback_target':target,'callback_type':m.obj(target)['name'] if target else None,
+                        'callback_address':callback,'callback_target':target,'callback_type':m.obj(target)['name'] if target else None,
                         'event_model_match':target==cell,'root_active':active,'root_visible':shown}
                     diagnostic['widgets'].append(row)
                     if target!=cell or not active or not shown:continue
@@ -399,24 +408,123 @@ class SinglePotReader(CookingSelectionReader):
         diagnostic['phase_stable']=(after['status'],after['status_started'])==(status,current['status_started'])
         diagnostic['binding_stable']=all(diagnostic[k] for k in ('mapping_stable','ui_stack_stable','bars_stable','model_binding_stable','phase_stable'))
         if direct_bindings:
+            diagnostic['direct_binding_checks']=[]
+            diagnostic['direct_binding_failed_fields']=[]
+            diagnostic['direct_binding_before']=[]
+            diagnostic['direct_binding_after']=[]
+            class CallbackChanged(Exception):pass
             def direct_stable(binding):
                 (name,group,children,icon,iui,callback,button,button_callback,
                     go,visible,rect,callback_method,button_method)=binding
-                return (m.ref(bar_widget,'ui')==ui and m.ref(ui,name)==group
-                    and m.list_refs(m.ref(group,'_children'))==children and m.ref(icon,'ui')==iui
-                    and m.ref(icon,'_clickHandler')==callback and m.ref(callback,'_target')==cell
-                    and m.ref(iui,'icon_btn')==button and m.ref(button,'_clickHandler')==button_callback
-                    and m.ref(button_callback,'_target')==icon
-                    and m.ref(iui,'<gameObject>k__BackingField')==go and self.layout.active(go)
-                    and m.ref(iui,'root_visible_go')==visible and self.layout.active(visible)
-                    and self._hud_callback_method(callback,cell,
-                        ('CookDangerTrackCellModel','XDTGUI.Module.Track.Cells'),'TriggerOnClickByView')
-                        ==callback_method
-                    and self._hud_callback_method(button_callback,icon,
-                        ('CommonIcon','XDTGame.UI.Widget'),'OnIconClicked')
-                        ==button_method
-                    and self._rect(button,stack,panel,nodes,size)==rect)
-            diagnostic['direct_widget_binding_stable']=all(direct_stable(b) for b in direct_bindings)
+                if _revalidate is not None:
+                    witness=(name,group,children,icon,iui,button,button_callback,go,visible,rect,callback_method,button_method)
+                    if witness!=_revalidate['witness'] or callback!=_revalidate['new_callback']:
+                        raise ValueError('回调重新验证期间控件身份、位置或回调再次变化，未点击')
+                checks=[
+                    ('bar_widget.ui',ui,lambda:m.ref(bar_widget,'ui')),
+                    ('ui.'+name,group,lambda:m.ref(ui,name)),
+                    ('group._children',children,lambda:m.list_refs(m.ref(group,'_children'))),
+                    ('icon.ui',iui,lambda:m.ref(icon,'ui')),
+                    ('icon._clickHandler',callback,lambda:m.ref(icon,'_clickHandler')),
+                    ('icon_callback._target',cell,lambda:m.ref(callback,'_target')),
+                    ('ui.icon_btn',button,lambda:m.ref(iui,'icon_btn')),
+                    ('button._clickHandler',button_callback,lambda:m.ref(button,'_clickHandler')),
+                    ('button_callback._target',icon,lambda:m.ref(button_callback,'_target')),
+                    ('ui.gameObject',go,lambda:m.ref(iui,'<gameObject>k__BackingField')),
+                    ('gameObject.active',True,lambda:self.layout.active(go)),
+                    ('ui.root_visible_go',visible,lambda:m.ref(iui,'root_visible_go')),
+                    ('root_visible_go.active',True,lambda:self.layout.active(visible)),
+                    ('icon_callback.method',callback_method,lambda:self._hud_callback_method(callback,cell,
+                        ('CookDangerTrackCellModel','XDTGUI.Module.Track.Cells'),'TriggerOnClickByView')),
+                    ('button_callback.method',button_method,lambda:self._hud_callback_method(button_callback,icon,
+                        ('CommonIcon','XDTGame.UI.Widget'),'OnIconClicked')),
+                    ('button.rect',rect,lambda:self._rect(button,stack,panel,nodes,size)),
+                ]
+                before={'icon':icon,'ui_list':name,'values':{}}
+                after_values={'icon':icon,'ui_list':name,'values':{}}
+                diagnostic['direct_binding_before'].append(before)
+                diagnostic['direct_binding_after'].append(after_values)
+                first_error=None;passed=True
+                for field,original,read_value in checks:
+                    row={'icon':icon,'ui_list':name,'field':field,'before':original}
+                    before['values'][field]=original
+                    try:
+                        value=read_value()
+                        if field=='icon._clickHandler' and value!=original:
+                            raise CallbackChanged(binding,value)
+                        equal=value==original  # Strict equality, including rectangle and list order.
+                        row.update(after=value,equal=equal)
+                        after_values['values'][field]=value
+                        if field=='button.rect':
+                            row['max_coordinate_delta']=max(abs(a-b) for a,b in zip(original,value))
+                        if field=='group._children':
+                            from collections import Counter
+                            old_counts,new_counts=Counter(original),Counter(value)
+                            row.update(added=list((new_counts-old_counts).elements()),
+                                removed=list((old_counts-new_counts).elements()),
+                                order_changed=old_counts==new_counts and value!=original)
+                    except CallbackChanged:raise
+                    except Exception as exc:
+                        if first_error is None:first_error=exc
+                        row.update(equal=False,after={'state':'unavailable'},
+                            error={'type':type(exc).__name__,'message':str(exc),
+                                   'stage':'direct_stable.'+field})
+                        after_values['values'][field]={'state':'unavailable','error':row['error']}
+                    diagnostic['direct_binding_checks'].append(row)
+                    if not row['equal']:
+                        passed=False
+                        diagnostic['direct_binding_failed_fields'].append({'icon':icon,'ui_list':name,'field':field})
+                if first_error is not None:
+                    diagnostic['direct_widget_binding_stable']=False
+                    diagnostic['binding_stable']=False
+                    # Retain the original read exception; diagnostics cannot authorize a click.
+                    raise first_error
+                return passed
+            try:
+                diagnostic['direct_widget_binding_stable']=all(direct_stable(b) for b in direct_bindings)
+            except CallbackChanged as changed:
+                binding,new_callback=changed.args
+                (name,group,children,icon,iui,old_callback,button,button_callback,
+                    go,visible,rect,method,button_method)=binding
+                key=(current['scope'],tuple(current['stove_identity']),str(current['status_started']))
+                used=getattr(self,'_danger_revalidation_used',set())
+                self._danger_revalidation_used=used
+                record={'event_id':str(current['status_started']),'icon':icon,'button':button,'model':cell,
+                    'old_callback':old_callback,'new_callback':new_callback,'token':danger_token,
+                    'passed':False,'allow_dispatch':False}
+                diagnostic['callback_revalidation']=record
+                if len(matches)!=1 or not diagnostic['binding_stable']:
+                    record['stop_reason']='original scene/model/UI checks failed'
+                    raise ValueError('回调换址时原有身份安全检查未通过，未点击')
+                if _revalidate is not None or key in used:
+                    record['stop_reason']='same Danger revalidation budget exhausted'
+                    raise ValueError('同一 Danger 回调再次变化，已停止且未点击')
+                used.add(key)
+                context={'native':current,'model':cell,'token':danger_token,'new_callback':new_callback,
+                    'witness':(name,group,children,icon,iui,button,button_callback,go,visible,rect,method,button_method)}
+                try:
+                    result=self.hud_target(size,kind,expected,_revalidate=context)
+                    fresh=self.hud_diagnostics
+                    record.update(new_target=cell,new_method=method,
+                        address_recheck=m.ref(icon,'_clickHandler'))
+                    if (record['address_recheck']!=new_callback or self.state()!=current
+                            or self.integer(cell,'<token>k__BackingField')!=danger_token
+                            or self.integer(cell,'_valid',2,'B',1)!=1):
+                        raise ValueError('回调重新验证后引用或 Danger 再次变化，未点击')
+                    record.update(passed=True,allow_dispatch=True,stop_reason=None)
+                    fresh['callback_revalidation']=record
+                    contexts=getattr(self,'_danger_revalidated_context',{})
+                    context['record']=record
+                    contexts[key]=context;self._danger_revalidated_context=contexts
+                    return result
+                except Exception as exc:
+                    rows=self.hud_diagnostics.get('widgets',[])
+                    observed=next((row for row in rows if row.get('icon')==icon and row.get('callback_address')==new_callback),{})
+                    record.update(new_target=observed.get('callback_target',{'state':'unavailable'}),
+                        new_method=observed.get('callback_method',{'state':'unavailable'}),
+                        stop_reason=str(exc),error_type=type(exc).__name__)
+                    self.hud_diagnostics['callback_revalidation']=record
+                    raise ValueError('回调只读重新验证失败，未点击：'+str(exc)) from exc
             diagnostic['binding_stable'] &= diagnostic['direct_widget_binding_stable']
         if collect_bindings:
             def collect_stable(binding):
