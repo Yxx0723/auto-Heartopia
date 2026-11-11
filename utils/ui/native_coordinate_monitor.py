@@ -199,7 +199,7 @@ class CoordinateWindow:
                                       guidance_scene_factory=NavigationSceneMap if scene_factory is MemorySceneMap else None,
                                       scene_provider=self.navigation_scene, scene_refresh=self.refresh_scene,
                                       diagnostics_path=diagnostics_dir / '日志' / '点位回放.jsonl', input_gate=self.input_gate)
-        self.cooking = CookingSinglePotControl(self.resources/'profile.json', data_dir/'烹饪记录',
+        self.cooking = CookingSinglePotControl(self.resources/'profile.json', Path(r'C:\Users\user\Desktop\烹饪记录'),
                                       busy=lambda: self.playback.active, input_gate=self.input_gate,
                                       runner=cooking_entry_runner, selection_runner=cooking_selection_runner,
                                       single_pot_runner=single_pot_runner)
@@ -227,8 +227,8 @@ class CoordinateWindow:
         self.wait_editor = None
         root.title('心动小镇 · 坐标观测台（窗口版）')
         root.configure(bg=COLORS['bg'])
-        root.geometry('490x760+50+0')
-        root.minsize(460, 740)
+        root.geometry('490x900+50+0')
+        root.minsize(460, 860)
         icon = self.resources / 'monitor.ico'
         if icon.exists():
             root.iconbitmap(str(icon))
@@ -313,7 +313,14 @@ class CoordinateWindow:
 
     def build(self):
         self.configure_dropdowns()
-        body = self.frame(self.root)
+        self.main_panes=tk.PanedWindow(self.root,orient='vertical',bg=COLORS['bg'],
+            sashwidth=5,sashrelief='raised',showhandle=True,opaqueresize=True,bd=0)
+        self.main_panes.pack(fill='both',expand=True)
+        self.function_host=self.frame(self.main_panes)
+        self.global_log_host=self.frame(self.main_panes,card=True)
+        self.main_panes.add(self.function_host,minsize=680,stretch='always')
+        self.main_panes.add(self.global_log_host,minsize=150,height=170,stretch='never')
+        body = self.frame(self.function_host)
         body.pack(fill='both', expand=True, padx=12, pady=(6, 8))
         body.grid_columnconfigure(0, weight=1)
         body.grid_rowconfigure(0, weight=1)
@@ -389,17 +396,9 @@ class CoordinateWindow:
         for page, title in ((route_page, '采集设定'), (parameter_page, '参数设定'),
                             (map_page, '地图连接'), (cooking_page, '烹饪')):
             self.control_tabs.add(page, text=title)
-        self.label(cooking_page,'离线料理库 · P1（只选菜，不制作）',font=('Microsoft YaHei UI',-14)).pack(
+        self.label(cooking_page,'料理选择 · 单锅 / 连续制作',font=('Microsoft YaHei UI',-14)).pack(
             anchor='w',padx=10,pady=(5,2))
-        self.cooking_catalog=CookingCatalogPanel(self,cooking_page)
-        self.cooking_entry_button=self.button(cooking_page,'验证灶台入口（不制作）',
-                                              self.start_cooking_entry,primary=True)
-        self.cooking_entry_button.pack(fill='x',padx=12,pady=(2,3))
-        self.cooking_entry_stop=self.button(cooking_page,'停止验证 · F9',self.stop_cooking_entry)
-        self.cooking_entry_stop.pack(fill='x',padx=12,pady=(0,3))
-        self.cooking_entry_status=self.field(cooking_page,'cooking_entry',self.cooking_status['message'],
-            color='muted',wraplength=395,justify='left',anchor='w')
-        self.cooking_entry_status.pack(fill='x',padx=12,pady=(0,8))
+        self.cooking_catalog=CookingCatalogPanel(self,cooking_page,runtime_parent=self.global_log_host)
         route_page.grid_columnconfigure(0, weight=1)
         def group(parent, title):
             return tk.LabelFrame(parent, text=title, bg=COLORS['card'], fg=COLORS['text'],
@@ -860,11 +859,15 @@ class CoordinateWindow:
             if playback.get('state') in ('reached', 'finished', 'stopped', 'error', 'partial'):
                 self.refresh_path_memory_info()
         cooking_owner = getattr(self,'cooking',None)
+        if cooking_owner and hasattr(self,'cooking_catalog'):
+            try:self.cooking_catalog.apply_log_events(cooking_owner.take_log_events())
+            except Exception:pass  # Optional display must not break task/tick.
         cooking = cooking_owner.take_latest() if cooking_owner else None
         if cooking is not None:
             self.cooking_status = cooking
             if hasattr(self,'cooking_catalog'):
-                self.cooking_catalog.apply_result(cooking)
+                try:self.cooking_catalog.apply_result(cooking)
+                except Exception:pass  # Progress display cannot interrupt cooking.
         self.render()
         # One pending callback only; a slow frame never queues catch-up frames.
         elapsed = max(0., self.clock()-frame_started)
@@ -877,10 +880,6 @@ class CoordinateWindow:
         view, status = self.view, self.view.status
         live = view.position is not None and not view.paused
         playing = self.playback.active or bool(getattr(self, 'cooking', None) and self.cooking.active)
-        if hasattr(self,'cooking_entry_button'):
-            configure_changed(self.cooking_entry_button,state='normal' if live and not playing else 'disabled')
-            configure_changed(self.cooking_entry_stop,state='normal' if self.cooking.active else 'disabled')
-            self.fields['cooking_entry'].set(self.cooking_status['message'])
         if hasattr(self,'cooking_catalog'):
             self.cooking_catalog.set_active(playing)
         if hasattr(self, 'guidance_button'):

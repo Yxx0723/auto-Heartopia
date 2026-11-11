@@ -1,5 +1,6 @@
 """One background cooking task, independent of Tk and coordinate route memory."""
 from copy import deepcopy
+from collections import deque
 from dataclasses import replace
 from datetime import datetime
 import json
@@ -29,6 +30,7 @@ class CookingControl:
         self.thread = None
         self.stop_event = threading.Event()
         self.results = queue.Queue(maxsize=1)
+        self.log_events = deque(maxlen=1000)
         self.lock = threading.RLock()
         self.stream = None
         self.signature = None
@@ -53,10 +55,15 @@ class CookingControl:
             self.task_state = state
             if pot.get('id'):
                 self.pots[pot['id']] = deepcopy(pot)
+            event={'at': datetime.now().astimezone().isoformat(), **data}
             if self.stream:
-                self.stream.write(json.dumps({'at': datetime.now().astimezone().isoformat(), **data},
+                self.stream.write(json.dumps(event,
                                              ensure_ascii=False, allow_nan=False)+'\n')
                 self.stream.flush()
+            # Optional bounded display mirror of the exact file event. Never
+            # call Tk here, block the producer, or fail cooking for display.
+            try:self.log_events.append(deepcopy(event))
+            except Exception:pass
             try:
                 self.results.get_nowait()
             except queue.Empty:
@@ -68,6 +75,10 @@ class CookingControl:
             return self.results.get_nowait()
         except queue.Empty:
             return None
+
+    def take_log_events(self,limit=100):
+        with self.lock:
+            return [self.log_events.popleft() for _ in range(min(limit,len(self.log_events)))]
 
     def start(self, pid, visual_profile, target=1, reserve=20, max_star=1):
         if self.active or self.busy():

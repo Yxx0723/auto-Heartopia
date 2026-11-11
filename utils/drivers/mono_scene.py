@@ -3,6 +3,8 @@ import math
 import hashlib
 import struct
 import time
+import traceback
+import sys
 from utils.core import thresholds as policy
 from utils.core.scene_read import (SceneReadIssue, RecoveryBudget, read_collection,
                                   read_linked_collection, contextual_issue, issue_summary)
@@ -151,10 +153,29 @@ class SceneMetadata:
         return result
 
     def obj(self, address):
+        def domain_error(vtable,actual,branch):
+            error=ValueError('场景对象归属已变化')
+            caller=sys._getframe(2)
+            origin={'state':'unconfirmed','reason':'object pointer origin not recorded'}
+            if caller.f_code.co_name=='ref':
+                origin={'call':'SceneMetadata.ref','owner_object':caller.f_locals.get('obj'),
+                        'field':caller.f_locals.get('name'),
+                        'scope':'object being inspected is the field owner, not a proven field value'}
+            error.object_domain_diagnostic={
+                'object_address':address,'vtable':vtable,'expected_domain':self.domain,
+                'actual_domain':actual,'read_stage':self.stage,'header_branch':branch,
+                'exception_type':'ValueError','location':'SceneMetadata.obj.domain_check',
+                'reference_origin':origin,'call_stack':[
+                    {'file':f.filename,'line':f.lineno,'function':f.name,'source':f.line}
+                    for f in traceback.extract_stack()[:-1]],
+                'from_previous_pot':{'state':'unconfirmed'},
+                'cause':{'state':'unconfirmed','reason':'domain mismatch alone does not prove invalidation, mutation or scene change'}}
+            return error
         vtable = self.pointer(address)
         if not self.batch_object_headers:
-            if self.pointer(vtable + 16) != self.domain:
-                raise ValueError('场景对象归属已变化')
+            domain=self.pointer(vtable + 16)
+            if domain != self.domain:
+                raise domain_error(vtable,domain,'separate_pointer_reads')
             return self.cls(self.pointer(vtable))
         # Read the same type/domain witness together, every time. Never cache
         # object identity or mutable payload across queries or scans.
@@ -163,7 +184,7 @@ class SceneMetadata:
         if domain and not 0x10000 <= domain < 0x7fffffffffff:
             raise SceneReadIssue('场景引用无效', kind='invalid_reference', stage=self.stage)
         if domain != self.domain:
-            raise ValueError('场景对象归属已变化')
+            raise domain_error(vtable,domain,'batched_24_byte_header')
         if klass and not 0x10000 <= klass < 0x7fffffffffff:
             raise SceneReadIssue('场景引用无效', kind='invalid_reference', stage=self.stage)
         return self.cls(klass)

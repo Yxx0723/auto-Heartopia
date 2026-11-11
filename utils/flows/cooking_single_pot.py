@@ -1,5 +1,7 @@
 """Exactly one native-state pot. No animation recognition or scheduled stirring."""
 import math
+import json
+from contextlib import nullcontext
 from collections import Counter
 from copy import deepcopy
 from uuid import uuid4
@@ -9,7 +11,7 @@ from utils.core.scene_read import SceneReadIssue
 from utils.core.map_targeting import MapLayoutUpdating
 from utils.drivers.coordinate_point_store import atomic_write_json
 from utils.drivers.cooking_single_pot import CookingObservationUpdating
-from utils.drivers.cooking_mouse_diagnostics import begin_move, execute_move, finish_move
+from utils.drivers.cooking_mouse_diagnostics import begin_move, execute_move, finish_move, attempt
 from utils.drivers.cooking_alt_interaction import cooking_alt, release_cooking_inputs
 from utils.drivers.cooking_click_diagnostics import ClickDiagnostics, danger_timing, now
 from utils.drivers.cooking_ui_click_ack import CookingUiClickAck
@@ -38,6 +40,25 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             'product_id':recipe['product_id'],'recipe_name':recipe['name'],'state':'checking',
             'started_pots':0,'confirmed_products':0}
     task_deadline=clock.monotonic()+600.; stock_scope=None;alt_interaction_active=False;danger_times={}
+    start_ui_before=None;start_reserved_at=None;pending_ack=None;ack_succeeded=False
+    def observe_start(stage):
+        nonlocal start_ui_before
+        try:
+            value=reader.start_diagnostics(size)
+            json.dumps(value,allow_nan=False)
+        except Exception as exc:
+            value={'state':'unavailable','reason':type(exc).__name__+': '+str(exc)}
+        if stage=='before_click':start_ui_before=value
+        baseline=start_ui_before or {}
+        same_button=(value.get('button')==baseline.get('button') and value.get('button') is not None
+            and value.get('button_binding_stable') is True
+            and isinstance(value.get('callback'),dict) and 'delegate' in value['callback']
+            and value.get('callback')==baseline.get('callback'))
+        old=baseline.get('last_click_time');new=value.get('last_click_time')
+        value['button_handler_timestamp_updated']=(new>old if same_button and
+            type(old) in (int,float) and type(new) in (int,float) else {'state':'unavailable'})
+        value['timestamp_evidence_scope']='CustomButton handler timestamp only; not proof of CookPanel callback or start acceptance'
+        report('start_ui_diagnostic','开始按钮只读诊断',stage=stage,start_diagnostic=value)
     def save(state,message,**extra):
         record.update(state=state,message=message,**events.record(),**extra)
         atomic_write_json(journal,record)
@@ -77,16 +98,28 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
         if value['scope']!=stock_scope:raise ValueError('本锅背包归属改变')
         return value
     def click(read_target, before_input=None, *, hold_alt=False):
-        nonlocal alt_interaction_active
+        nonlocal alt_interaction_active,pending_ack,ack_succeeded
         if not hold_alt:
             return click_body(read_target,before_input)
+        pending_ack=None;ack_succeeded=False
         initial=read(read_target)
         try:
             with cooking_alt(device,window,guard,wait,report):
                 alt_interaction_active=True
                 return click_body(read_target,before_input,initial)
-        finally:alt_interaction_active=False
+        finally:
+            alt_interaction_active=False
+            if pending_ack is not None:
+                try:
+                    held_buttons=getattr(device,'buttons',None)
+                    held_keys=getattr(device,'keys',None)
+                    inputs_released=(isinstance(held_buttons,(set,frozenset)) and
+                        isinstance(held_keys,(set,frozenset)) and not held_buttons and not held_keys)
+                    report('ack_post_diagnostic','UI 确认事后诊断；原输入清理已执行',
+                        ack_diagnostic=pending_ack.finalize(failed=not ack_succeeded and inputs_released))
+                except Exception:pass
     def click_body(read_target, before_input=None, expected=None):
+        nonlocal pending_ack,ack_succeeded
         def same_target(a,b):
             return ({k:v for k,v in a.items() if k!='rect'}=={k:v for k,v in b.items() if k!='rect'}
                     and len(a['rect'])==len(b['rect'])==4
@@ -96,6 +129,8 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             raise ValueError('按下 ALT 后翻锅事件或按钮身份变化，未移动或点击')
         if not same_target(fresh,target):raise ValueError('烹饪交互目标在点击前变化，未发送点击')
         target=fresh
+        is_start=target.get('kind')=='start'
+        if is_start:observe_start('before_click')
         rect=target['rect'];l,t,r,b=rect
         if not 0<=l<r<=size[0] or not 0<=t<b<=size[1]:
             raise ValueError('烹饪交互控件不在可见客户区内')
@@ -118,6 +153,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             ui_ack=CookingUiClickAck(reader,target)
             diagnostic=ClickDiagnostics(device,window,danger_times.get(target.get('event_id')))
             diagnostic.data['ui_click_before']=ui_ack.before
+            pending_ack=ui_ack;ack_succeeded=False
             try:
                 with diagnostic:
                     try:
@@ -125,25 +161,41 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                         device.execute({'type':'mouse_up','button':'left'})
                         diagnostic.data['mouse_up_returned_at']=now()
                         ack_until=clock.monotonic()+1.
+                        ui_ack.begin_confirmation(ack_until,clock.monotonic,guard)
                         while True:
                             guard();sample=ui_ack.observe()
                             diagnostic.data['ui_click_after']=sample
-                            if sample['last_click_time']>ui_ack.before['last_click_time']:
-                                diagnostic.data['ui_first_update_observed_at']=sample['observed_at']
-                                diagnostic.data['ui_click_confirmed']=True
-                                break
-                            if sample['last_click_time']<ui_ack.before['last_click_time']:
-                                raise ValueError('原按钮点击时钟回退，未重试点击')
                             if clock.monotonic()>=ack_until:
                                 diagnostic.data['ui_click_confirmed']=False
                                 raise ValueError('左键已释放但 UI 在限定时间内未确认点击，已停止且不重复点击')
+                            if sample['last_click_time']>ui_ack.before['last_click_time']:
+                                diagnostic.data['ui_first_update_observed_at']=sample['observed_at']
+                                diagnostic.data['ui_click_confirmed']=True
+                                ack_succeeded=True
+                                break
+                            if sample['last_click_time']<ui_ack.before['last_click_time']:
+                                raise ValueError('原按钮点击时钟回退，未重试点击')
                             wait(.01)
                     finally:release_cooking_inputs(device)
             finally:report('stir_left_diagnostic','翻锅左键原始派发诊断；游戏确认另行核对',left_diagnostic=diagnostic.data)
         else:
+            diagnostic=ClickDiagnostics(device,window) if is_start else None
             try:
-                device.execute({'type':'mouse_down','button':'left'});wait(.04)
-            finally:release_cooking_inputs(device)
+                with diagnostic if diagnostic is not None else nullcontext():
+                    try:
+                        if diagnostic is not None:
+                            import win32gui
+                            diagnostic.data['foreground_before_down']=attempt(win32gui.GetForegroundWindow)
+                        device.execute({'type':'mouse_down','button':'left'});wait(.04)
+                    finally:
+                        try:release_cooking_inputs(device)
+                        finally:
+                            if diagnostic is not None:
+                                diagnostic.data['foreground_after_up']=attempt(win32gui.GetForegroundWindow)
+            finally:
+                if diagnostic is not None:
+                    report('start_left_diagnostic','开始左键派发诊断；不代表 UI 接受或实际开锅',
+                           start_reserved_at=start_reserved_at,left_diagnostic=diagnostic.data)
     def await_slots(predicate,seconds=2.):
         end=clock.monotonic()+seconds
         while clock.monotonic()<end:
@@ -201,15 +253,20 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
         wait(.1)
         if read(reader.materials)!=view:raise ValueError('材料槽尚未稳定，未投料')
         def reserve_start():
+            nonlocal start_reserved_at
             current=read(reader.state);events.observe(current)
             latest=stock();now_view=read(reader.materials)
             if now_view!=view or not slots_match(now_view['slots'],material_plan(recipe,now_view,latest)):
                 raise ValueError('派发开始前材料或料理变化，未投料')
             events.reserve('start')
+            start_reserved_at=now()
             save('start_reserved','启动单锅操作已登记，等待游戏确认，不重发',
-                 inventory_scope=latest['scope'],inventory_before=deepcopy(latest['counts']),material_slots=now_view['slots'])
+                 inventory_scope=latest['scope'],inventory_before=deepcopy(latest['counts']),material_slots=now_view['slots'],
+                 start_reserved_at=start_reserved_at)
         click(lambda:reader.menu_target(size,'start'),reserve_start)
         start_at=clock.monotonic();collect_at=None;last_signature=None;observed_phase=None
+        next_start_observation=start_at
+        start_transition_observed=False
         while True:
             state=read(reader.state)
             if state['status']==3 and str(state['status_started']) not in danger_times:
@@ -218,6 +275,12 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                 report('native_observation','烹饪原始状态观测',native_state=state)
                 observed_phase=(state['status'],state['status_started'])
             action=events.observe(state)
+            if not events.cooking_seen and clock.monotonic()>=next_start_observation:
+                observe_start('waiting_start')
+                next_start_observation=clock.monotonic()+.5
+            elif events.cooking_seen and not start_transition_observed:
+                observe_start('start_native_confirmed')
+                start_transition_observed=True
             if events.cooking_seen:
                 record['started_pots']=1
             signature=(state['status'],state['status_started'],events.pending)

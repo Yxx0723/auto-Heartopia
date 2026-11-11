@@ -3,10 +3,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from utils.core.cooking_catalog import load_catalog, material_status
+from utils.ui.cooking_event_view import event_view
 
 
 class CookingCatalogPanel:
-    def __init__(self, owner, parent):
+    def __init__(self, owner, parent, *, runtime_parent=None):
         self.owner = owner; self.inventory = None; self.recipe = None; self.active = None
         self.recipes = load_catalog()['recipes']
         self.frame = owner.frame(parent, card=True, border=False)
@@ -17,7 +18,8 @@ class CookingCatalogPanel:
                      state='readonly', width=10).pack(side='left')
         ttk.Entry(bar, textvariable=self.query, width=17).pack(side='left', fill='x', expand=True, padx=(5,0))
         owner.label(bar, '搜索名称 / ID', color='muted').pack(side='left', padx=3)
-        body = owner.frame(self.frame, card=True, border=False); body.pack(fill='both',expand=True,pady=3)
+        body = owner.frame(self.frame, card=True, border=False)
+        body.pack(fill='both',expand=True,pady=3)
         self.list = ttk.Treeview(body, columns=('name',), show='headings', height=4, selectmode='browse')
         self.list.heading('name', text='料理列表'); self.list.column('name',width=150,minwidth=90)
         self.list.pack(side='left',fill='both',expand=True)
@@ -29,10 +31,49 @@ class CookingCatalogPanel:
         actions = owner.frame(self.frame,card=True,border=False); actions.pack(fill='x')
         self.stock_button = owner.button(actions,'刷新背包材料',self.refresh_inventory)
         self.stock_button.pack(side='left',fill='x',expand=True,padx=(0,3))
-        self.select_button = owner.button(actions,'确认料理并选菜',self.confirm,primary=True)
-        self.select_button.pack(side='left',fill='x',expand=True)
-        self.pot_button=owner.button(self.frame,'P2：核对当前料理并制作一锅',self.make_one_pot)
-        self.pot_button.pack(fill='x',pady=(3,0))
+        batch=owner.frame(self.frame,card=True,border=False);batch.pack(fill='x',pady=(3,0))
+        owner.label(batch,'连续锅数（1～99）').pack(side='left')
+        self.batch_target=tk.StringVar(value='1')
+        self.batch_count=ttk.Spinbox(batch,from_=1,to=99,textvariable=self.batch_target,width=4)
+        self.batch_count.pack(side='left',padx=4)
+        self.batch_button=owner.button(batch,'开始',self.make_batch)
+        self.batch_button.pack(side='left',fill='x',expand=True,padx=(0,3))
+        self.batch_stop_button=owner.button(batch,'停止',owner.cooking.stop)
+        self.batch_stop_button.pack(side='left',fill='x',expand=True)
+        self.batch_stop_button.configure(state='disabled')
+        # The single log view belongs to the main window's shared bottom pane,
+        # never to the cooking tab. Keep its event/state objects across tabs.
+        self.runtime_page=owner.frame(runtime_parent if runtime_parent is not None else owner.root,
+                                      card=True,border=False)
+        self.runtime_page.pack(fill='both',expand=True,padx=8,pady=3)
+        self.runtime_status=tk.StringVar(value='批次状态：空闲 · 当前阶段：—')
+        owner.label(self.runtime_page,'',textvariable=self.runtime_status,wraplength=390,
+                    justify='left').pack(fill='x')
+        self.batch_progress=tk.StringVar(value='目标 — · 当前 — · 已完成 0 · 成品 +0')
+        owner.label(self.runtime_page,'',textvariable=self.batch_progress).pack(fill='x')
+        self.progress=ttk.Progressbar(self.runtime_page,mode='determinate',maximum=1,value=0)
+        self.progress.pack(fill='x',pady=(1,2))
+        self.runtime_error=tk.StringVar()
+        self.runtime_error_label=owner.label(self.runtime_page,'',textvariable=self.runtime_error,
+                    color='red',wraplength=390,justify='left',font=('Microsoft YaHei UI',-11),
+                    height=2,anchor='nw')
+        log_area=owner.frame(self.runtime_page,card=True,border=False);log_area.pack(fill='both',expand=True)
+        self.runtime_log=tk.Text(log_area,height=3,width=42,wrap='word',state='disabled',
+                                 font=('Microsoft YaHei UI',-11))
+        for status,color in (('进行中','#53665b'),('已派发','#916900'),('已确认','#27684a'),
+                             ('已完成','#27684a'),('失败','#b12b2b'),('未确认','#9b4300')):
+            self.runtime_log.tag_configure(status,foreground=color)
+        self.runtime_log.pack(side='left',fill='both',expand=True)
+        log_scroll=ttk.Scrollbar(log_area,orient='vertical',command=self.runtime_log.yview)
+        log_scroll.pack(side='right',fill='y');self.runtime_log.configure(yscrollcommand=log_scroll.set)
+        def show_error(*_):
+            try:
+                if self.runtime_error.get():
+                    self.runtime_error_label.pack(fill='x',pady=(2,3),before=log_area)
+                else:self.runtime_error_label.pack_forget()
+            except Exception:pass
+        self.runtime_error.trace_add('write',show_error)
+        self.runtime_lines=0;self.last_success='尚无确认操作';self.last_batch={}
         self.list.bind('<<TreeviewSelect>>',self.changed)
         self.category.trace_add('write',self.filter);self.query.trace_add('write',self.filter)
         self.filter()
@@ -76,8 +117,57 @@ class CookingCatalogPanel:
         self.owner.cooking.read_inventory(pid)
 
     def apply_result(self,result):
+        if 'batch' in result:
+            b=result['batch']
+            self.last_batch=b
+            self.batch_progress.set(f"目标 {b['target_pots']} · 当前 {b['current_pot']} · 已完成 {b['completed_pots']} · 成品 +{b['total_products']}")
+            self.progress.configure(maximum=max(1,b['target_pots']),value=b['completed_pots'])
+            batch_state='已完成' if b.get('state')=='batch_finished' else '失败 / 已停止' if b.get('state')=='batch_stopped' else '待开始' if result.get('state')=='batch_wait' else '进行中'
+            self.runtime_status.set('批次状态：'+batch_state+' · 当前阶段：'
+                +str((b.get('diagnostic_context') or {}).get('current_step') or result.get('state','—'))
+                +' / '+str(result.get('state','—')))
+            if result.get('state')=='batch_wait':
+                self.runtime_error.set('');self.last_success='尚无确认操作'
         if 'inventory' in result:
             self.inventory=result['inventory'];self.show_detail()
+
+    def apply_log_events(self,events):
+        """Called only by the existing Tk tick; display failures stay local."""
+        lines=[]
+        for event in events:
+            try:
+                row=event_view(event);batch=event.get('batch') or self.last_batch
+                if event.get('state')=='batch_wait':
+                    self.runtime_error.set('');self.last_success='尚无确认操作'
+                if row['pot']=='—':row['pot']=batch.get('current_pot','—')
+                if row['status'] in ('已确认','已完成'):
+                    self.last_success=row['event']+'：'+row['result']
+                if row['status'] in ('失败','未确认') and event.get('state') in ('batch_stopped','error','unconfirmed','stopped','STOPPED'):
+                    failure=batch.get('failure_diagnostic') or {}
+                    context=batch.get('diagnostic_context') or {}
+                    phase=failure.get('current_step') or context.get('current_step') or row['stage']
+                    last=failure.get('last_successful_step') or context.get('last_successful_step') or self.last_success
+                    self.runtime_error.set(f"第 {batch.get('current_pot',row['pot'])} 锅 · 出错阶段：{phase}\n错误：{row['result']}\n最后成功：{last}\n停止原因：{batch.get('message',row['result'])}")
+                line=f"{row['time']} | 第 {row['pot']} 锅 | {row['stage']} | {row['event']} | {row['status']} | {row['result']}\n"
+                lines.append((line,row['status']))
+            except Exception:
+                # Tk or formatting errors must not propagate into the task or
+                # stop the main tick. Full original events remain in the file.
+                pass
+        if lines:
+            try:
+                self.runtime_log.configure(state='normal')
+                chunks=[]
+                for line,status in lines:chunks.extend((line,(status,)))
+                self.runtime_log.insert('end',*chunks)
+                self.runtime_lines+=len(lines)
+                if self.runtime_lines>500:
+                    self.runtime_log.delete('1.0',f'{self.runtime_lines-500+1}.0');self.runtime_lines=500
+                self.runtime_log.see('end')
+            except Exception:pass
+            finally:
+                try:self.runtime_log.configure(state='disabled')
+                except Exception:pass
 
     def confirm(self):
         if self.recipe is None:
@@ -93,9 +183,24 @@ class CookingCatalogPanel:
         if self.active == active:
             return
         self.active = active
-        self.select_button.configure(state='disabled' if active else 'normal')
         self.stock_button.configure(state='disabled' if active else 'normal')
-        self.pot_button.configure(state='disabled' if active else 'normal')
+        self.batch_button.configure(state='disabled' if active else 'normal')
+        self.batch_stop_button.configure(state='normal' if self.owner.cooking.active else 'disabled')
+        self.batch_count.configure(state='disabled' if active else 'normal')
+
+    def make_batch(self):
+        if self.recipe is None:
+            messagebox.showerror('未选择料理','请先选择本批次唯一料理',parent=self.owner.root);return
+        try:
+            value=self.batch_target.get().strip()
+            if not value.isdecimal() or not 1<=int(value)<=99:
+                raise ValueError('连续制作锅数必须为 1～99 的整数')
+            self.owner.cooking.start_batch(self.owner.view.status.get('pid'),self.recipe,int(value))
+            self.batch_progress.set(f'目标 {int(value)} · 当前 0 · 已完成 0 · 成品 +0')
+            self.owner.cooking_status={'state':'batch_wait','message':'连续制作待开始：切回游戏按 F6；F9停止'}
+            self.owner.render()
+        except (ValueError,OSError) as exc:
+            messagebox.showerror('无法连续制作',str(exc),parent=self.owner.root)
 
     def make_one_pot(self):
         if self.recipe is None:
