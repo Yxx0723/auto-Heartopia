@@ -1,17 +1,60 @@
 """P1 selects a single explicit recipe, verifies readback and stops."""
 import math
 import traceback
-from utils.core.cooking_catalog import material_status
+from utils.core.cooking_catalog import base_recipe, material_status
 from utils.core.scene_read import SceneReadIssue
 from utils.drivers.cooking_menu_state import CookingMenuDetailMismatch, CookingMenuStateChanged
 
 
 def select_recipe(*, recipe, reader, window, controls, device, inventory, clock, report, timeout=30.):
-    identity = recipe['recipe_id']; size = tuple(window.size())
+    card_recipe = base_recipe(recipe)
+    identity = card_recipe['recipe_id']; size = tuple(window.size())
     deadline = clock.monotonic()+timeout
     scope = stove = None
     clicked = False; last_view = None; unchanged = 0
     sync_first_at = None; sync_reads = 0; last_sync = None
+    trace_blue_roll = recipe['recipe_id'] == 45160 and identity == 45153
+    last_valid_read = None
+    last_condition = 'no_valid_readback'
+    read_sequence = 0
+    trace_ids = {'target_recipe_id': recipe['recipe_id'], 'base_recipe_id': identity}
+
+    def readback(value):
+        evidence = value.get('selection_evidence', {})
+        return {'selected': value.get('selected'), 'signature': value.get('signature'),
+                'selection_state': 'detail_present' if value.get('selected') else 'detail_absent',
+                'card_selected_flag': None,
+                'scope': value['scope'], 'stove_identity': value['stove_identity'],
+                'ui_manager': evidence.get('ui_manager'), 'panel_address': evidence.get('panel_address'),
+                'panel_active': evidence.get('panel_active'), 'panel_focused': evidence.get('panel_focused')}
+
+    def read_selection(ui_attempt):
+        nonlocal read_sequence, last_valid_read, last_condition
+        if not (trace_blue_roll and clicked):
+            return reader.selection(size)
+        read_sequence += 1
+        started = clock.monotonic()
+        try:
+            value = reader.selection(size)
+        except Exception as exc:
+            last_condition = 'read_error'
+            report('variant_recipe_readback', f'蓝色浮云卷选菜后读取 {read_sequence}',
+                   **trace_ids, sequence=read_sequence, ui_attempt=ui_attempt,
+                   started_monotonic=started, completed_monotonic=clock.monotonic(),
+                   read_error={'type': type(exc).__name__, 'message': str(exc),
+                               'diagnostics': getattr(exc, 'diagnostics', None)})
+            raise
+        last_valid_read = readback(value)
+        selected = value.get('selected') or {}
+        last_condition = ('selection_missing' if not selected else
+                          'selected_id_mismatch' if selected.get('recipe_id') != identity else
+                          'selected_name_mismatch' if selected.get('name') != card_recipe['name'] else
+                          'expected_selection_read')
+        report('variant_recipe_readback', f'蓝色浮云卷选菜后读取 {read_sequence}',
+               **trace_ids, sequence=read_sequence, ui_attempt=ui_attempt,
+               started_monotonic=started, completed_monotonic=clock.monotonic(),
+               condition=last_condition, readback=last_valid_read)
+        return value
     def guard():
         running, stopped = controls.snapshot()
         if stopped:
@@ -37,7 +80,7 @@ def select_recipe(*, recipe, reader, window, controls, device, inventory, clock,
             if recovering and clock.monotonic() >= deadline:
                 raise ValueError('食谱 UI 只读恢复达到原选菜截止时间，未开始制作')
             try:
-                value = reader.selection(size)
+                value = read_selection(ui_attempt)
             except CookingMenuStateChanged as exc:
                 report('recipe_snapshot_changed', '已丢弃不一致的食谱读取',
                     attempt=ui_attempt, snapshot_diagnostic=exc.diagnostics)
@@ -83,7 +126,7 @@ def select_recipe(*, recipe, reader, window, controls, device, inventory, clock,
             return value
 
     def observe():
-        nonlocal scope, stove, sync_first_at, sync_reads, last_sync
+        nonlocal scope, stove, sync_first_at, sync_reads, last_sync, last_condition
         # A just-opened recipe list can replace its card references while it
         # initializes. Discard the whole failed read; never act on part of it.
         read_deadline = min(deadline, clock.monotonic()+2.)
@@ -138,6 +181,7 @@ def select_recipe(*, recipe, reader, window, controls, device, inventory, clock,
         if scope is None:
             scope, stove = value['scope'], value['stove_identity']
         if value['scope'] != scope or value['stove_identity'] != stove:
+            last_condition = 'scope_or_stove_changed'
             raise ValueError('灶台或场景已经改变，未继续选菜')
         return value
     try:
@@ -150,20 +194,30 @@ def select_recipe(*, recipe, reader, window, controls, device, inventory, clock,
             if value is None:
                 continue  # The only recoverable mismatch is after a card click.
             if identity not in value['available_ids']:
+                last_condition = 'base_recipe_unavailable'
+                if card_recipe is not recipe:
+                    raise ValueError('当前灶台没有基础食谱：'+card_recipe['name']+'，未开始制作')
                 raise ValueError('当前灶台没有所选食谱：可能尚未解锁或灶台类别不符；未替换料理')
             selected = value.get('selected') or {}
-            if selected.get('recipe_id') == identity and selected.get('name') == recipe['name']:
+            if selected.get('recipe_id') == identity and selected.get('name') == card_recipe['name']:
                 wait(.12); second = observe()
                 if second is None:
                     continue
                 if second['signature'] == value['signature'] and second.get('selected') == selected:
                     stock = inventory(); materials = material_status(recipe, stock)
                     if not materials['sufficient']:
+                        last_condition = 'inventory_insufficient_after_selection'
                         raise ValueError('选菜后背包材料变化或不足；已停止，未开始制作')
-                    result = {'recipe_id': identity, 'recipe_name': recipe['name'], 'started_pots': 0,
+                    result = {'recipe_id': recipe['recipe_id'], 'recipe_name': recipe['name'], 'started_pots': 0,
                               'inventory': stock, 'materials': materials}
-                    report('RECIPE_SELECTED', '已确认游戏内料理：'+recipe['name']+'；P1 到此停止，未开始制作', **result)
+                    if card_recipe is not recipe:
+                        result.update(base_recipe_id=identity, base_recipe_name=card_recipe['name'])
+                        message = '已确认基础食谱：'+card_recipe['name']+'；目标产物：'+recipe['name']+'，未开始制作'
+                    else:
+                        message = '已确认游戏内料理：'+recipe['name']+'；P1 到此停止，未开始制作'
+                    report('RECIPE_SELECTED', message, **result)
                     return result
+                last_condition = 'confirmation_signature_or_selection_changed'
                 continue
             if clicked:
                 wait(.1)
@@ -179,14 +233,31 @@ def select_recipe(*, recipe, reader, window, controls, device, inventory, clock,
                 if len(pointer) != 3 or not pointer[2] or math.dist(pointer[:2], point) > 2:
                     raise ValueError('鼠标未到达当前料理控件，未点击')
                 # One final owned-layout read after positioning, before mouse down.
-                if card not in observe()['cards']:
+                before_click = observe()
+                if card not in before_click['cards']:
                     continue
                 clicked = True
+                dispatch = {'mouse_down_returned': False, 'release_all_returned': False}
                 try:
-                    guard(); device.execute({'type': 'mouse_down', 'button': 'left'})
-                    wait(.04)
+                    try:
+                        guard(); device.execute({'type': 'mouse_down', 'button': 'left'})
+                        dispatch['mouse_down_returned'] = True
+                        wait(.04)
+                    finally:
+                        device.release_all()
+                        dispatch['release_all_returned'] = True
+                except Exception as exc:
+                    last_condition = 'dispatch_or_cleanup_error'
+                    dispatch['error'] = {'type': type(exc).__name__, 'message': str(exc)}
+                    raise
                 finally:
-                    device.release_all()
+                    if trace_blue_roll:
+                        addresses = before_click.get('selection_evidence', {}).get('card_addresses', {})
+                        report('variant_recipe_dispatch', '蓝色浮云卷基础食谱卡派发诊断',
+                               **trace_ids, monotonic=clock.monotonic(),
+                               card={**card, **addresses.get(card['handle'], {}),
+                                     'catalog_name': card_recipe['name']},
+                               before_click=readback(before_click), dispatch=dispatch)
                 report('recipe_confirming', '已点击指定料理，等待读回确认；不会点击开始制作')
                 wait(.15)
                 continue
@@ -208,5 +279,13 @@ def select_recipe(*, recipe, reader, window, controls, device, inventory, clock,
             wait(.3)
         raise ValueError('选菜后详情未同步，原确认期限已到，未开始制作' if last_sync is not None
                          else '指定料理选中确认超时，未开始制作')
+    except Exception as exc:
+        if trace_blue_roll and clicked:
+            report('variant_recipe_confirmation_failed', '蓝色浮云卷选菜确认停止',
+                   **trace_ids, monotonic=clock.monotonic(), deadline_monotonic=deadline,
+                   condition=last_condition, last_valid_read=last_valid_read,
+                   expected_name=card_recipe['name'],
+                   error={'type': type(exc).__name__, 'message': str(exc)})
+        raise
     finally:
         device.release_all()

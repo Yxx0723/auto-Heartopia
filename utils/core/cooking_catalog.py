@@ -29,6 +29,19 @@ def load_catalog(path=None):
     return data
 
 
+def base_recipe(recipe):
+    """Resolve the recipe card separately from the requested product."""
+    if 'base_recipe_id' not in recipe:
+        return recipe
+    candidates = [entry for entry in load_catalog()['recipes']
+                  if entry['recipe_id'] == recipe['base_recipe_id']]
+    if (len(candidates) != 1 or candidates[0]['status'] != 'confirmed'
+            or 'base_recipe_id' in candidates[0]
+            or candidates[0]['cooker_type'] != recipe['cooker_type']):
+        raise ValueError('变种料理的基础食谱未确认')
+    return candidates[0]
+
+
 def material_status(recipe, inventory):
     """Match every material slot once; overlapping groups cannot share a unit."""
     if not isinstance(inventory, dict) or not inventory.get('scope'):

@@ -256,11 +256,17 @@ class MapPanelReader:
             (cw,ch),sketch['anchored_position'],scale[0],first['map_ratio'],self.clock(),
             True,True,(w*.12,h*.16,w*.98,h*.90))
 
-    def _button_rect(self,layout,owner,component,client_size):
+    def _button_rect(self,layout,owner,component,client_size,observation=None):
         canvas=self.meta.ref(owner[1],'<CanvasRect>k__BackingField')
-        rect,chain=layout.button_geometry(component)
-        result=rect_to_client(rect,chain,layout.rect(canvas)['rect'],
-                              layout.transforms(canvas),client_size)
+        rect,chain=(layout.button_geometry(component) if observation is None
+                    else layout.button_geometry(component,observation))
+        canvas_rect=layout.rect(canvas)['rect']
+        canvas_chain=layout.transforms(canvas)
+        result=rect_to_client(rect,chain,canvas_rect,canvas_chain,client_size)
+        if observation is not None:
+            observation.update(canvas_address=canvas, canvas_rect=canvas_rect,
+                               canvas_transform_chain=canvas_chain, client_rect=result,
+                               canvas_scale=(client_size[0]/canvas_rect[2],client_size[1]/canvas_rect[3]))
         l,t,r,b=result;w,h=client_size
         if not 0<=l<r<=w or not 0<=t<b<=h:
             raise ValueError('地图按钮未完整位于游戏窗口内')

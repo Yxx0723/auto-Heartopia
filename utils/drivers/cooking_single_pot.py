@@ -145,25 +145,49 @@ class SinglePotReader(CookingSelectionReader):
             raise CookingObservationUpdating('原生烹饪状态正在变化')
         return result
 
-    def _rect(self, component, stack, panel, nodes, size):
-        return self.ui._button_rect(self.layout,(*stack[:3],panel,nodes),component,size)
+    def _rect(self, component, stack, panel, nodes, size, observation=None):
+        args=(self.layout,(*stack[:3],panel,nodes),component,size)
+        return self.ui._button_rect(*args) if observation is None else self.ui._button_rect(*args,observation)
 
-    def _toggle_rect(self, widget, stack, size):
+    def _toggle_rect(self, widget, stack, size, observation=None, *, material_candidate=False):
         m=self.ui.meta; n=self.layout.native; toggle=m.ref(widget,'_toggle')
         self.ui.expected(toggle,'Toggle','UnityEngine.UI')
         target=self.layout.resolve(toggle,'Toggle','UnityEngine.UI')
         for name in ('m_Interactable','m_GroupsAllowInteraction'):
             ff=n.field(n.obj(target)['address'],name,2)
-            if n.data(target+ff['offset'],1)!=b'\1':
+            enabled=n.data(target+ff['offset'],1)==b'\1'
+            if material_candidate:
+                observation[name]=enabled
+            if not enabled:
                 raise ValueError('材料控件不可交互')
         # This client's PackWidget toggle has a null m_TargetGraphic. Its
         # owned instantiated widget root supplies the actual clickable cell.
         ui=m.ref(widget,'ui');rect=m.ref(ui,'root_t');go=m.ref(ui,'<gameObject>k__BackingField')
-        if not self.layout.active(go):
+        active=self.layout.active(go)
+        if material_candidate:
+            observation.update(game_object_active=active, game_object_address=go,
+                               toggle_address=toggle, native_toggle_address=target,
+                               widget_ui_address=ui, rect_transform=rect)
+        if not active:
             raise ValueError('材料控件实际实例未显示')
         canvas=m.ref(stack[1],'<CanvasRect>k__BackingField')
-        result=rect_to_client(self.layout.rect(rect)['rect'],self.layout.transforms(rect),
-            self.layout.rect(canvas)['rect'],self.layout.transforms(canvas),size)
+        if observation is not None:
+            observation.update(toggle_address=toggle, native_toggle_address=target,
+                               widget_ui_address=ui, game_object_address=go)
+        local=self.layout.rect(rect)
+        if observation is not None:
+            observation.update(local_rect=local['rect'], anchored_position=local['anchored_position'],
+                               rect_transform=rect, canvas_address=canvas)
+        chain=self.layout.transforms(rect)
+        canvas_rect=self.layout.rect(canvas)['rect']
+        canvas_chain=self.layout.transforms(canvas)
+        if observation is not None:
+            observation.update(canvas_rect=canvas_rect, canvas_transforms=canvas_chain,
+                               slot_transforms=chain,
+                               canvas_scale=(size[0]/canvas_rect[2], size[1]/canvas_rect[3]))
+        result=rect_to_client(local['rect'],chain,canvas_rect,canvas_chain,size)
+        if observation is not None:
+            observation['client_rect']=result
         if m.ref(widget,'_toggle')!=toggle or m.ref(widget,'ui')!=ui or m.ref(ui,'root_t')!=rect \
                 or self.layout.resolve(toggle,'Toggle','UnityEngine.UI')!=target:
             raise ValueError('材料控件引用在读取期间变化')
@@ -637,21 +661,123 @@ class SinglePotReader(CookingSelectionReader):
         result['unity_button']=attempt(native_button)
         return result
 
-    def menu_target(self, size, kind, *, index=None, net_id=None):
+    def observe_start_owner(self, observation, state, stack, panel, nodes, opened):
+        m=self.ui.meta
+        def optional(field, read):
+            try:
+                observation[field]=read()
+            except Exception as exc:
+                observation[field]={'unavailable':type(exc).__name__, 'message':str(exc)}
+        def layers():
+            return [layer for layer in m.dictionary(stack[2])
+                    if panel in m.list_refs(m.ref(layer,'stack'))]
+        observation.update(scene_scope=state['scope'], stove_identity=state['stove_identity'],
+                           ui_manager=stack[1], ui_layer_dictionary=stack[2], ui_views=stack[3],
+                           panel_address=panel, panel_nodes=nodes, picker_open=opened,
+                           picker_closed=None, picker_state_verified=False,
+                           picker_focus={'unavailable':'no verified focus field for the picker'},
+                           picker_occlusion={'unavailable':'no verified raycast or occlusion data'})
+        optional('panel_type',lambda: f"{m.obj(panel)['namespace']}.{m.obj(panel)['name']}")
+        optional('panel_layers',layers)
+        optional('panel_active',lambda:self.integer(panel,'_viewActiveCache',2,'B',1))
+        optional('panel_focus',lambda:self.integer(panel,'_isGotFocus',2,'B',1))
+        optional('picker_address',lambda:m.ref(nodes,'bag_widget'))
+        picker=observation['picker_address']
+        observation['picker_panel_in_stack']=picker in stack[3] if type(picker) is int else None
+        observation.update(picker_root_present=None, picker_root_active=None, picker_view_active=None)
+        if type(picker) is int and picker:
+            optional('picker_root',lambda:m.ref(m.ref(picker,'ui'),'<gameObject>k__BackingField'))
+            root=observation['picker_root']
+            if type(root) is int:
+                observation['picker_root_present']=bool(root)
+                if root:
+                    optional('picker_root_active',lambda:self.layout.active(root))
+            if observation['picker_panel_in_stack']:
+                optional('picker_view_active',lambda:self.integer(picker,'_viewActiveCache',2,'B',1))
+                optional('picker_focus',lambda:self.integer(picker,'_isGotFocus',2,'B',1))
+        observation['picker_active']=observation['picker_root_active']
+        observation['picker_exists']=bool(picker) if type(picker) is int else None
+        in_stack=observation['picker_panel_in_stack']
+        if type(observation['picker_root_active']) is bool and (
+                not in_stack or observation['picker_view_active'] in (0,1)):
+            observation['picker_state_verified']=True
+            observation['picker_closed']=not opened and not in_stack and not observation['picker_root_active']
+        optional('button_bar_active',lambda:self.layout.active(m.ref(nodes,'btnBar_go')))
+
+    def start_button_enabled(self, wrapper, address):
+        """Read only a verified metadata field. Behaviour.enabled may be native-only."""
+        native = self.layout.native
+        expected = ('Button', 'UnityEngine.UI')
+        try:
+            if self.layout.resolve(wrapper, *expected) != address:
+                raise ValueError('开始按钮原生引用变化')
+            info = native.obj(address, expected)
+            field = native.field(info['address'], 'm_Enabled', 2)
+            offset = field['offset']
+            if not 16 <= offset < info['size']:
+                raise ValueError('开始按钮启用字段偏移超出对象范围')
+            raw = native.data(address + offset, 1)
+            if raw not in (b'\0', b'\1'):
+                raise ValueError('开始按钮启用字段不是有效布尔值')
+            if self.layout.resolve(wrapper, *expected) != address:
+                raise ValueError('开始按钮原生引用变化')
+        except (ValueError, OSError) as exc:
+            return {'state': 'unknown', 'source': 'm_Enabled',
+                    'error': {'type': type(exc).__name__, 'message': str(exc)}}
+        return {'state': 'enabled' if raw == b'\1' else 'disabled', 'source': 'm_Enabled'}
+
+    def menu_target(self, size, kind, *, index=None, net_id=None, slot_observation=None,
+                    material_observation=None, start_observation=None):
         state,stack,panel,nodes=self.menu_owner(); m=self.ui.meta
         result={'kind':kind,'scope':state['scope'],'stove_identity':state['stove_identity']}
         opened=self.integer(panel,'_isOpenBag',2,'B',1)==1
         if kind=='start':
-            if opened:raise ValueError('材料选择器尚未关闭，未点击开始')
+            if start_observation is not None:
+                self.observe_start_owner(start_observation,state,stack,panel,nodes,opened)
+            if opened and start_observation is None:raise ValueError('材料选择器尚未关闭，未点击开始')
             button=m.ref(nodes,'confirm_swapbtn')
-            result['rect']=self._rect(button,stack,panel,nodes,size)
+            if start_observation is not None:
+                start_observation.update(button_address=button, button_panel=panel,
+                    button_parent_address={'unavailable':'transform chain exposes TRS, not parent addresses'})
+                try:
+                    game_object=m.ref(button,'<gameObject>k__BackingField')
+                    start_observation['button_game_object']=game_object
+                    start_observation['button_active']=self.layout.active(game_object)
+                except Exception as exc:
+                    unavailable={'unavailable':type(exc).__name__, 'message':str(exc)}
+                    start_observation.setdefault('button_game_object',unavailable)
+                    start_observation['button_active']=unavailable
+            result['rect']=self._rect(button,stack,panel,nodes,size,start_observation)
+            if start_observation is not None:
+                start_observation['button_enabled']=self.start_button_enabled(
+                    start_observation['button_wrapper'], start_observation['button_native'])
+                selected=self.recipe.snapshot()['selected']
+                start_observation['base_recipe_id']=selected['recipe_id'] if selected else None
+                if m.ref(panel,'ui')!=nodes or m.ref(nodes,'confirm_swapbtn')!=button:
+                    raise ValueError('开始按钮所属面板在读取期间变化')
             # Diagnostic witness only; never participates in click permission.
             self.start_button_witness=(panel,nodes,button)
         elif kind=='slot':
-            widgets=m.list_refs(m.ref(m.ref(nodes,'material_list'),'_children'))
-            if type(index) is not int or not 0<=index<len(self.materials()['slots']) or index>=len(widgets):
+            group=m.ref(nodes,'material_list')
+            children=m.ref(group,'_children')
+            widgets=m.list_refs(children)
+            materials = self.materials()
+            if type(index) is not int or not 0<=index<len(materials['slots']) or index>=len(widgets):
                 raise ValueError('材料槽控件没有对应')
-            result.update(index=index,rect=self._toggle_rect(widgets[index],stack,size))
+            result.update(index=index, widget=widgets[index],
+                          recipe_id=materials['selected']['recipe_id'], slot=materials['slots'][index])
+            if slot_observation is not None:
+                result['panel_binding']=(panel,nodes,opened,materials['selected_slot'])
+                slot_observation.update(object_address=widgets[index], binding_identity=dict(result),
+                                        selected_material_id=result['slot']['item_id'])
+            result['rect']=self._toggle_rect(widgets[index],stack,size,slot_observation)
+            if slot_observation is not None:
+                result['component_binding']={key:slot_observation[key] for key in (
+                    'rect_transform','toggle_address','native_toggle_address','widget_ui_address','game_object_address')}
+                result['canvas_address']=slot_observation['canvas_address']
+                if m.ref(nodes,'material_list')!=group or m.ref(group,'_children')!=children \
+                        or m.list_refs(children)!=widgets:
+                    raise ValueError('材料槽列表在读取期间变化')
         elif kind in ('material','close_picker'):
             if not opened:raise ValueError('材料选择器尚未打开')
             bag=m.ref(nodes,'bag_widget'); ui=m.ref(bag,'ui')
@@ -659,12 +785,18 @@ class SinglePotReader(CookingSelectionReader):
                 result['rect']=self._rect(m.ref(ui,'close_btn'),stack,panel,nodes,size)
             else:
                 options=m.ref(bag,'_opt')
-                if self.integer(options,'RecipeId')!=self.materials()['selected']['recipe_id'] \
-                        or self.integer(options,'SelectedSlotIndex')!=index \
-                        or self.integer(panel,'_selectedSlotIndex')!=index:
+                recipe_id=self.integer(options,'RecipeId')
+                if recipe_id!=self.materials()['selected']['recipe_id']:
                     raise ValueError('材料选择器绑定的料理或槽位不符')
-                data=m.list_refs(m.ref(bag,'_bagList')); group=m.ref(ui,'pack_list')
-                widgets=m.list_refs(m.ref(group,'_children'))
+                selected_slot=self.integer(options,'SelectedSlotIndex')
+                if selected_slot!=index or self.integer(panel,'_selectedSlotIndex')!=index:
+                    raise ValueError('材料选择器绑定的料理或槽位不符')
+                data_list=m.ref(bag,'_bagList');data=m.list_refs(data_list);group=m.ref(ui,'pack_list')
+                children=m.ref(group,'_children');widgets=m.list_refs(children)
+                if material_observation is not None:
+                    material_observation.update(panel=panel, bag=bag, bag_ui=ui, options=options,
+                        recipe_id=recipe_id, selected_slot=selected_slot, pack_list=group,
+                        data_list=data_list, children_list=children, data_count=len(data), widget_count=len(widgets))
                 matches=[]
                 for i,row in enumerate(data):
                     ci=self.ui.expected(row,'BackpackItemUiData',''); ff=m.field(ci['address'],'Item'); item=m.cls(ff['type'])
@@ -681,8 +813,15 @@ class SinglePotReader(CookingSelectionReader):
                 if len(matches)!=1:raise ValueError('所需材料分堆未出现在当前选择器')
                 i,item_id=matches[0]
                 if i>=len(widgets):raise ValueError('材料列表控件尚未生成')
-                result.update(index=index,net_id=net_id,item_id=item_id,rect=self._toggle_rect(widgets[i],stack,size))
+                if material_observation is not None:
+                    material_observation.update(row_index=i, row_address=data[i], widget_address=widgets[i],
+                                                item_id=item_id, net_id=net_id)
+                result.update(index=index,net_id=net_id,item_id=item_id,
+                              rect=self._toggle_rect(widgets[i],stack,size,material_observation,
+                                                     material_candidate=material_observation is not None))
                 viewport=m.ref(group,'_viewPort')
+                if material_observation is not None:
+                    material_observation['viewport_address']=viewport
                 if viewport:
                     canvas=m.ref(stack[1],'<CanvasRect>k__BackingField')
                     vr=rect_to_client(self.layout.rect(viewport)['rect'],self.layout.transforms(viewport),

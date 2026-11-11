@@ -40,6 +40,61 @@ def test_mismatch_is_specific_value_error_and_preserves_both_references(panel_de
     assert (ex.value.panel_detail, ex.value.system_detail) == (panel_detail, 100)
 
 
+def test_blue_roll_selects_base_and_reports_requested_product(monkeypatch):
+    from utils.core.cooking_catalog import load_catalog
+
+    recipes = {recipe['recipe_id']: recipe for recipe in load_catalog()['recipes']}
+    target = recipes[45160]
+    base = recipes[45153]
+    kitchen = Kitchen('recover', mismatch_reads=0)
+    kitchen.card = {**kitchen.card, 'recipe_id': 45153}
+    original_selection = kitchen.selection
+
+    def selection(size):
+        view = original_selection(size)
+        view['available_ids'] = [45153]
+        if kitchen.clicked:
+            view['selected'] = {'recipe_id': 45153, 'name': base['name']}
+        return view
+
+    kitchen.selection = selection
+    monkeypatch.setattr(selection_flow, 'material_status',
+                        lambda recipe, inventory: {'sufficient': recipe is target})
+    result = selection_flow.select_recipe(
+        recipe=target, reader=kitchen, window=kitchen, controls=kitchen,
+        device=kitchen, inventory=kitchen.inventory, clock=kitchen, report=kitchen.report)
+    assert result['recipe_id'] == 45160
+    assert result['base_recipe_id'] == 45153
+    assert left_clicks(kitchen) == 1
+
+
+def test_blue_roll_requires_two_blue_sugars_in_base_group_slots():
+    from utils.core.cooking_catalog import load_catalog
+    from utils.core.cooking_single_pot import material_plan, slots_match
+
+    target = next(recipe for recipe in load_catalog()['recipes'] if recipe['recipe_id'] == 45160)
+    current_ids = (46102, 46103, 46107, 46107)
+    slots = [
+        {'kind': kind, 'required_id': required, 'filled': True, 'net_id': item, 'item_id': item}
+        for (kind, required), item in zip(
+            [('item', 46102), ('item', 46103), ('group', 16), ('group', 16)], current_ids)
+    ]
+    view = {'selected': {'recipe_id': 45153, 'name': '原味浮云卷'}, 'slots': slots}
+    bag = {'items': [
+        {'item_id': item, 'net_id': item, 'count': count, 'locked': False, 'disabled': False, 'star': 0}
+        for item, count in [(46102, 1), (46103, 1), (46107, 2), (46112, 2)]
+    ]}
+    plan = material_plan(target, view, bag)
+    assert [item['item_id'] for item in plan] == [46102, 46103, 46112, 46112]
+    assert not slots_match(slots, plan)
+    verified = [dict(slot, **{k: item[k] for k in ('item_id', 'net_id')})
+                for slot, item in zip(slots, plan)]
+    assert slots_match(verified, plan)
+    bag['items'][-1]['count'] = 1
+    with pytest.raises(ValueError, match='无法满足全部槽位'):
+        material_plan(target, view, bag)
+
+
 class Kitchen:
     def __init__(self, mode, mismatch_reads=3):
         self.mode = mode
@@ -149,3 +204,90 @@ def test_no_mismatch_regular_switch_still_works(monkeypatch):
     assert run(k, monkeypatch)['recipe_id'] == 45558
     assert left_clicks(k) == 1
     assert not any(category == 'recipe_detail_sync_pending' for category, _ in k.reports)
+
+
+@pytest.mark.parametrize('scenario,condition', [
+    ('correct', None),
+    ('stale_then_correct', None),
+    ('wrong_recipe', 'selected_id_mismatch'),
+    ('target_instead_of_base', 'selected_id_mismatch'),
+    ('wrong_name', 'selected_name_mismatch'),
+    ('no_selection', 'selection_missing'),
+    ('unstable_signature', 'confirmation_signature_or_selection_changed'),
+    ('read_error', 'read_error'),
+    ('scene_changed', 'scope_or_stove_changed'),
+    ('manager_refresh', None),
+    ('manager_refresh_unreadable', 'read_error'),
+])
+def test_blue_roll_p1_readback_diagnostics(monkeypatch, scenario, condition):
+    from utils.core.cooking_catalog import load_catalog
+
+    recipes = {r['recipe_id']: r for r in load_catalog()['recipes']}
+    base = recipes[45153]
+    kitchen = Kitchen('recover', mismatch_reads=0)
+    kitchen.card = {**kitchen.card, 'recipe_id': 45153}
+    original_selection = kitchen.selection
+
+    def selection(size):
+        view = original_selection(size)
+        view['available_ids'] = [45153]
+        view['selection_evidence'] = {'ui_manager': 90, 'panel_address': 30,
+            'panel_active': True, 'card_addresses': {1: {'card_address': 10, 'button_address': 11}}}
+        if not kitchen.clicked:
+            return view
+        reads = kitchen.reads_after_click
+        view['selected'] = {'recipe_id': 45153, 'name': base['name']}
+        if scenario in ('read_error', 'manager_refresh_unreadable') and reads >= 2:
+            raise ValueError('食谱面板读取失败')
+        if scenario == 'scene_changed':
+            view['scope'] = 'other'
+        if scenario == 'manager_refresh':
+            view['selection_evidence']['ui_manager'] = 91
+        if scenario == 'wrong_recipe' or (scenario == 'stale_then_correct' and reads == 1):
+            view['selected'] = {'recipe_id': 45152, 'name': '旧食谱'}
+        elif scenario == 'target_instead_of_base':
+            view['selected'] = {'recipe_id': 45160, 'name': recipes[45160]['name']}
+        elif scenario == 'wrong_name':
+            view['selected']['name'] = '不匹配的名称'
+        elif scenario == 'no_selection':
+            view['selected'] = None
+        if scenario == 'unstable_signature':
+            view['signature'] = reads
+        return view
+
+    kitchen.selection = selection
+    monkeypatch.setattr(selection_flow, 'material_status',
+                        lambda recipe, inventory: {'sufficient': recipe is recipes[45160]})
+    def select():
+        return selection_flow.select_recipe(
+            recipe=recipes[45160], reader=kitchen, window=kitchen, controls=kitchen,
+            device=kitchen, inventory=kitchen.inventory, clock=kitchen, report=kitchen.report, timeout=1.2)
+
+    if condition is None:
+        result = select()
+        assert result['recipe_id'] == 45160 and result['base_recipe_id'] == 45153
+        assert any(state == 'RECIPE_SELECTED' for state, _ in kitchen.reports)
+    else:
+        with pytest.raises(ValueError):
+            select()
+        failure, = [fields for state, fields in kitchen.reports
+                    if state == 'variant_recipe_confirmation_failed']
+        assert failure['condition'] == condition
+        assert failure['last_valid_read'] is not None
+        assert not any(state == 'RECIPE_SELECTED' for state, _ in kitchen.reports)
+    dispatch, = [fields for state, fields in kitchen.reports if state == 'variant_recipe_dispatch']
+    assert (dispatch['target_recipe_id'], dispatch['base_recipe_id']) == (45160, 45153)
+    assert dispatch['card']['recipe_id'] == 45153 and dispatch['card']['card_address'] == 10
+    assert dispatch['dispatch'] == {'mouse_down_returned': True, 'release_all_returned': True}
+    assert left_clicks(kitchen) == 1
+    reads = [fields for state, fields in kitchen.reports if state == 'variant_recipe_readback']
+    assert [r['sequence'] for r in reads] == list(range(1, len(reads)+1))
+    assert all(r['started_monotonic'] <= r['completed_monotonic'] for r in reads)
+    if scenario == 'stale_then_correct':
+        assert reads[0]['readback']['selected']['recipe_id'] == 45152
+        assert reads[-1]['readback']['selected']['recipe_id'] == 45153
+    if scenario == 'manager_refresh':
+        assert dispatch['before_click']['ui_manager'] == 90 and reads[0]['readback']['ui_manager'] == 91
+    if condition == 'read_error':
+        assert reads[-1]['read_error']['message'] == '食谱面板读取失败'
+        assert failure['last_valid_read']['selected']['recipe_id'] == 45153

@@ -34,6 +34,149 @@ def collect_with_key(*, reader, state, guard, device, wait, reserve):
         finally:release_cooking_inputs(device)
 
 
+def read_variant_slot_target(source, *, window, size, guard, wait, report, context):
+    """Require consecutive observations of one logical slot before moving."""
+    previous = None
+    sequence = 0
+
+    def sample(stage, reference=None, pointer=None):
+        nonlocal sequence
+        guard()
+        sequence += 1
+        diagnostic = dict(context, read_sequence=sequence, stage=stage, captured_at=now(),
+                          object_address=None, binding_identity=None, local_rect=None,
+                          screen_rect=None, canvas_scale=None, window_rect=None,
+                          binding_stable=None, rect_stable=None, stability_failure_reason=None)
+        try:
+            window_rect = tuple(window.get_rect())
+            diagnostic['window_rect'] = window_rect
+            current = source(diagnostic)
+            if tuple(window.get_rect()) != window_rect:
+                raise ValueError('读取变种材料槽期间游戏窗口移动')
+            l,t,r,b = current['rect']
+            x,y,right,bottom = window_rect
+            diagnostic['screen_rect'] = (x+l,y+t,x+r,y+b)
+            if (right-x,bottom-y) != size or not (0<=l<r<=size[0] and 0<=t<b<=size[1]):
+                raise ValueError('变种材料槽不在有效游戏客户区内')
+            binding = {key: value for key,value in current.items() if key != 'rect'}
+            diagnostic['binding_identity'] = binding
+            logical = {key: value for key,value in binding.items()
+                       if key not in ('widget','component_binding')}
+            if (current['recipe_id'], current['index'], current['slot'], current['stove_identity']) != (
+                    context['base_recipe_id'], context['slot_index'], context['expected_slot'],
+                    context['expected_stove']):
+                raise ValueError('变种材料槽食谱、索引或已选材料改变')
+            if reference is not None:
+                old, old_binding, old_logical, old_window = reference
+                changed = sorted(key for key in binding.keys() | old_binding.keys()
+                                 if binding.get(key) != old_binding.get(key))
+                delta = tuple(abs(a-b) for a,b in zip(current['rect'],old['rect']))
+                diagnostic.update(binding_changed_fields=changed, rect_edge_delta=delta,
+                                  binding_stable=not changed, rect_stable=max(delta)<=1.5)
+                reasons = []
+                if changed:reasons.append('binding_changed')
+                if max(delta)>1.5:reasons.append('rect_changed')
+                if window_rect!=old_window:reasons.append('window_rect_changed')
+                diagnostic['stability_failure_reason'] = reasons or None
+                if logical != old_logical:
+                    raise ValueError('变种材料槽逻辑归属改变')
+                if pointer is not None and (reasons or not (l<=pointer[0]<r and t<=pointer[1]<b)):
+                    if not reasons:diagnostic['stability_failure_reason'] = ['pointer_outside']
+                    raise ValueError('变种材料槽派发前绑定、坐标或鼠标命中未确认')
+            return current,binding,logical,window_rect
+        except Exception as exc:
+            diagnostic['read_error'] = {'type':type(exc).__name__,'message':str(exc)}
+            if not diagnostic['stability_failure_reason']:
+                diagnostic['stability_failure_reason'] = ['read_or_validation_failed']
+            raise
+        finally:
+            diagnostic['completed_at'] = now()
+            report('variant_slot_observation','变种材料槽点击前读取',slot_observation=diagnostic)
+
+    for delay in (0,.04,.02,.02):
+        if delay:wait(delay)
+        current = sample('before_move',previous)
+        if previous is not None and current[1] == previous[1] and current[3] == previous[3] and (
+                max(abs(a-b) for a,b in zip(current[0]['rect'],previous[0]['rect']))<=1.5):
+            return current[0],lambda pointer: sample('before_dispatch',current,pointer)
+        previous = current
+    raise ValueError('变种材料槽稳定性读取次数耗尽，未发送点击')
+
+
+def wait_for_variant_start(read_target, *, clock, guard, wait, report, window, recipe_snapshot,
+                           same_target):
+    deadline=clock.monotonic()+.5
+    samples=[]
+    owner=None
+    previous=None
+
+    def capture(observation):
+        nonlocal owner
+        guard()
+        bounds=tuple(window.get_rect())
+        observation['window_rect']=bounds
+        target=read_target(observation)
+        if tuple(window.get_rect())!=bounds:
+            raise ValueError('开始按钮读取期间窗口移动')
+        identity=tuple(observation[key] for key in
+                       ('scene_scope','ui_manager','panel_address','stove_identity','base_recipe_id'))
+        if owner is None:owner=identity
+        if identity!=owner or target['stove_identity']!=recipe_snapshot['stove_identity'] \
+                or identity[-1]!=recipe_snapshot['base_recipe_id']:
+            raise ValueError('开始按钮的场景、面板、灶台或食谱身份变化')
+        if observation['picker_state_verified'] is not True:
+            raise ValueError('材料选择器关闭状态未知，未点击开始')
+        enabled=observation['button_enabled']['state']
+        if enabled=='disabled':
+            raise ValueError('开始按钮已禁用，未发送点击')
+        if enabled not in ('enabled','unknown'):
+            raise ValueError('开始按钮启用状态记录无效，未发送点击')
+        # Keep the original read error in the observation. The owned UI and
+        # interaction checks below still govern a click when enabled is unknown.
+        if not observation['button_binding_valid'] or observation['button_panel']!=identity[2] \
+                or observation['button_bar_active'] is not True or observation['button_active'] is False \
+                or observation['m_Interactable'] is not True \
+                or observation['m_GroupsAllowInteraction'] is not True:
+            raise ValueError('开始按钮归属、显示或交互状态未确认')
+        button=tuple(observation[key] for key in
+                     ('button_address','button_wrapper','button_native','target_graphic','rect_transform'))
+        l,t,r,b=target['rect']
+        x,y,_,_=bounds
+        observation['screen_rect']=(x+l,y+t,x+r,y+b)
+        return target,button,bounds
+
+    error=None
+    try:
+        while clock.monotonic()<deadline:
+            observation={'captured_at':now()}
+            samples.append(observation)
+            target,button,bounds=capture(observation)
+            if clock.monotonic()>=deadline:break
+            current=(target,button,bounds)
+            if observation['picker_closed'] is True:
+                if previous is not None and current[1:]==previous[1:] and same_target(target,previous[0]):
+                    def verified_target(observation=None):
+                        latest={} if observation is None else observation
+                        fresh,fresh_button,fresh_bounds=capture(latest)
+                        if latest['picker_closed'] is not True or (fresh_button,fresh_bounds)!=(button,bounds) \
+                                or not same_target(fresh,target):
+                            raise ValueError('开始按钮稳定后复核失败，未发送点击')
+                        return fresh
+                    return verified_target
+                previous=current
+            else:
+                previous=None
+            remaining=deadline-clock.monotonic()
+            if remaining>0:wait(min(.02,remaining))
+        raise ValueError('开始按钮布局在 500ms 内未稳定，未发送点击')
+    except Exception as exc:
+        error={'type':type(exc).__name__,'message':str(exc)}
+        raise
+    finally:
+        report('variant_start_stability_wait','变种料理等待选择器关闭与开始按钮稳定',
+               samples=samples, deadline_ms=500, failure=error)
+
+
 def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock, report, journal):
     size=tuple(window.size()); events=SinglePotEvents(recipe)
     record={'schema':'cooking-single-pot-v1','pot_id':uuid4().hex,'recipe_id':recipe['recipe_id'],
@@ -97,10 +240,12 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
         if stock_scope is None:stock_scope=value['scope']
         if value['scope']!=stock_scope:raise ValueError('本锅背包归属改变')
         return value
-    def click(read_target, before_input=None, *, hold_alt=False):
+    def click(read_target, before_input=None, *, hold_alt=False, variant_slot=None, start_trace=None):
         nonlocal alt_interaction_active,pending_ack,ack_succeeded
         if not hold_alt:
-            return click_body(read_target,before_input)
+            if start_trace is not None:
+                return click_body(read_target,before_input,start_trace=start_trace)
+            return click_body(read_target,before_input,variant_slot=variant_slot)
         pending_ack=None;ack_succeeded=False
         initial=read(read_target)
         try:
@@ -118,17 +263,27 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                     report('ack_post_diagnostic','UI 确认事后诊断；原输入清理已执行',
                         ack_diagnostic=pending_ack.finalize(failed=not ack_succeeded and inputs_released))
                 except Exception:pass
-    def click_body(read_target, before_input=None, expected=None):
+    def click_body(read_target, before_input=None, expected=None, *, variant_slot=None, start_trace=None):
         nonlocal pending_ack,ack_succeeded
+        def target_binding(value):
+            return {key: item for key, item in value.items() if key != 'rect'}
         def same_target(a,b):
-            return ({k:v for k,v in a.items() if k!='rect'}=={k:v for k,v in b.items() if k!='rect'}
+            return (target_binding(a)==target_binding(b)
                     and len(a['rect'])==len(b['rect'])==4
                     and max(abs(x-y) for x,y in zip(a['rect'],b['rect']))<=1.5)
-        target=read(read_target);wait(.04);fresh=read(read_target)
-        if expected is not None and {k:v for k,v in target.items() if k!='rect'}!={k:v for k,v in expected.items() if k!='rect'}:
-            raise ValueError('按下 ALT 后翻锅事件或按钮身份变化，未移动或点击')
-        if not same_target(fresh,target):raise ValueError('烹饪交互目标在点击前变化，未发送点击')
-        target=fresh
+        if start_trace is not None:
+            read_target=wait_for_variant_start(read_target,clock=clock,guard=guard,wait=wait,
+                report=report,window=window,recipe_snapshot=start_trace,same_target=same_target)
+            target=observe_start_comparison(read_target,same_target,target_binding,start_trace)
+        elif variant_slot is None:
+            target=read(read_target);wait(.04);fresh=read(read_target)
+            if expected is not None and target_binding(target)!=target_binding(expected):
+                raise ValueError('按下 ALT 后翻锅事件或按钮身份变化，未移动或点击')
+            if not same_target(fresh,target):raise ValueError('烹饪交互目标在点击前变化，未发送点击')
+            target=fresh
+        else:
+            target,verify_slot=read_variant_slot_target(read_target,window=window,size=size,
+                guard=guard,wait=wait,report=report,context=variant_slot)
         is_start=target.get('kind')=='start'
         if is_start:observe_start('before_click')
         rect=target['rect'];l,t,r,b=rect
@@ -145,7 +300,12 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
         report('mouse_diagnostic','烹饪鼠标到位诊断',mouse_diagnostic=mouse_diagnostic)
         if len(pointer)!=3 or not pointer[2] or math.dist(pointer[:2],point)>2:
             raise ValueError('鼠标未到达实际烹饪控件，未点击')
-        if not same_target(read(read_target),target):raise ValueError('烹饪控件绑定在派发前改变')
+        if variant_slot is not None:
+            verify_slot(pointer)
+            if window.pointer()!=pointer:
+                raise ValueError('变种材料槽派发前鼠标位置变化，未发送点击')
+        elif not same_target(read_target() if start_trace is not None else read(read_target),target):
+            raise ValueError('烹饪控件绑定在派发前改变')
         guard()
         if before_input:before_input()
         guard()
@@ -203,6 +363,74 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             if predicate(view):return view
             wait(.05)
         raise ValueError('材料选择输入后没有读回确认，未重复点击或开始制作')
+
+    def observe_start_comparison(read_target, same_target, target_binding, recipe_snapshot):
+        diagnostic={'first_snapshot':None, 'second_snapshot':None, 'changed_fields':None,
+                    'changed_target_fields':None, 'rect_edge_delta':None,
+                    'comparison_passed':None, 'failure_reason':None}
+
+        def capture(phase):
+            snapshot={'recipe':deepcopy(recipe_snapshot), 'captured_at':now()}
+            diagnostic[phase]=snapshot
+            errors=[]
+            def sample():
+                observation={}
+                snapshot['observation']=observation
+                try:
+                    window_rect=tuple(window.get_rect())
+                    observation.update(window_rect=window_rect, window_size=size)
+                    target=read_target(observation)
+                    observation['click_target']=deepcopy(target)
+                    l,t,r,b=target['rect']
+                    x,y,_,_=window_rect
+                    observation.update(screen_rect=(x+l,y+t,x+r,y+b),
+                                       mouse_target=(round((l+r)/2),round((t+b)/2)),
+                                       window_rect_after=tuple(window.get_rect()))
+                    return target
+                except Exception as exc:
+                    errors.append({'phase':phase, 'type':type(exc).__name__, 'message':str(exc),
+                                   'observation':observation})
+                    raise
+            try:
+                guard()
+                return sample()
+            finally:
+                snapshot.update(read_errors=errors, completed_at=now())
+
+        stage='first_snapshot'
+        try:
+            first=capture(stage)
+            stage='between_reads'
+            wait(.04)
+            stage='second_snapshot'
+            second=capture(stage)
+            stage='comparison'
+            before,after=target_binding(first),target_binding(second)
+            diagnostic['changed_target_fields']=sorted(
+                key for key in before.keys() | after.keys()
+                if (key in before)!=(key in after) or before.get(key)!=after.get(key))
+            if len(first['rect'])==len(second['rect'])==4:
+                diagnostic['rect_edge_delta']=tuple(abs(a-b) for a,b in zip(first['rect'],second['rect']))
+            diagnostic['comparison_passed']=same_target(second,first)
+            if not diagnostic['comparison_passed']:
+                diagnostic['failure_reason']='target_comparison_failed'
+                raise ValueError('烹饪交互目标在点击前变化，未发送点击')
+            return second
+        except Exception as exc:
+            diagnostic['failure_reason']=diagnostic['failure_reason'] or stage
+            diagnostic['error']={'stage':stage, 'type':type(exc).__name__, 'message':str(exc)}
+            raise
+        finally:
+            left=(diagnostic['first_snapshot'] or {}).get('observation')
+            right=(diagnostic['second_snapshot'] or {}).get('observation')
+            if left is not None and right is not None:
+                # On a failed read, omitted fields are unavailable, not changed.
+                keys=left.keys() & right.keys() if diagnostic['comparison_passed'] is None \
+                    else left.keys() | right.keys()
+                diagnostic['changed_fields']=sorted(
+                    key for key in keys if key!='click_target'
+                    and ((key in left)!=(key in right) or left.get(key)!=right.get(key)))
+            report('variant_start_comparison','变种料理开始按钮点击前比较',start_comparison=diagnostic)
     try:
         if recipe.get('status')!='confirmed' or not recipe.get('product_id'):
             raise ValueError('指定料理或产物编号尚未确认')
@@ -221,15 +449,29 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             fillable=[i for i in changes if counts.get(plan[i]['net_id'],0)>used[plan[i]['net_id']]]
             if not fillable:raise ValueError('材料分堆仍被其他槽位占用，未重复分配或开始制作')
             i=fillable[0]
+            item=plan[i]
             if view['picker_open'] and view['selected_slot']!=i:
                 click(lambda:reader.menu_target(size,'close_picker'))
                 await_slots(lambda v:not v['picker_open'])
             if not view['picker_open'] or view['selected_slot']!=i:
-                click(lambda:reader.menu_target(size,'slot',index=i))
+                if 'base_recipe_id' in recipe:
+                    click(lambda observation: reader.menu_target(size,'slot',index=i,slot_observation=observation),
+                          variant_slot=dict(slot_index=i,slot_identity=(recipe['base_recipe_id'],i),
+                              base_recipe_id=recipe['base_recipe_id'],target_recipe_id=recipe['recipe_id'],
+                              material_id=item['item_id'],expected_slot=view['slots'][i],
+                              expected_stove=initial['stove_identity'],
+                              remaining_slots=changes))
+                else:
+                    click(lambda:reader.menu_target(size,'slot',index=i))
                 await_slots(lambda v:v['picker_open'] and v['selected_slot']==i)
-            item=plan[i]
+            def material_target(observation=None):
+                kwargs = {} if observation is None else {'material_observation':observation}
+                target = reader.menu_target(size, 'material', index=i, net_id=item['net_id'], **kwargs)
+                if 'base_recipe_id' in recipe and target['item_id'] != item['item_id']:
+                    raise ValueError('变种食材编号与指定用料不符，未点击')
+                return target
             for _ in range(10):
-                target=read(lambda:reader.menu_target(size,'material',index=i,net_id=item['net_id']))
+                target=read(material_target)
                 if target['visible']:break
                 if not target['can_scroll']:raise ValueError('材料分堆不在可见列表且滚动入口未确认')
                 l,t,r,b=target['viewport'];x,y=round((l+r)/2),round((t+b)/2)
@@ -240,9 +482,56 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                 guard();device.execute({'type':'scroll','dx':0,'dy':2 if target['rect'][1]<t else -2})
                 wait(.2)
             else:raise ValueError('材料列表滚动后仍未找到可见的指定分堆')
-            click(lambda:reader.menu_target(size,'material',index=i,net_id=item['net_id']))
-            await_slots(lambda v:v['slots'][i]['filled'] and
+            if 'base_recipe_id' in recipe:
+                previous_candidate = None
+                candidate_sequence = 0
+
+                def observed_material_target():
+                    nonlocal previous_candidate,candidate_sequence
+                    candidate_sequence += 1
+                    observation = {}
+                    entry = dict(slot_index=i, target_recipe_id=recipe['recipe_id'],
+                                 expected_item_id=item['item_id'], expected_net_id=item['net_id'],
+                                 sequence=candidate_sequence, captured_at=now(), candidate=observation)
+                    try:
+                        observation['window_rect_before'] = tuple(window.get_rect())
+                        candidate = material_target(observation)
+                        observation['click_target'] = candidate
+                        observation['window_rect_after'] = tuple(window.get_rect())
+                        l,t,r,b = candidate['rect']
+                        x,y,_,_ = observation['window_rect_before']
+                        observation['screen_rect'] = (x+l,y+t,x+r,y+b)
+                        if previous_candidate is not None:
+                            prior, prior_target = previous_candidate
+                            entry['changed_fields'] = sorted(
+                                key for key in observation.keys() | prior.keys()
+                                if observation.get(key)!=prior.get(key) and key!='click_target')
+                            entry['changed_target_fields'] = sorted(
+                                key for key in candidate.keys() | prior_target.keys()
+                                if candidate.get(key)!=prior_target.get(key) and key!='rect')
+                            entry['rect_edge_delta'] = tuple(
+                                abs(a-b) for a,b in zip(candidate['rect'],prior_target['rect']))
+                            entry['rect_stable'] = max(entry['rect_edge_delta'])<=1.5
+                        previous_candidate = observation,candidate
+                        return candidate
+                    except Exception as exc:
+                        entry['read_error'] = {'type':type(exc).__name__,'message':str(exc)}
+                        raise
+                    finally:
+                        entry['completed_at'] = now()
+                        report('variant_material_candidate',f'变种材料候选槽 {i} 第 {candidate_sequence} 次读取',
+                               material_candidate=entry)
+
+                click(observed_material_target)
+            else:
+                click(material_target)
+            verified=await_slots(lambda v:v['slots'][i]['filled'] and
                         (v['slots'][i]['net_id'],v['slots'][i]['item_id'])==(item['net_id'],item['item_id']))
+            if 'base_recipe_id' in recipe:
+                report('variant_slot_replaced','变种材料槽替换已读回确认',slot_index=i,
+                       base_recipe_id=recipe['base_recipe_id'],target_recipe_id=recipe['recipe_id'],
+                       material_id=item['item_id'],selected_slot=verified['slots'][i],
+                       remaining_slots=[index for index in changes if index!=i])
         else:raise ValueError('全部材料槽未确认，未开始制作')
         view=read(reader.materials)
         if view['picker_open']:
@@ -263,7 +552,18 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             save('start_reserved','启动单锅操作已登记，等待游戏确认，不重发',
                  inventory_scope=latest['scope'],inventory_before=deepcopy(latest['counts']),material_slots=now_view['slots'],
                  start_reserved_at=start_reserved_at)
-        click(lambda:reader.menu_target(size,'start'),reserve_start)
+        if recipe['recipe_id']==45160 and recipe.get('base_recipe_id')==45153:
+            def start_target(observation=None):
+                if observation is None:
+                    return reader.menu_target(size,'start')
+                return reader.menu_target(size,'start',start_observation=observation)
+            click(start_target,reserve_start,start_trace={
+                'base_recipe_id':view['selected']['recipe_id'], 'target_recipe_id':recipe['recipe_id'],
+                'stove_identity':view['stove_identity'],
+                'material_slots':view['slots'], 'recipe_confirmed':True,
+                'material_snapshot_source':'pre_start_recipe_and_slot_stability_check'})
+        else:
+            click(lambda:reader.menu_target(size,'start'),reserve_start)
         start_at=clock.monotonic();collect_at=None;last_signature=None;observed_phase=None
         next_start_observation=start_at
         start_transition_observed=False

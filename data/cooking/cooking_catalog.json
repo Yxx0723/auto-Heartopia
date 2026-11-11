@@ -1679,6 +1679,7 @@
     {
       "name": "蓝色浮云卷",
       "recipe_id": 45160,
+      "base_recipe_id": 45153,
       "product_id": 45160,
       "category": "日常料理",
       "cooker_type": 1,

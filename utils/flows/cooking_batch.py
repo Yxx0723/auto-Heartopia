@@ -4,6 +4,7 @@ import traceback
 
 from utils.core.cooking_catalog import material_status
 from utils.drivers.coordinate_point_store import atomic_write_json
+from utils.drivers.cooking_first_recipe_notice import observe_first_recipe_notice
 from utils.drivers.cooking_single_pot import SinglePotReader
 from utils.drivers.input_task_gate import InputTaskGate
 
@@ -93,6 +94,19 @@ def run_batch(*, target, recipe, memory, window, controls, device, clock,
             summary['pots'].append({'number':number,'pot_id':result['pot_id'],
                                     'product_delta':delta,'record':str(potdir/'pot.json')})
             publish('batch_pot_finished','第 '+str(number)+' 锅已确认完成')
+            if number < target:
+                guard()
+                notice = step('check_first_recipe_notice',
+                              lambda: observe_first_recipe_notice(native, window, recipe))
+                summary['pots'][-1]['first_recipe_notice'] = notice
+                atomic_write_json(directory/'batch.json', summary)
+                report('batch_first_recipe_notice', '首次制作提示检测：' + notice['state'],
+                       batch=deepcopy(summary), notice=deepcopy(notice))
+                guard()
+                if notice['state'] != 'absent':
+                    if notice['state'] == 'confirmed':
+                        raise ValueError('检测到首次制作提示，请手动关闭后重新开始批次')
+                    raise ValueError('锅间底部对话状态未确认，未开始下一锅')
         publish('batch_finished','连续制作完成：'+str(target)+' 锅，成品增加 '+str(summary['total_products']))
         return deepcopy(summary)
     except Exception as exc:

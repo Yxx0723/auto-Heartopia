@@ -127,7 +127,7 @@ class NativeUiLayout:
             raise MapLayoutUpdating('界面变换数值正在更新')
         return chain
 
-    def button_geometry(self,component):
+    def button_geometry(self,component,observation=None):
         """Reach a button's real rectangle through its owned target Graphic."""
         m,n=self.meta,self.native;info=m.obj(component)
         if info['name'] not in ('CustomButton','CustomSwapButton','CustomToggleButton'):
@@ -136,16 +136,28 @@ class NativeUiLayout:
         if (wi['name'],wi['namespace'])!=('Button','UnityEngine.UI'):
             raise ValueError('地图按钮原生桥接类型未确认')
         target=self.resolve(wrapper,'Button','UnityEngine.UI')
-        graphic=n.ref(target,'m_TargetGraphic');rect=n.ref(graphic,'m_RectTransform')
+        if observation is not None:
+            observation.update(button_wrapper=wrapper, button_native=target,
+                               button_type=f"{wi['namespace']}.{wi['name']}")
+        graphic=n.ref(target,'m_TargetGraphic')
+        if observation is not None:observation['target_graphic']=graphic
+        rect=n.ref(graphic,'m_RectTransform')
+        if observation is not None:observation['rect_transform']=rect
         for name in ('m_Interactable','m_GroupsAllowInteraction'):
             f=n.field(n.obj(target)['address'],name,2)
-            if n.data(target+f['offset'],1)!=b'\x01':
+            enabled=n.data(target+f['offset'],1)==b'\x01'
+            if observation is not None:observation[name]=enabled
+            if not enabled:
                 raise ValueError('地图按钮当前不可交互')
-        geometry=self.native_rect(rect);chain=self.native_transforms(rect)
+        geometry=self.native_rect(rect)
+        if observation is not None:observation['local_rect']=geometry['rect']
+        chain=self.native_transforms(rect)
         if m.ref(component,'unityComponent')!=wrapper \
                 or self.resolve(wrapper,'Button','UnityEngine.UI')!=target \
                 or n.ref(target,'m_TargetGraphic')!=graphic or n.ref(graphic,'m_RectTransform')!=rect:
             raise ValueError('地图按钮对象归属正在变化')
+        if observation is not None:
+            observation.update(button_binding_valid=True, transform_chain=chain)
         return geometry['rect'],chain
 
     def active(self,obj):

@@ -1,6 +1,7 @@
 """Single-pot material allocation and event acknowledgement; no input or vision."""
 from collections import Counter
 
+from utils.core.cooking_catalog import base_recipe
 
 # Read from this client's EcsClient CookingStatus literal constants, not timing.
 STATUSES = {0: 'Idle', 1: 'Preparing', 2: 'Cooking', 3: 'Danger',
@@ -8,17 +9,31 @@ STATUSES = {0: 'Idle', 1: 'Preparing', 2: 'Cooking', 3: 'Danger',
 
 
 def material_plan(recipe, view, inventory):
+    card = base_recipe(recipe)
     selected = view.get('selected') or {}
-    if (selected.get('recipe_id'), selected.get('name')) != (recipe['recipe_id'], recipe['name']):
+    if (selected.get('recipe_id'), selected.get('name')) != (card['recipe_id'], card['name']):
         raise ValueError('实际料理与本次选择不一致，未投料')
     slots = view['slots']
     requirements = {('group' if r['item_id'] is None else 'item',
                      r['material_group_id'] if r['item_id'] is None else r['item_id']): r
-                    for r in recipe['ingredients']}
+                    for r in card['ingredients']}
     expected = Counter({k: r['quantity'] for k, r in requirements.items()})
     actual = Counter((s['kind'], s['required_id']) for s in slots)
     if actual != expected:
         raise ValueError('游戏材料槽需求与离线配方不一致，未投料')
+    if card is not recipe:
+        variant_requirements = {}
+        for material in recipe['ingredients']:
+            allowed = set(material['allowed_item_ids'])
+            matches = [key for key, base in requirements.items()
+                       if allowed and allowed <= set(base['allowed_item_ids'])
+                       and material['quantity'] == base['quantity']]
+            if len(matches) != 1 or matches[0] in variant_requirements:
+                raise ValueError('变种材料无法唯一对应基础食谱槽位，未投料')
+            variant_requirements[matches[0]] = material
+        if variant_requirements.keys() != requirements.keys():
+            raise ValueError('变种配方未覆盖全部基础食谱槽位，未投料')
+        requirements = variant_requirements
     rows = {r['net_id']: r for r in inventory['items']}
     if len(rows) != len(inventory['items']):
         raise ValueError('背包材料分堆身份不唯一')

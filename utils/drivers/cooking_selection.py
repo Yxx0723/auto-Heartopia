@@ -50,6 +50,7 @@ class CookingSelectionReader(CookingMenuStateReader):
         viewport_rect = rect_to_client(self.layout.native_rect(viewport)['rect'],
             self.layout.native_transforms(viewport), canvas_rect, canvas_chain, client_size)
         cards = []
+        card_addresses = {}
         for card in m.dictionary(m.ref(scroll, '_rootToComponent'), max_items=256):
             if (m.obj(card)['name'], m.obj(card)['namespace']) != ('NewCardWidget', 'XDTGame.UI.Widget'):
                 continue
@@ -73,6 +74,7 @@ class CookingSelectionReader(CookingMenuStateReader):
             l,t,r,b = rect; vl,vt,vr,vb = viewport_rect
             if vl <= l < r <= vr and vt <= t < b <= vb:
                 cards.append({'recipe_id': identity, 'rect': rect, 'handle': handle})
+                card_addresses[handle] = {'card_address': card, 'button_address': component}
             if m.ref(card, 'ui') != ui or m.ref(ui, 'root_t') != root \
                     or m.ref(ui, 'card_btn') != component or m.integer(card+m.field(m.obj(card)['address'], '_handle')['offset']) != handle:
                 raise ValueError('料理卡片正在回收或更新')
@@ -82,4 +84,6 @@ class CookingSelectionReader(CookingMenuStateReader):
                 or after != state or selected['scope'] != state['scope']:
             raise ValueError('料理列表或灶台在读取期间变化')
         return {**state, 'available_ids': ids, 'cards': cards, 'viewport': viewport_rect,
-                'selected': selected['selected'], 'signature': selected['signature']}
+                'selected': selected['selected'], 'signature': selected['signature'],
+                'selection_evidence': {'panel_address': panel, 'ui_manager': stack[1],
+                    'panel_active': True, 'panel_focused': True, 'card_addresses': card_addresses}}
