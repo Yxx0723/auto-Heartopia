@@ -436,7 +436,10 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             raise ValueError('指定料理或产物编号尚未确认')
         view=read(reader.materials);reader.bind(view['stove_identity'])
         initial=read(reader.state);events.observe(initial)
-        save('preparing_materials','已核对实际料理，正在逐槽核对用料',stove_identity=initial['stove_identity'])
+        attempts=getattr(reader,'binding_metrics',None)
+        binding_timing={'binding_attempts':attempts} if isinstance(attempts,list) else {}
+        save('preparing_materials','已核对实际料理，正在逐槽核对用料',
+             stove_identity=initial['stove_identity'],**binding_timing)
         # Native AutoFill already runs on recipe selection. Keep every valid
         # stack; fill/change only slots whose actual stack is not in the plan.
         for _ in range(5):

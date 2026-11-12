@@ -41,7 +41,8 @@ def test_batch_records_completed_pot_before_notice(monkeypatch, tmp_path, state,
     reader = Mock()
     reader.state.return_value = {'stove_identity': stove, 'scope': 's', 'local_net_id': 4, 'status': 0}
     reader.snapshot.return_value = {'stove_identity': stove}
-    monkeypatch.setattr(cooking_batch, 'SinglePotReader', lambda memory: reader)
+    factory = Mock(return_value=reader)
+    monkeypatch.setattr(cooking_batch, 'SinglePotReader', factory)
     monkeypatch.setattr(cooking_batch, 'material_status', lambda recipe, stock: {'sufficient': True})
     detection = Mock(return_value={'state': state, 'auto_click_enabled': False})
     monkeypatch.setattr(cooking_batch, 'observe_first_recipe_notice', detection)
@@ -68,4 +69,6 @@ def test_batch_records_completed_pot_before_notice(monkeypatch, tmp_path, state,
     assert saved['completed_pots'] == saved['total_products'] == completed
     assert saved['pots'][0]['first_recipe_notice']['state'] == state
     assert detection.call_count == 1
+    assert factory.call_count == 1
+    assert reader.bind.call_count == (3 if state == 'absent' else 1)
     assert [call[0] for call in device.method_calls] == ['release_all']

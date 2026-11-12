@@ -1,6 +1,7 @@
 """Owned cooking component and native UI observations. Never writes memory."""
 import struct
 import hashlib
+from time import perf_counter
 
 from utils.core.cooking_single_pot import STATUSES
 from utils.core.ui_projection import rect_to_client
@@ -19,6 +20,8 @@ class SinglePotReader(CookingSelectionReader):
     def __init__(self, memory):
         super().__init__(memory)
         self.bound = None
+        self.binding_witness = None
+        self.binding_metrics = []
 
     def integer(self, obj, name, code=8, fmt='i', width=4):
         return struct.unpack('<'+fmt, self.ui.payload(obj, name, code, width))[0]
@@ -66,7 +69,7 @@ class SinglePotReader(CookingSelectionReader):
                 'picker_open': self.integer(panel, '_isOpenBag', 2, 'B', 1) == 1,
                 'selected_slot': self.integer(panel, '_selectedSlotIndex')}
 
-    def bind(self, stove):
+    def _binding_source(self):
         m = self.ui.meta; context = self.recipe.context()
         sample = self.memory.snapshot(); local = MemorySceneMap.local_hierarchy(sample)
         registry = m.static_ref(m.obj(local)['address'], 'ActiveHierarchies')
@@ -76,14 +79,85 @@ class SinglePotReader(CookingSelectionReader):
         role = local_entities.pop()
         if self.integer(role, '<isSelfPlayer>k__BackingField', 2, 'B', 1) != 1:
             raise ValueError('当前人物归属未确认')
+        return context, local, registry, role
+
+    def _binding_stamp(self, source, path):
+        m = self.ui.meta
+        _, local, registry, _ = source
+        hierarchy, owner, entity, components = path
+        if (m.static_ref(m.obj(local)['address'], 'ActiveHierarchies') != registry
+                or m.ref(hierarchy, '_hierarchyObject') != owner
+                or m.ref(owner, '<entity>k__BackingField') != entity
+                or m.ref(entity, '_components') != components):
+            raise ValueError('已绑定灶台的活动层级或组件归属已变化')
+        return m.dictionary_stamp(registry), m.dictionary_stamp(components, 128)
+
+    def bind(self, stove):
+        # A failed proof never leaves a binding usable by a later state read.
+        stove = tuple(stove)
+        self.binding_metrics = []
+        previous = self.bound
+        try:
+            if previous is not None:
+                state = self._time_binding('quick', lambda: self._revalidate(stove))
+                if state is not None:
+                    return state
+            self.bound = self.binding_witness = None
+            return self._time_binding('full', lambda: self._bind_full(stove, previous))
+        except Exception:
+            self.bound = self.binding_witness = None
+            raise
+
+    def _time_binding(self, mode, read):
+        started = perf_counter()
+        record = {'mode': mode, 'outcome': 'failed'}
+        try:
+            result = read()
+            record['outcome'] = 'verified' if result is not None else 'collection_changed'
+            return result
+        except Exception as exc:
+            record.update(error_type=type(exc).__name__, error=str(exc))
+            raise
+        finally:
+            record['seconds'] = perf_counter() - started
+            self.binding_metrics.append(record)
+
+    def _revalidate(self, stove):
+        source, path, stamp = self.binding_witness
+        if stove != self.bound[1] or self._binding_source() != source:
+            raise ValueError('场景、人物、灶台或活动层级入口已变化')
+        before = self._binding_stamp(source, path)
+        # The original scan matched the exact types, not just their short names.
+        m = self.ui.meta
+        info = m.obj(self.bound[4])
+        data = m.field(info['address'], '_componentData')
+        typ = m.cls(data['type'])
+        if ((info['name'], info['namespace']) !=
+                ('CookingComponent', 'XDTLevelAndEntity.Gameplay.Component.Homeland')
+                or data['code'] != 17 or (typ['name'], typ['namespace']) !=
+                ('CookingComponentData', 'XDTDataAndProtocol.ComponentsData')):
+            raise ValueError('已绑定灶台组件类型已变化')
+        state = self.state()
+        after = self._binding_stamp(source, path)
+        if before != after:
+            raise ValueError('灶台绑定复核期间集合正在变化')
+        return state if after == stamp else None
+
+    def _bind_full(self, stove, previous):
+        m = self.ui.meta
+        source = self._binding_source()
+        context, _, registry, role = source
+        hierarchies, registry_stamp = m.dictionary(registry, with_stamp=True)
         matches = []
-        for hierarchy in m.dictionary(registry):
+        for hierarchy in hierarchies:
             try:
                 owner = m.ref(hierarchy, '_hierarchyObject')
                 if not owner or m.obj(owner)['name'] not in ('StaticLevelObjectWrap', 'LevelEntityComponent'):
                     continue
                 entity = m.ref(owner, '<entity>k__BackingField')
-                for component in m.dictionary(m.ref(entity, '_components'), max_items=128):
+                components = m.ref(entity, '_components')
+                entries, component_stamp = m.dictionary(components, max_items=128, with_stamp=True)
+                for component in entries:
                     info = m.obj(component)
                     if (info['name'], info['namespace']) != ('CookingComponent', 'XDTLevelAndEntity.Gameplay.Component.Homeland'):
                         continue
@@ -99,13 +173,22 @@ class SinglePotReader(CookingSelectionReader):
                         continue
                     if self.integer(component, '_cookerStaticId') != stove[0]:
                         continue
-                    matches.append((component, entity, parent, parent_entity))
+                    matches.append(((component, entity, parent, parent_entity),
+                                    (hierarchy, owner, entity, components), component_stamp))
             except (ValueError, OSError):
                 continue  # Unrelated streaming objects never authorize a pot.
-        if len(matches) != 1 or self.recipe.context() != context:
+        if len(matches) != 1 or self._binding_source() != source:
             raise ValueError('当前灶台的烹饪组件尚未唯一对应')
-        self.bound = (context, tuple(stove), role, self.entity_net(role), *matches[0])
-        return self.state()
+        binding, path, component_stamp = matches[0]
+        stamp = (registry_stamp, component_stamp)
+        self.bound = (context, stove, role, self.entity_net(role), *binding)
+        if previous is not None and previous != self.bound:
+            raise ValueError('重新绑定发现灶台组件或人物身份变化')
+        state = self.state()
+        if self._binding_stamp(source, path) != stamp:
+            raise ValueError('完整绑定期间活动层级或组件集合发生变化')
+        self.binding_witness = (source, path, stamp)
+        return state
 
     def state(self):
         if self.bound is None:

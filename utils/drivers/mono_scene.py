@@ -240,7 +240,7 @@ class SceneMetadata:
         info, length = self.array(address)
         return list(struct.unpack('<' + 'Q' * length, self.data(address + 32, length * 8))) if length else []
 
-    def dictionary(self, obj, max_items=policy.COORD_SCENE_MAX_ITEMS):
+    def _dictionary_stamp_reader(self, obj):
         info = self.obj(obj)
         if (info['name'], info['namespace']) != ('Dictionary`2', 'System.Collections.Generic'):
             raise ValueError('场景集合类型不符')
@@ -251,16 +251,29 @@ class SceneMetadata:
         addresses = [obj+f['offset'] for f in fields]
         def stamp():
             return (*[self.integer(at) for at in addresses], self.ref(obj, '_entries'))
-        before = stamp()
-        _, count, free, entries = before
-        # .NET _count is the occupied high-water mark, not the number of live
-        # objects. A long-lived registry can have a large array and many holes.
+        return stamp
+
+    @staticmethod
+    def _validate_dictionary_stamp(stamp, max_items):
+        _, count, free, _ = stamp
+        # _count is the high-water mark, not the number of live objects.
         if not 0 <= free <= count <= policy.COORD_SCENE_MAX_CAPACITY or not 0 <= count-free <= max_items:
             raise ValueError('场景集合数量无效')
+
+    def dictionary_stamp(self, obj, max_items=policy.COORD_SCENE_MAX_ITEMS):
+        stamp = self._dictionary_stamp_reader(obj)()
+        self._validate_dictionary_stamp(stamp, max_items)
+        return stamp
+
+    def dictionary(self, obj, max_items=policy.COORD_SCENE_MAX_ITEMS, *, with_stamp=False):
+        stamp = self._dictionary_stamp_reader(obj)
+        before = stamp()
+        self._validate_dictionary_stamp(before, max_items)
+        _, count, free, entries = before
         if count == free:
             if stamp() != before:
                 raise SceneReadIssue('场景集合在读取时发生变化', kind='mutation', stage=self.stage, retryable=True)
-            return []
+            return ([], before) if with_stamp else []
         array, length = self.array(entries, policy.COORD_SCENE_MAX_CAPACITY)
         element = self.cls(array['element'])
         stride = element['size'] - 16
@@ -280,7 +293,7 @@ class SceneMetadata:
                     result.append(address)
         if occupied != count-free or stamp() != before:
             raise SceneReadIssue('场景集合在读取时发生变化', kind='mutation', stage=self.stage, retryable=True)
-        return result
+        return (result, before) if with_stamp else result
 
     def list_refs(self, obj):
         """Read only the occupied reference elements, with mutation checks."""

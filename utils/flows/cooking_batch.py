@@ -20,15 +20,18 @@ def run_batch(*, target, recipe, memory, window, controls, device, clock,
     context={'current_step':None,'last_successful_step':None,'current_pot':0,
              'confirmed_identity':None}
     summary['diagnostic_context']=context
-    def step(name,call):
+    native=None
+    def step(name,call,*,binding=False):
         context.update(current_step=name,current_pot=summary['current_pot'],
             confirmed_identity=deepcopy(identity))
         report('batch_step','执行批次步骤：'+name,batch=deepcopy(summary),
                diagnostic_context=deepcopy(context),step_phase='begin')
         value=call()
         context.update(last_successful_step=name,confirmed_identity=deepcopy(identity))
+        attempts=getattr(native,'binding_metrics',None) if binding else None
+        extra={'binding_attempts':attempts} if isinstance(attempts,list) else {}
         report('batch_step','完成批次步骤：'+name,batch=deepcopy(summary),
-               diagnostic_context=deepcopy(context),step_phase='complete')
+               diagnostic_context=deepcopy(context),step_phase='complete',**extra)
         return value
     def publish(state,message,**extra):
         summary.update(state=state,message=message)
@@ -53,9 +56,10 @@ def run_batch(*, target, recipe, memory, window, controls, device, clock,
             guard();summary['current_pot']=number
             potdir=directory/('锅次-'+str(number).zfill(2));potdir.mkdir(exist_ok=False)
             publish('batch_preparing','正在准备第 '+str(number)+' / '+str(target)+' 锅')
-            native=step('create_pot_reader',lambda:SinglePotReader(memory))
+            if native is None:
+                native=step('create_pot_reader',lambda:SinglePotReader(memory))
             if identity is not None:
-                step('bind_previous_confirmed_stove',lambda:native.bind(identity[0]))
+                step('bind_previous_confirmed_stove',lambda:native.bind(identity[0]),binding=True)
                 step('confirm_idle_before_entry',lambda:owned(native))
             if not material_status(recipe,step('read_material_inventory',inventory))['sufficient']:
                 raise ValueError('当前锅材料不足，批次停止，未开锅')
@@ -68,7 +72,7 @@ def run_batch(*, target, recipe, memory, window, controls, device, clock,
             if result['state']!='MENU_OPEN':
                 raise ValueError('本锅食谱入口未确认，批次停止：'+result.get('reason',result['state']))
             menu=step('reread_recipe_panel',native.snapshot)
-            step('bind_open_panel_stove',lambda:native.bind(menu['stove_identity']))
+            step('bind_open_panel_stove',lambda:native.bind(menu['stove_identity']),binding=True)
             step('confirm_idle_after_panel',lambda:owned(native))
             step('p1_select_recipe',lambda:selection_runner(recipe=deepcopy(recipe),reader=native,window=window,controls=controls,
                 device=device,inventory=inventory,clock=clock,report=lambda s,m,**x:publish(s,m,**x)))
@@ -115,6 +119,9 @@ def run_batch(*, target, recipe, memory, window, controls, device, clock,
             'traceback':traceback.format_exc(),
             'object_domain':deepcopy(getattr(exc,'object_domain_diagnostic',
                 {'state':'unavailable','reason':'exception has no object-domain witness'}))}
+        attempts=getattr(native,'binding_metrics',None)
+        if isinstance(attempts,list) and attempts and attempts[-1]['outcome']=='failed':
+            summary['failure_diagnostic']['binding_attempts']=attempts
         publish('batch_stopped','连续制作停止：'+type(exc).__name__+': '+str(exc))
         raise
     finally:
