@@ -48,9 +48,9 @@ class CookingCatalogPanel:
         self.runtime_page.pack(fill='both',expand=True,padx=8,pady=3)
         self.runtime_status=tk.StringVar(value='批次状态：空闲 · 当前阶段：—')
         owner.label(self.runtime_page,'',textvariable=self.runtime_status,wraplength=390,
-                    justify='left').pack(fill='x')
+                    justify='left',anchor='w').pack(fill='x')
         self.batch_progress=tk.StringVar(value='目标 — · 当前 — · 已完成 0 · 成品 +0')
-        owner.label(self.runtime_page,'',textvariable=self.batch_progress).pack(fill='x')
+        owner.label(self.runtime_page,'',textvariable=self.batch_progress,anchor='w').pack(fill='x')
         self.progress=ttk.Progressbar(self.runtime_page,mode='determinate',maximum=1,value=0)
         self.progress.pack(fill='x',pady=(1,2))
         self.runtime_error=tk.StringVar()

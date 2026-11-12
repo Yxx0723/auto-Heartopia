@@ -31,54 +31,58 @@ from utils.ui.point_wait_editor import PointWaitEditor
 from utils.ui.scene_map_worker import SceneMapWorker
 from utils.ui.map_draw_cache import MapDrawCache, Viewport, object_key, muted_color, nearby_model_key
 from utils.ui.collision_display import collision_faces
-from utils.ui.map_presentation import (MAP_STYLE, draw_grid, draw_chrome, draw_player, chrome_bounds,
+from utils.ui.map_presentation import (draw_grid, draw_chrome, draw_player, chrome_bounds,
                                       draw_waypoint_labels, draw_target_indicator)
 from utils.ui.map_labels import layout_waypoints, HoverTarget, MapHover, target_indicator
 from utils.drivers.mono_scene import MemorySceneMap, NavigationSceneMap
 from utils.core.map_water_reference import MAP_WATER_AREAS, MAP_WATER_ISLANDS
 from utils.core.map_reference_roads import REFERENCE_ROADS
+from utils.ui import theme
+from utils.ui.theme import (COLORS, MAP_STYLE, RoundedPanel, apply_dpi_scale,
+                            apply_theme, enable_dpi_awareness, font, px)
 
-
-COLORS = {'bg': '#101714', 'card': '#19221d', 'plot': MAP_STYLE['ground'],
-          'line': '#2b382f', 'text': '#edf3e8', 'muted': '#9ba99c', 'green': '#cef18b',
-          'red': '#f1a19a', 'blue': '#a8c8ee', 'amber': '#efc97b', 'button': '#202c24',
-          'shrub': '#365d3e', 'shrub_outline': '#89c880',
-          'blueberry': '#294a72', 'blueberry_outline': '#83b4ff',
-          'raspberry': '#6a2944', 'raspberry_outline': '#ed91b3'}
-
+# Map symbols keep saturated fills/outlines so they stay readable on the light
+# cream/sage ground; the surrounding chrome is owned by utils.ui.theme.
 PLANT_STYLES = {'blueberry': (COLORS['blueberry'], COLORS['blueberry_outline']),
                 'raspberry': (COLORS['raspberry'], COLORS['raspberry_outline']),
                 'bush': (COLORS['shrub'], COLORS['shrub_outline']),
-                'tree': ('#326046', '#acce89'),
-                'shrub': ('#3f4230', '#c3be83')}
+                'tree': ('#5F8A55', '#3E6B4A'),
+                'shrub': ('#8A8C5C', '#5E6A3C')}
 
-FAUNA_STYLES = {'butterfly': ('#45345b', '#bd91f2'),
-                'insect': ('#514528', '#e9c56b'),
-                'bird': ('#26484e', '#6bc9d7'),
-                'animal': ('#58422f', '#e8a775')}
+FAUNA_STYLES = {'butterfly': ('#6D5A8E', '#4A3B66'),
+                'insect': ('#8A7638', '#5F5222'),
+                'bird': ('#3E808C', '#27616B'),
+                'animal': ('#8A6240', '#5F4128')}
 
-MINERAL_STYLES = {'rock': ('#4d5b63', '#b0bec6'),
-                  'ore': ('#4d5146', '#e2c17d'), 'fluorite': ('#176e77', '#80f5ed')}
+MINERAL_STYLES = {'rock': ('#7C8A90', '#4E6067'),
+                  'ore': ('#8A7E4E', '#5F5630'), 'fluorite': ('#3E9AA2', '#1E6A72')}
 
 MAP_PIXELS_PER_UNIT = 3.  # Default 60-pixel grid spacing represents 20 world units.
 SCENE_RANGE_OPTIONS = (80, 150, 200, 300, 400)
 SCENE_RANKS = {**dict.fromkeys(PLANT_STYLES, 1), **dict.fromkeys(MINERAL_STYLES, 1),
                **dict.fromkeys(FAUNA_STYLES, 2), 'roaming_oak': 3}
 
-SCENE_CATEGORIES = {'blueberry': ('蓝莓', COLORS['blueberry_outline']),
-                    'raspberry': ('树莓', COLORS['raspberry_outline']),
-                    'bush': ('普通灌木', COLORS['shrub_outline']),
-                    'tree': ('树木', PLANT_STYLES['tree'][1]),
-                    'rock': ('岩石', MINERAL_STYLES['rock'][1]),
-                    'ore': ('矿石', MINERAL_STYLES['ore'][1]),
-                    'fluorite': ('无暇萤石', '#80f5ed'),
-                    'roaming_oak': ('溜溜橡木', '#e8b574'),
-                    'butterfly': ('蝴蝶', FAUNA_STYLES['butterfly'][1]),
-                    'insect': ('其他昆虫', FAUNA_STYLES['insect'][1]),
-                    'bird': ('鸟类', FAUNA_STYLES['bird'][1]),
-                    'animal': ('小动物', FAUNA_STYLES['animal'][1]),
-                    'shrub': ('未确认果灌', PLANT_STYLES['shrub'][1]),
-                    'other': ('其他物体', '#91a69a')}
+# Left navigation -> existing Notebook page index. All four pages stay alive;
+# switching never destroys a page or interrupts a running task.
+MODULES = (('自动采集', 0, '采集设定'),
+           ('自动烹饪', 3, '烹饪'),
+           ('地图与设置', 2, '地图与设置'))
+NAV_WIDE_THRESHOLD = 900
+
+SCENE_CATEGORIES = {'blueberry': ('蓝莓', '#4E72A8'),
+                    'raspberry': ('树莓', '#A85C7E'),
+                    'bush': ('普通灌木', '#5F8A55'),
+                    'tree': ('树木', '#3E6B4A'),
+                    'rock': ('岩石', '#4E6067'),
+                    'ore': ('矿石', '#7A6522'),
+                    'fluorite': ('无暇萤石', '#1E6A72'),
+                    'roaming_oak': ('溜溜橡木', '#9A6B32'),
+                    'butterfly': ('蝴蝶', '#6A4E8C'),
+                    'insect': ('其他昆虫', '#8A6A22'),
+                    'bird': ('鸟类', '#27616B'),
+                    'animal': ('小动物', '#8A5A34'),
+                    'shrub': ('未确认果灌', '#5E6A3C'),
+                    'other': ('其他物体', '#5E7062')}
 
 
 class DisplayValue(tk.StringVar):
@@ -232,9 +236,16 @@ class CoordinateWindow:
         icon = self.resources / 'monitor.ico'
         if icon.exists():
             root.iconbitmap(str(icon))
-        root.option_add('*Font', ('Microsoft YaHei UI', -13))
+        apply_dpi_scale(root)
+        apply_theme(root)
         root.protocol('WM_DELETE_WINDOW', self.close)
+        self.nav_mode = None
+        self.active_module = 0
+        self.log_collapsed = False
+        self.log_view = 'standard'
         self.build()
+        root.update_idletasks()
+        self.apply_nav_mode()
         root.bind('<Configure>', self.window_configured, add='+')
         self.worker.start()
         if self.scene_worker:
@@ -250,18 +261,18 @@ class CoordinateWindow:
     @staticmethod
     def label(parent, text='', color='text', font=None, **options):
         return tk.Label(parent, text=text, bg=parent.cget('bg'), fg=COLORS[color],
-                        font=font or ('Microsoft YaHei UI', -13), **options)
+                        font=font or theme.font(13), **options)
 
     def button(self, parent, text, action, primary=False, small=False):
         return tk.Button(parent, text=text, command=action, relief='flat', bd=0,
-                         highlightthickness=1, highlightbackground=COLORS['line'],
-                         bg=COLORS['green' if primary else 'button'],
-                         fg='#1b2815' if primary else COLORS['text'],
-                         activebackground='#bde379' if primary else '#2a382d',
-                         activeforeground='#1b2815' if primary else COLORS['text'],
-                         disabledforeground='#667362', cursor='hand2',
-                         font=('Microsoft YaHei UI', -12 if small else -13),
-                         padx=7 if small else 10, pady=4 if small else 6)
+                         highlightthickness=1, highlightbackground=COLORS['button_border'],
+                         bg=COLORS['primary' if primary else 'button'],
+                         fg=COLORS['primary_fg' if primary else 'text'],
+                         activebackground=COLORS['primary_active' if primary else 'button_active'],
+                         activeforeground=COLORS['text'],
+                         disabledforeground=COLORS['disabled'], cursor='hand2',
+                         font=theme.font(12 if small else 13),
+                         padx=px(7 if small else 10), pady=px(3 if small else 6))
 
     def field(self, parent, key, text='', **options):
         variable = DisplayValue(self.root, value=text)
@@ -271,35 +282,14 @@ class CoordinateWindow:
         return label
 
     def configure_dropdowns(self):
-        style = ttk.Style(self.root)
-        style.theme_use('clam')
-        style.configure('Monitor.TCombobox', font=('Microsoft YaHei UI', -13),
-                        padding=(7, 4), arrowsize=14, borderwidth=1,
-                        foreground=COLORS['text'], fieldbackground=COLORS['button'],
-                        background=COLORS['button'], bordercolor=COLORS['line'],
-                        lightcolor=COLORS['line'], darkcolor=COLORS['line'],
-                        arrowcolor=COLORS['green'], selectbackground=COLORS['button'],
-                        selectforeground=COLORS['text'])
-        style.map('Monitor.TCombobox',
-                  fieldbackground=[('disabled', COLORS['card']), ('readonly', COLORS['button'])],
-                  foreground=[('disabled', '#667362')],
-                  arrowcolor=[('disabled', '#667362')],
-                  background=[('active', '#2a382d')],
-                  bordercolor=[('focus', COLORS['green']), ('active', '#667362')])
-        style.configure('TScrollbar', background=COLORS['line'], troughcolor=COLORS['button'],
-                        bordercolor=COLORS['button'], arrowcolor=COLORS['muted'])
-        style.map('TScrollbar', background=[('active', '#667362')])
-        for key, value in {'background': COLORS['button'], 'foreground': COLORS['text'],
-                           'selectBackground': COLORS['green'], 'selectForeground': '#1b2815',
-                           'font': ('Microsoft YaHei UI', -15), 'borderWidth': 0,
-                           'highlightThickness': 0, 'selectBorderWidth': 0}.items():
-            self.root.option_add(f'*TCombobox*Listbox.{key}', value)
+        """All widget styles are owned by utils.ui.theme.apply_theme."""
+        return apply_theme(self.root)
 
     @staticmethod
     def dropdown(parent, variable, values, width, command=None, postcommand=None):
         combo = ttk.Combobox(parent, textvariable=variable, values=values, width=width,
                              state='readonly', height=8, style='Monitor.TCombobox',
-                             cursor='hand2', font=('Microsoft YaHei UI', -13))
+                             cursor='hand2', font=theme.font(13))
         if command:
             combo.bind('<<ComboboxSelected>>', lambda event: command(variable.get()))
         if postcommand:
@@ -311,19 +301,98 @@ class CoordinateWindow:
         combo.bind('<Button-5>', lambda event: 'break')
         return combo
 
+    def toolbar_pill(self, parent):
+        """Rounded capsule that groups map toolbar buttons."""
+        host = RoundedPanel(parent, radius=px(13), height=px(28), bg=COLORS['card'],
+                            fill=COLORS['segment_bg'], outline=COLORS['segment_border'])
+        inner = tk.Frame(host, bg=COLORS['segment_bg'], bd=0, highlightthickness=0)
+        host.create_window(px(3), px(3), window=inner, anchor='nw')
+
+        def fit(event=None):
+            try:
+                width = inner.winfo_reqwidth() + px(6)
+                height = inner.winfo_reqheight() + px(6)
+                if host.winfo_reqwidth() != width or host.winfo_reqheight() != height:
+                    host.configure(width=width, height=height)
+            except Exception:
+                pass
+
+        inner.bind('<Configure>', fit, add='+')
+        host.after_idle(fit)
+        return host, inner
+
+    def toolbar_button(self, parent, text, action):
+        """Flat button that blends into a capsule until hovered."""
+        return tk.Button(parent, text=text, command=action, relief='flat', bd=0,
+                         highlightthickness=0, bg=COLORS['segment_bg'], fg=COLORS['text'],
+                         activebackground=COLORS['segment_hover'],
+                         activeforeground=COLORS['green'],
+                         disabledforeground=COLORS['disabled'], cursor='hand2',
+                         font=theme.font(11), padx=px(8), pady=px(3))
+
+    def pack_toolbar_buttons(self, inner, specs):
+        """Pack capsule buttons left-to-right with hairline dividers."""
+        buttons = []
+        for index, (text, action) in enumerate(specs):
+            if index:
+                tk.Frame(inner, bg=COLORS['segment_border'], width=1, bd=0,
+                         highlightthickness=0).pack(side='left', fill='y', pady=px(7))
+            button = self.toolbar_button(inner, text, action)
+            button.pack(side='left')
+            buttons.append(button)
+        return buttons
+
+    def build_map_toolbar(self, parent):
+        """Two rows of capsule groups replacing the bare button strip.
+
+        Row one holds the scene filter toggle (left) and the view controls
+        (right); row two holds the route actions. Commands, widget attributes
+        and behaviour are unchanged, only the grouping and styling differ.
+        """
+        head = self.frame(parent, card=True)
+        self.plothead = head
+        head.grid(row=0, column=0, sticky='ew', padx=px(4), pady=(px(4), 0))
+        left, left_inner = self.toolbar_pill(head)
+        left.pack(side='left')
+        self.scene_filters_toggle = self.pack_toolbar_buttons(
+            left_inner, [('分类筛选 ▾', self.toggle_scene_filters)])[0]
+        right, right_inner = self.toolbar_pill(head)
+        right.pack(side='right')
+        self.map_expand_button = self.pack_toolbar_buttons(right_inner, [
+            ('－', lambda: self.set_zoom(self.zoom / 1.5)),
+            ('＋', lambda: self.set_zoom(self.zoom * 1.5)),
+            ('重置缩放', self.reset_map_view),
+            ('大地图', self.toggle_map_size)])[-1]
+        actions = self.frame(parent, card=True)
+        self.map_actions = actions
+        actions.grid(row=1, column=0, sticky='ew', padx=px(4), pady=(px(4), px(3)))
+        pill, inner = self.toolbar_pill(actions)
+        pill.pack(side='left')
+        self.pack_toolbar_buttons(inner, [
+            ('路线全览', self.show_route_overview),
+            ('清空轨迹', self.clear_trail),
+            ('导出实走路段', self.export_walk_trail)])
+        return head
+
     def build(self):
         self.configure_dropdowns()
-        self.main_panes=tk.PanedWindow(self.root,orient='vertical',bg=COLORS['bg'],
-            sashwidth=5,sashrelief='raised',showhandle=True,opaqueresize=True,bd=0)
-        self.main_panes.pack(fill='both',expand=True)
-        self.function_host=self.frame(self.main_panes)
-        self.global_log_host=self.frame(self.main_panes,card=True)
-        self.main_panes.add(self.function_host,minsize=680,stretch='always')
-        self.main_panes.add(self.global_log_host,minsize=150,height=170,stretch='never')
+        self.build_status_bar()
+        self.shell = self.frame(self.root)
+        self.shell.pack(fill='both', expand=True)
+        self.build_nav_panel(self.shell)
+        self.main_panes = tk.PanedWindow(self.shell, orient='vertical', bg=COLORS['bg'],
+            sashwidth=px(6), sashrelief='flat', showhandle=False, opaqueresize=True, bd=0)
+        self.main_panes.pack(side='left', fill='both', expand=True)
+        self.function_host = self.frame(self.main_panes)
+        self.global_log_host = self.frame(self.main_panes, card=True)
+        self.build_log_header()
+        self.main_panes.add(self.function_host, minsize=460, stretch='always')
+        self.main_panes.add(self.global_log_host, minsize=92, height=px(108), stretch='never')
         body = self.frame(self.function_host)
         body.pack(fill='both', expand=True, padx=12, pady=(6, 8))
         body.grid_columnconfigure(0, weight=1)
         body.grid_rowconfigure(0, weight=1)
+        self.build_segmented_nav(body)
         workspace = self.frame(body)
         self.workspace = workspace
         workspace.grid(row=0, column=0, sticky='nsew')
@@ -334,27 +403,7 @@ class CoordinateWindow:
         plotcard.grid(row=0, column=0, sticky='nsew')
         plotcard.grid_columnconfigure(0, weight=1)
         plotcard.grid_rowconfigure(2, weight=1)
-        plothead = self.frame(plotcard, card=True)
-        plothead.grid(row=0, column=0, sticky='ew')
-        self.scene_filters_toggle = self.button(plothead, '分类筛选 ▾', self.toggle_scene_filters, small=True)
-        self.scene_filters_toggle.configure(padx=6, font=('Microsoft YaHei UI', -11))
-        self.scene_filters_toggle.pack(side='left', padx=3, pady=4)
-        self.map_expand_button = self.button(plothead, '大地图', self.toggle_map_size, small=True)
-        self.map_expand_button.configure(padx=6, font=('Microsoft YaHei UI', -11))
-        self.map_expand_button.pack(side='right', padx=1, pady=4)
-        for text, action in reversed([('−', lambda: self.set_zoom(self.zoom / 1.5)),
-                                      ('＋', lambda: self.set_zoom(self.zoom * 1.5)),
-                                      ('重置缩放', self.reset_map_view)]):
-            button = self.button(plothead, text, action, small=True)
-            button.configure(padx=4, font=('Microsoft YaHei UI', -11))
-            button.pack(side='right', padx=1, pady=4)
-        map_actions = self.frame(plotcard, card=True, border=False)
-        map_actions.grid(row=1, column=0, sticky='ew')
-        for text, action in [('路线全览', self.show_route_overview), ('清空轨迹', self.clear_trail),
-                             ('导出实走路段', self.export_walk_trail)]:
-            button = self.button(map_actions, text, action, small=True)
-            button.configure(padx=5, font=('Microsoft YaHei UI', -11))
-            button.pack(side='left', padx=2, pady=(0, 3))
+        self.build_map_toolbar(plotcard)
         self.canvas = tk.Canvas(plotcard, bg=COLORS['plot'], bd=0, highlightthickness=0, height=270)
         self.map_cache = MapDrawCache(self.canvas, MAP_WATER_AREAS, SCENE_RANKS, roads=REFERENCE_ROADS,
                                      water_islands=MAP_WATER_ISLANDS)
@@ -372,23 +421,25 @@ class CoordinateWindow:
         plotfoot = self.frame(plotcard, card=True)
         # Keep internal measurements, but do not display the map information bar.
         plotfoot.grid_columnconfigure(1, weight=1)
-        self.field(plotfoot, 'points', '轨迹点 0', color='muted', font=('Microsoft YaHei UI', -11)).grid(row=0, column=0, sticky='w', padx=8, pady=2)
-        self.field(plotfoot, 'speed', '平面速度 — 单位/秒', color='muted', font=('Microsoft YaHei UI', -11)).grid(row=0, column=1, sticky='e', padx=8)
-        self.field(plotfoot, 'scale', '刻度 —', color='muted', font=('Microsoft YaHei UI', -11)).grid(row=1, column=0, sticky='w', padx=8, pady=2)
-        self.scene_filter_hint = self.label(plotfoot, color='muted', font=('Microsoft YaHei UI', -10))
+        self.field(plotfoot, 'points', '轨迹点 0', color='muted', font=theme.font(11)).grid(row=0, column=0, sticky='w', padx=8, pady=2)
+        self.field(plotfoot, 'speed', '平面速度 — 单位/秒', color='muted', font=theme.font(11)).grid(row=0, column=1, sticky='e', padx=8)
+        self.field(plotfoot, 'scale', '刻度 —', color='muted', font=theme.font(11)).grid(row=1, column=0, sticky='w', padx=8, pady=2)
+        self.scene_filter_hint = self.label(plotfoot, color='muted', font=theme.font(10))
         self.scene_filter_hint.grid(row=1, column=1, sticky='e', padx=8)
         self.update_scene_filter_controls()
-        lower_panel = tk.LabelFrame(body, text='分类显示', bg=COLORS['bg'], fg=COLORS['text'],
-                                    font=('Microsoft YaHei UI', -12), bd=1, relief='solid', padx=4, pady=3)
-        lower_panel.grid(row=1, column=0, sticky='ew', pady=(8, 0))
+        lower_panel = tk.LabelFrame(body, text='功能模块', bg=COLORS['card'], fg=COLORS['green'],
+                                    font=theme.font(12, bold=True), bd=0, relief='flat',
+                                    highlightbackground=COLORS['line'], highlightthickness=1,
+                                    padx=px(4), pady=px(3))
+        lower_panel.grid(row=2, column=0, sticky='ew', pady=(8, 0))
+        # All four pages stay alive with their original tab text. The native tab
+        # strip is replaced by the left navigation (wide) / segmented navigation
+        # (narrow); select() semantics and page state are untouched.
         style = ttk.Style(self.root)
-        style.configure('Monitor.TNotebook', background=COLORS['bg'], borderwidth=0)
-        style.configure('Monitor.TNotebook.Tab', background=COLORS['button'], foreground=COLORS['text'],
-                        padding=(12, 4), font=('Microsoft YaHei UI', -12))
-        style.map('Monitor.TNotebook.Tab', background=[('selected', COLORS['card'])],
-                  foreground=[('selected', COLORS['green'])])
-        self.control_tabs = ttk.Notebook(lower_panel, style='Monitor.TNotebook', height=375)
+        style.layout('Monitor.TNotebook.Tab', [])
+        self.control_tabs = ttk.Notebook(lower_panel, style='Monitor.TNotebook', height=340)
         self.control_tabs.pack(fill='both', expand=True)
+        self.control_tabs.bind('<<NotebookTabChanged>>', self.sync_nav_from_tabs)
         route_page = self.frame(self.control_tabs, card=True, border=False)
         parameter_page = self.frame(self.control_tabs, card=True, border=False)
         map_page = self.frame(self.control_tabs, card=True, border=False)
@@ -401,29 +452,30 @@ class CoordinateWindow:
         self.cooking_catalog=CookingCatalogPanel(self,cooking_page,runtime_parent=self.global_log_host)
         route_page.grid_columnconfigure(0, weight=1)
         def group(parent, title):
-            return tk.LabelFrame(parent, text=title, bg=COLORS['card'], fg=COLORS['text'],
-                                 font=('Microsoft YaHei UI', -12), padx=6, pady=4,
-                                 bd=1, relief='solid', highlightthickness=0)
+            return tk.LabelFrame(parent, text=title, bg=COLORS['card'], fg=COLORS['green'],
+                                 font=theme.font(12, bold=True), padx=px(4), pady=px(2),
+                                 bd=0, relief='flat', highlightbackground=COLORS['line'],
+                                 highlightthickness=1)
         operations = group(route_page, '采集路线操作')
-        operations.grid(row=0, column=0, sticky='ew', padx=6, pady=(4, 0))
+        operations.grid(row=0, column=0, sticky='ew', padx=4, pady=(2, 0))
         for column in range(4):
             operations.grid_columnconfigure(column, weight=1, uniform='route-actions')
         self.route_buttons = {}
         for column, (action, text) in enumerate([('new', '新建路线'), ('copy', '另存路线'),
                                                 ('rename', '路线改名'), ('delete', '删除路线')]):
             button = self.button(operations, text, lambda action=action: self.manage_route(action), small=True)
-            button.grid(row=0, column=column, sticky='ew', padx=2, pady=2)
+            button.grid(row=0, column=column, sticky='ew', padx=2, pady=1)
             self.route_buttons[action] = button
         self.route_preview_button = self.button(operations, '路线预览', self.show_route_overview, small=True)
-        self.route_preview_button.grid(row=1, column=0, sticky='ew', padx=2, pady=2)
+        self.route_preview_button.grid(row=1, column=0, sticky='ew', padx=2, pady=1)
         self.save_point_button = self.button(operations, '添加点位', self.save_point, primary=True, small=True)
-        self.save_point_button.grid(row=1, column=1, sticky='ew', padx=2, pady=2)
+        self.save_point_button.grid(row=1, column=1, sticky='ew', padx=2, pady=1)
         self.point_manage_button = self.button(operations, '点位管理', self.edit_point_waits, small=True)
-        self.point_manage_button.grid(row=1, column=2, sticky='ew', padx=2, pady=2)
+        self.point_manage_button.grid(row=1, column=2, sticky='ew', padx=2, pady=1)
         self.clear_points_button = self.button(operations, '清空点位', self.clear_saved_points, small=True)
-        self.clear_points_button.grid(row=1, column=3, sticky='ew', padx=2, pady=2)
+        self.clear_points_button.grid(row=1, column=3, sticky='ew', padx=2, pady=1)
         pointcard = group(route_page, '采集路线显示')
-        pointcard.grid(row=1, column=0, sticky='nsew', padx=6, pady=(4, 6))
+        pointcard.grid(row=1, column=0, sticky='nsew', padx=4, pady=(2, 3))
         self.route_display = pointcard
         routebar = self.frame(pointcard, card=True, border=False)
         routebar.pack(fill='x')
@@ -432,28 +484,28 @@ class CoordinateWindow:
                                         command=self.switch_route, postcommand=self.refresh_route_menu)
         self.route_menu.pack(side='left')
         self.field(routebar, 'saved_count', '已保存 0 个点', color='green',
-                   font=('Microsoft YaHei UI', -11)).pack(side='right')
+                   font=theme.font(11)).pack(side='right')
         self.refresh_route_menu()
         self.saved_summary = self.field(pointcard, 'saved_summary', '点击添加点位记录当前坐标',
-                                        color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1)
-        self.saved_summary.pack(fill='x', pady=(3, 0))
+                                        color='muted', font=theme.font(11), anchor='w', width=1)
+        self.saved_summary.pack(fill='x', pady=(1, 0))
         sidebar = self.frame(map_page, card=True)
         sidebar.pack(fill='both', expand=True, padx=4, pady=4)
         self.build_sidebar(sidebar)
         coordinates = self.frame(pointcard, card=True, border=False)
-        coordinates.pack(fill='x', pady=(4, 0))
+        coordinates.pack(fill='x', pady=(2, 0))
         for axis, color in zip('XYZ', ('red', 'green', 'blue')):
-            self.label(coordinates, axis, color=color, font=('Consolas', -12)).pack(side='left', padx=(0, 3))
-            self.label(coordinates, textvariable=self.fields[axis], font=('Consolas', -12)).pack(
+            self.label(coordinates, axis, color=color, font=theme.font(12, mono=True)).pack(side='left', padx=(0, 3))
+            self.label(coordinates, textvariable=self.fields[axis], font=theme.font(12, mono=True)).pack(
                 side='left', padx=(0, 10))
         bottom = group(route_page, '回放控制')
-        bottom.grid(row=2, column=0, sticky='ew', padx=6, pady=(0, 6))
+        bottom.grid(row=2, column=0, sticky='ew', padx=4, pady=(0, 3))
         self.guidance_button = self.button(bottom, '跟随游戏引导 · F6开始 / F9停止',
                                            self.start_guidance_follow, small=True)
-        self.guidance_button.pack(fill='x', pady=(0, 4))
+        self.guidance_button.pack(fill='x', pady=(0, 2))
         toolbar = self.frame(bottom)
         toolbar.pack(fill='x')
-        self.label(toolbar, '起点', color='muted', font=('Microsoft YaHei UI', -12)).pack(
+        self.label(toolbar, '起点', color='muted', font=theme.font(12)).pack(
             side='left', padx=(0, 6))
         self.start_mode_var = tk.StringVar(self.root, value='完整回放')
         self.start_menu = self.dropdown(toolbar, self.start_mode_var, ['完整回放', '最近点接入'], width=10)
@@ -462,69 +514,69 @@ class CoordinateWindow:
         self.play_button.pack(side='left', padx=(4, 5))
         self.stop_button = self.button(toolbar, '■ 停止', self.stop_playback, small=True)
         self.stop_button.pack(side='left', padx=(0, 12))
-        self.label(toolbar, '循环', color='muted', font=('Microsoft YaHei UI', -12)).pack(side='left')
+        self.label(toolbar, '循环', color='muted', font=theme.font(12)).pack(side='left')
         self.loop_count_var = tk.StringVar(self.root, value=str(policy.COORD_PLAYBACK_DEFAULT_LOOPS))
         self.loop_count_spin = tk.Spinbox(toolbar, from_=1, to=policy.COORD_PLAYBACK_MAX_LOOPS,
             increment=1, textvariable=self.loop_count_var, width=4,
-            bg=COLORS['button'], fg=COLORS['text'], buttonbackground=COLORS['button'],
-            insertbackground=COLORS['text'], relief='flat', font=('Microsoft YaHei UI', -12))
+            bg=COLORS['card'], fg=COLORS['text'], buttonbackground=COLORS['button'],
+            insertbackground=COLORS['text'], relief='flat', font=theme.font(12))
         self.loop_count_spin.pack(side='left', padx=(6, 3))
-        self.label(toolbar, '次', color='muted', font=('Microsoft YaHei UI', -12)).pack(
+        self.label(toolbar, '次', color='muted', font=theme.font(12)).pack(
             side='left', padx=(0, 12))
         waitbar = self.frame(bottom)
-        waitbar.pack(fill='x', pady=(5, 0))
+        waitbar.pack(fill='x', pady=(2, 0))
         self.label(waitbar, '按 F 后等待', color='muted',
-                   font=('Microsoft YaHei UI', -12)).pack(side='left')
+                   font=theme.font(12)).pack(side='left')
         self.collect_wait_var = tk.StringVar(self.root, value=f'{policy.COORD_COLLECTION_DEFAULT_WAIT:g}')
         self.collect_wait_spin = tk.Spinbox(waitbar, from_=0, to=policy.COORD_COLLECTION_MAX_WAIT,
             increment=.1, textvariable=self.collect_wait_var, width=5,
-            bg=COLORS['button'], fg=COLORS['text'], buttonbackground=COLORS['button'],
-            insertbackground=COLORS['text'], relief='flat', font=('Microsoft YaHei UI', -12))
+            bg=COLORS['card'], fg=COLORS['text'], buttonbackground=COLORS['button'],
+            insertbackground=COLORS['text'], relief='flat', font=theme.font(12))
         self.collect_wait_spin.pack(side='left', padx=(6, 3))
-        self.label(waitbar, '秒', color='muted', font=('Microsoft YaHei UI', -12)).pack(side='left')
+        self.label(waitbar, '秒', color='muted', font=theme.font(12)).pack(side='left')
         self.point_wait_button = self.button(waitbar, '逐点等待', self.edit_point_waits, small=True)
         self.point_wait_button.pack(side='left', padx=(8, 0))
-        recoverybar = self.frame(parameter_page, card=True, border=False)
-        recoverybar.pack(fill='x', pady=(5, 0))
+        recoverybar = self.frame(self.settings_card, card=True, border=False)
+        recoverybar.pack(fill='x', pady=(0, 0))
         self.label(recoverybar, '每轮脱困次数', color='muted',
-                   font=('Microsoft YaHei UI', -12)).pack(side='left', padx=(0, 8))
+                   font=theme.font(12)).pack(side='left', padx=(0, 8))
         self.recovery_count_var = tk.StringVar(self.root, value=str(policy.COORD_RECOVERY_DEFAULT_ATTEMPTS))
         self.recovery_menu = self.dropdown(recoverybar, self.recovery_count_var,
             [str(i) for i in range(1, policy.COORD_RECOVERY_MAX_ATTEMPTS + 1)], width=4)
         self.recovery_menu.pack(side='left')
-        self.label(recoverybar, '次', color='muted', font=('Microsoft YaHei UI', -12)).pack(
+        self.label(recoverybar, '次', color='muted', font=theme.font(12)).pack(
             side='left', padx=(6, 0))
         self.recovery_jump_var = tk.BooleanVar(self.root, value=True)
         self.recovery_jump_check = tk.Checkbutton(recoverybar, text='每次先大跳（长按空格）',
             variable=self.recovery_jump_var, bg=COLORS['bg'], fg=COLORS['text'],
             activebackground=COLORS['bg'], activeforeground=COLORS['text'],
-            selectcolor=COLORS['button'], font=('Microsoft YaHei UI', -12), bd=0,
+            selectcolor=COLORS['button'], font=theme.font(12), bd=0,
             highlightthickness=0)
         self.recovery_jump_check.pack(side='left', padx=(12, 16))
-        navigationbar = self.frame(parameter_page, card=True, border=False)
+        navigationbar = self.frame(self.settings_card, card=True, border=False)
         navigationbar.pack(fill='x', pady=(5, 0))
         self.navigation_var = tk.BooleanVar(self.root, value=True)
         self.navigation_check = tk.Checkbutton(navigationbar, text='自动寻路', variable=self.navigation_var,
             bg=COLORS['bg'], fg=COLORS['text'], activebackground=COLORS['bg'],
             activeforeground=COLORS['text'], selectcolor=COLORS['button'],
-            font=('Microsoft YaHei UI', -12), bd=0, highlightthickness=0)
+            font=theme.font(12), bd=0, highlightthickness=0)
         self.navigation_check.pack(side='left', padx=(0, 12))
         self.path_memory_var = tk.BooleanVar(self.root, value=self.load_path_memory_option())
         self.path_memory_check = tk.Checkbutton(waitbar, text='使用路线记忆', variable=self.path_memory_var,
             command=self.save_path_memory_option,
             bg=COLORS['bg'], fg=COLORS['text'], activebackground=COLORS['bg'],
             activeforeground=COLORS['text'], selectcolor=COLORS['button'],
-            font=('Microsoft YaHei UI', -12), bd=0, highlightthickness=0)
+            font=theme.font(12), bd=0, highlightthickness=0)
         self.path_memory_check.pack(side='right', padx=(5, 0))
-        self.path_memory_label = self.label(navigationbar, '0 段', color='muted', font=('Microsoft YaHei UI', -11))
+        self.path_memory_label = self.label(navigationbar, '0 段', color='muted', font=theme.font(11))
         self.path_memory_label.pack(side='left', padx=(0, 5))
         self.clear_path_memory_button = self.button(navigationbar, '清除记忆', self.clear_path_memory, small=True)
         self.clear_path_memory_button.pack(side='left')
         self.refresh_path_memory_info()
         self.playback_label = self.field(bottom, 'playback', self.playback_status['message'],
-                                         color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1,
+                                         color='muted', font=theme.font(11), anchor='w', width=1,
                                          wraplength=360, justify='left')
-        self.playback_label.pack(fill='x', pady=(6, 0))
+        self.playback_label.pack(fill='x', pady=(3, 0))
         # Keep existing status-update calls valid without a footer or text widget.
         self._hint_state={}
         self.hint=SimpleNamespace(configure=self._hint_state.update)
@@ -533,11 +585,273 @@ class CoordinateWindow:
         self.stop_button.configure(state='disabled')
         self.map_expand_widgets = (lower_panel,)
         self.expanded_status = self.label(plotcard, textvariable=self.fields['playback'],
-            color='muted', font=('Microsoft YaHei UI', -11), anchor='w', width=1)
+            color='muted', font=theme.font(11), anchor='w', width=1)
         self.expanded_status.grid(row=4, column=0, sticky='ew', padx=14, pady=6)
         self.expanded_status.grid_remove()
         if self.points_error:
             self.hint.configure(text='点位文件读取失败，请检查原文件', fg=COLORS['red'])
+
+    # ------------------------------------------------------------------
+    # Presentation-only chrome. No task state is created or destroyed here:
+    # module switching only calls Notebook.select(), so a running collection
+    # or cooking batch keeps running while the user changes pages.
+    # ------------------------------------------------------------------
+    def build_status_bar(self):
+        panel = RoundedPanel(self.root, radius=px(14), height=px(58))
+        panel.pack(side='top', fill='x', padx=px(10), pady=(px(8), px(2)))
+        self.status_panel = panel
+        self.status_items = {}
+        self.status_brand = panel.create_text(px(18), px(20), anchor='w',
+                                              text='心动小镇 · 坐标观测台',
+                                              fill=COLORS['green'], font=theme.font(15, bold=True))
+        for key, initial in (('connection', '连接  等待游戏'),
+                             ('task', '任务  实时地图'),
+                             ('state', '状态  空闲')):
+            self.status_items[key] = panel.create_text(px(20), px(40), anchor='w',
+                                                       text=initial, fill=COLORS['muted'],
+                                                       font=theme.font(11))
+        panel.bind('<Configure>', self.layout_status_bar, add='+')
+
+    def layout_status_bar(self, event=None):
+        panel = self.status_panel
+        width, height = panel.winfo_width(), panel.winfo_height()
+        if width < 10 or height < 10:
+            return
+        if width >= 760:
+            panel.itemconfigure(self.status_brand, font=theme.font(15, bold=True))
+            panel.coords(self.status_brand, px(18), height / 2.)
+            start, slot = px(280), (width - px(280) - px(18)) / 3.
+            for index, key in enumerate(('connection', 'task', 'state')):
+                panel.coords(self.status_items[key], start + slot * index, height / 2.)
+                panel.itemconfigure(self.status_items[key], font=theme.font(12))
+        else:
+            panel.itemconfigure(self.status_brand, font=theme.font(12, bold=True))
+            panel.coords(self.status_brand, px(16), px(18))
+            slot = (width - px(24)) / 3.
+            for index, key in enumerate(('connection', 'task', 'state')):
+                panel.coords(self.status_items[key], px(16) + slot * index, px(40))
+                panel.itemconfigure(self.status_items[key], font=theme.font(10))
+
+    def update_status_bar(self, live, playing):
+        """Refresh the fixed header. Never interferes with task execution."""
+        if not hasattr(self, 'status_items'):
+            return
+        try:
+            panel = self.status_panel
+            freshness = self.fields.get('freshness')
+            connection = freshness.get() if freshness is not None else '等待游戏'
+            paused = bool(getattr(self.view, 'paused', False))
+            conn_color = COLORS['green'] if live else COLORS['muted'] if paused else COLORS['red']
+            task = MODULES[self.active_module][0]
+            if playing:
+                task = '自动采集 · 回放' if getattr(self.playback, 'active', False) else '自动烹饪'
+            running = '运行中' if playing else '已暂停' if paused else '空闲'
+            detail = self.fields['playback'].get() if 'playback' in self.fields else ''
+            if detail and len(detail) > 16:
+                detail = detail[:15] + '…'
+            narrow = panel.winfo_width() < 760
+            values = {
+                'connection': (f'连接  {connection}', conn_color),
+                'task': (f'任务  {task}', COLORS['text']),
+                'state': (f'状态  {running}' + ('' if not detail or narrow else f' · {detail}'),
+                          COLORS['green'] if playing else COLORS['muted']),
+            }
+            for key, (text, color) in values.items():
+                panel.itemconfigure(self.status_items[key], text=text, fill=color)
+        except Exception:
+            pass
+
+    def build_segmented_nav(self, parent):
+        # The segmented strip belongs to the content grid, directly below the
+        # map (row 1); the module panel moves to row 2. Wide layouts use the
+        # left rail instead and hide this strip. Swapping it with the map keeps
+        # the same vertical budget, so the map and tab pages do not shrink.
+        host = RoundedPanel(parent, radius=px(12), height=px(42),
+                            fill=COLORS['segment_bg'], outline=COLORS['segment_border'])
+        self.segmented = host
+        self.segmented_buttons = []
+        inner = tk.Frame(host, bg=COLORS['segment_bg'], bd=0, highlightthickness=0)
+        for index, (name, _, _) in enumerate(MODULES):
+            inner.grid_columnconfigure(index, weight=1, uniform='segmented')
+            button = self.button(inner, name, lambda index=index: self.select_module(index), small=True)
+            button.grid(row=0, column=index, sticky='ew', padx=px(2), pady=px(3))
+            self.segmented_buttons.append(button)
+        strip = host.create_window(px(3), px(3), window=inner, anchor='nw')
+
+        def stretch(event=None):
+            width = host.winfo_width()
+            if width > px(20):
+                host.itemconfigure(strip, width=width - px(6))
+
+        host.bind('<Configure>', stretch, add='+')
+        host.grid(row=1, column=0, sticky='ew', pady=(px(4), 0))
+        host.grid_remove()
+
+    def build_nav_panel(self, parent):
+        panel = RoundedPanel(parent, radius=px(14), width=px(154))
+        self.nav_panel = panel
+        panel.create_text(px(18), px(26), anchor='w', text='功能导航',
+                          fill=COLORS['muted'], font=theme.font(11, bold=True))
+        panel.create_line(px(16), px(44), px(138), px(44), fill=COLORS['line'])
+        self.nav_buttons = []
+        for index, (name, _, _) in enumerate(MODULES):
+            button = tk.Button(panel, text=name,
+                               command=lambda index=index: self.select_module(index),
+                               relief='flat', bd=0, highlightthickness=0,
+                               bg=COLORS['button'], fg=COLORS['text'],
+                               activebackground=COLORS['button_active'],
+                               activeforeground=COLORS['green'],
+                               disabledforeground=COLORS['disabled'],
+                               cursor='hand2', font=theme.font(13), anchor='w',
+                               padx=px(12), pady=px(6))
+            panel.create_window(px(14), px(56) + index * px(48), window=button,
+                                anchor='nw', width=px(126), height=px(38))
+            self.nav_buttons.append(button)
+        self.nav_footer = panel.create_text(px(18), px(280), anchor='sw',
+                                            text='F6 开始 / 暂停\nF9 停止任务',
+                                            fill=COLORS['muted'], font=theme.font(10),
+                                            justify='left')
+        panel.bind('<Configure>', self.layout_nav_panel, add='+')
+
+    def layout_nav_panel(self, event=None):
+        height = self.nav_panel.winfo_height()
+        if height > 10:
+            self.nav_panel.coords(self.nav_footer, px(18), height - px(18))
+
+    def select_module(self, index):
+        self.active_module = index
+        try:
+            self.control_tabs.select(MODULES[index][1])
+        except Exception:
+            pass
+        self.refresh_nav_highlight()
+
+    def refresh_nav_highlight(self):
+        for index, button in enumerate(getattr(self, 'nav_buttons', ())):
+            active = index == self.active_module
+            try:
+                button.configure(bg=COLORS['primary'] if active else COLORS['button'],
+                                 fg=COLORS['text'],
+                                 activebackground=COLORS['primary_active'] if active
+                                 else COLORS['button_active'])
+            except Exception:
+                pass
+        # Segmented strip: the selected module becomes a raised white pill with
+        # a green label; unselected items blend into the capsule, so there are
+        # no repeated per-button borders.
+        for index, button in enumerate(getattr(self, 'segmented_buttons', ())):
+            active = index == self.active_module
+            try:
+                button.configure(bg=COLORS['card'] if active else COLORS['segment_bg'],
+                                 fg=COLORS['green'] if active else COLORS['text'],
+                                 font=theme.font(12, bold=active),
+                                 highlightthickness=1 if active else 0,
+                                 highlightbackground=COLORS['segment_border'],
+                                 activebackground=COLORS['primary_active'] if active
+                                 else COLORS['segment_hover'])
+            except Exception:
+                pass
+        if hasattr(self, 'status_items'):
+            try:
+                self.status_panel.itemconfigure(self.status_items['task'],
+                                                text=f'任务  {MODULES[self.active_module][0]}',
+                                                fill=COLORS['text'])
+            except Exception:
+                pass
+
+    def sync_nav_from_tabs(self, event=None):
+        try:
+            selected = self.control_tabs.index(self.control_tabs.select())
+        except Exception:
+            return
+        for index, (_, page, _) in enumerate(MODULES):
+            if page == selected:
+                if index != self.active_module:
+                    self.active_module = index
+                    self.refresh_nav_highlight()
+                return
+        # The merged-away 参数设定 page keeps its tab (page state and tests rely
+        # on the four-page structure) but has no navigation entry, so fall back
+        # to the module the navigation currently highlights.
+        try:
+            self.control_tabs.select(MODULES[self.active_module][1])
+        except Exception:
+            pass
+
+    def apply_nav_mode(self, width=None):
+        # Guards keep this method inert on partially constructed windows used by
+        # the pure-logic unit tests (CoordinateWindow.__new__ + Mock root).
+        if not all(hasattr(self, name) for name in ('nav_panel', 'segmented', 'main_panes')):
+            return
+        if width is None:
+            width = self.root.winfo_width()
+        if width <= 1:
+            return
+        mode = 'wide' if width >= NAV_WIDE_THRESHOLD else 'narrow'
+        if mode == getattr(self, 'nav_mode', None):
+            return
+        self.nav_mode = mode
+        if mode == 'wide':
+            self.nav_panel.pack(side='left', fill='y', padx=(px(10), 0), pady=(0, px(8)),
+                                before=self.main_panes)
+            self.segmented.grid_remove()
+        else:
+            self.nav_panel.pack_forget()
+            self.segmented.grid()
+        self.refresh_nav_highlight()
+
+    def build_log_header(self):
+        header = self.frame(self.global_log_host, card=True, border=False)
+        header.pack(side='top', fill='x', padx=px(8), pady=(px(5), 0))
+        self.log_title = self.label(header, '运行日志 · 关键信息', color='green',
+                                    font=theme.font(12, bold=True))
+        self.log_title.pack(side='left')
+        self.log_toggle = self.button(header, '收起 ▴', self.toggle_log, small=True)
+        self.log_toggle.configure(padx=px(8), pady=px(2))
+        self.log_toggle.pack(side='right')
+        self.log_full_button = self.button(header, '完整日志 ▾', self.expand_full_log, small=True)
+        self.log_full_button.configure(padx=px(8), pady=px(2))
+        self.log_full_button.pack(side='right', padx=(0, px(4)))
+        separator = tk.Frame(self.global_log_host, bg=COLORS['line'], height=1, bd=0,
+                             highlightthickness=0)
+        separator.pack(side='top', fill='x', padx=px(8), pady=(px(5), 0))
+
+    def set_log_view(self, mode):
+        """standard / full / collapsed — content is never discarded."""
+        self.log_view = mode
+        self.log_collapsed = mode == 'collapsed'
+        catalog = getattr(self, 'cooking_catalog', None)
+        runtime = getattr(catalog, 'runtime_page', None) if catalog is not None else None
+        if runtime is not None:
+            try:
+                if mode == 'collapsed':
+                    runtime.pack_forget()
+                elif not runtime.winfo_ismapped():
+                    runtime.pack(fill='both', expand=True, padx=px(8), pady=px(3))
+            except Exception:
+                pass
+        heights = {'standard': px(108), 'full': px(300), 'collapsed': px(34)}
+        minsizes = {'standard': px(92), 'full': px(110), 'collapsed': px(34)}
+        try:
+            self.main_panes.paneconfigure(self.global_log_host,
+                                          minsize=minsizes[mode], height=heights[mode])
+            self.log_toggle.configure(text='还原 ▾' if mode == 'collapsed' else '收起 ▴')
+            self.log_full_button.configure(text='标准视图 ▴' if mode == 'full' else '完整日志 ▾')
+            self.log_title.configure(text={'standard': '运行日志 · 关键信息',
+                                           'full': '运行日志 · 完整记录',
+                                           'collapsed': '运行日志 · 已收起（完整记录保留）'}[mode])
+        except Exception:
+            pass
+        self.root.update_idletasks()
+
+    def toggle_log(self):
+        """Collapse or restore the log without discarding any log content."""
+        self.set_log_view('standard' if getattr(self, 'log_view', 'standard') == 'collapsed'
+                          else 'collapsed')
+
+    def expand_full_log(self):
+        """Toggle between the key-information view and the full log view."""
+        self.set_log_view('standard' if getattr(self, 'log_view', 'standard') == 'full' else 'full')
 
     def build_sidebar(self, sidebar):
         # Runtime scene statistics may grow to several lines. Keep the tool near
@@ -566,9 +880,9 @@ class CoordinateWindow:
         self.label(inner, '游戏连接', color='muted').grid(row=0, column=0, sticky='w', pady=(0, 6))
         entries = [('连接状态', 'freshness'), ('最近更新', 'updated')]
         for row, (name, key) in enumerate(entries, 1):
-            self.label(inner, name, color='muted', font=('Microsoft YaHei UI', -11)).grid(row=row, column=0, sticky='w', pady=1, padx=(0, 16))
+            self.label(inner, name, color='muted', font=theme.font(11)).grid(row=row, column=0, sticky='w', pady=1, padx=(0, 16))
             self.field(inner, key, '—',
-                       font=('Consolas', -12), anchor='w').grid(row=row, column=1, sticky='w', pady=1)
+                       font=theme.font(12, mono=True), anchor='w').grid(row=row, column=1, sticky='w', pady=1)
         self.frame(inner, card=True, height=1).grid(row=3, column=0, columnspan=2, sticky='ew', pady=6)
         self.xyz_row = self.frame(inner, card=True, border=False)
         self.xyz_row.grid(row=4, column=0, columnspan=2, sticky='ew', pady=2)
@@ -576,11 +890,11 @@ class CoordinateWindow:
         for column, (axis, color) in enumerate(zip('XYZ', ['red', 'green', 'blue'])):
             cell = self.frame(self.xyz_row, card=True, border=False)
             cell.grid(row=0, column=column, sticky='ew', padx=(0, 4 if column < 2 else 0))
-            self.label(cell, axis, color=color, font=('Microsoft YaHei UI', -11, 'bold')).pack(
+            self.label(cell, axis, color=color, font=theme.font(11, bold=True)).pack(
                 side='left', padx=(0, 2))
-            self.field(cell, axis, '—', font=('Consolas', -12), width=10, anchor='w').pack(
+            self.field(cell, axis, '—', font=theme.font(12, mono=True), width=10, anchor='w').pack(
                 side='left', fill='x', expand=True)
-        self.message = self.label(inner, '正在连接心动小镇…', color='muted', font=('Microsoft YaHei UI', -11),
+        self.message = self.label(inner, '正在连接心动小镇…', color='muted', font=theme.font(11),
                                   wraplength=250, justify='left', anchor='w')
         # Keep status updates available internally without showing the hint.
         controls = self.frame(inner, card=True, border=False)
@@ -588,20 +902,20 @@ class CoordinateWindow:
         self.button(controls, '重新连接', self.reconnect, small=True).pack(fill='x')
         pressbar = self.frame(controls, card=True, border=False)
         # Hidden controls retain the default three presses used by collection.
-        self.label(pressbar, '连按 F', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left')
+        self.label(pressbar, '连按 F', color='muted', font=theme.font(11)).pack(side='left')
         self.special_press_var = tk.StringVar(self.root, value='3')
         self.dropdown(pressbar, self.special_press_var, ['3', '5', '10', '20', '30'], width=4).pack(side='left', padx=6)
-        self.label(pressbar, '次', color='muted', font=('Microsoft YaHei UI', -11)).pack(side='left')
+        self.label(pressbar, '次', color='muted', font=theme.font(11)).pack(side='left')
         self.frame(inner, card=True, height=1).grid(row=10, column=0, columnspan=2, sticky='ew', pady=(14, 8))
         maphead = self.frame(inner, card=True, border=False)
         maphead.grid(row=11, column=0, columnspan=2, sticky='ew')
-        self.label(maphead, '内存地图', color='green', font=('Microsoft YaHei UI', -12, 'bold')).pack(side='left')
+        self.label(maphead, '内存地图', color='green', font=theme.font(12, bold=True)).pack(side='left')
         self.scene_range_var = tk.StringVar(self.root, value=f'{self.scene_radius:g} 单位')
         self.scene_range_menu = self.dropdown(maphead, self.scene_range_var,
             [f'{r} 单位' for r in SCENE_RANGE_OPTIONS], width=8, command=self.set_scene_radius)
         # Keep the configured loading radius internally without showing a selector.
         self.scene_status = self.label(inner, '进入角色后自动读取场景', color='muted',
-            font=('Microsoft YaHei UI', -11), wraplength=250, justify='left', anchor='w')
+            font=theme.font(11), wraplength=250, justify='left', anchor='w')
         self.scene_status.grid(row=12, column=0, columnspan=2, sticky='ew', pady=5)
         switches = self.frame(inner, card=True, border=False)
         switches.grid(row=13, column=0, columnspan=2, sticky='ew')
@@ -612,49 +926,49 @@ class CoordinateWindow:
             tk.Checkbutton(switches, text=text, variable=variable, command=self.scene_layer_changed, bg=COLORS['card'],
                 fg=COLORS['text'], selectcolor=COLORS['button'], activebackground=COLORS['card'],
                 activeforeground=COLORS['text'], bd=0, highlightthickness=0,
-                font=('Microsoft YaHei UI', -11)).grid(row=index // 2, column=index % 2, sticky='w', padx=(0, 15))
+                font=theme.font(11)).grid(row=index // 2, column=index % 2, sticky='w', padx=(0, 15))
         self.label(inner, '围栏：金色　护栏：浅蓝', color='muted',
-                   font=('Microsoft YaHei UI', -10)).grid(row=14, column=0, columnspan=2, sticky='w', pady=(4, 0))
+                   font=theme.font(10)).grid(row=14, column=0, columnspan=2, sticky='w', pady=(4, 0))
         cachebar = self.frame(inner, card=True, border=False)
         cachebar.grid(row=15, column=0, columnspan=2, sticky='ew', pady=(7, 0))
         cachebar.grid_columnconfigure((0, 1), weight=1, uniform='map-actions')
         self.button(cachebar, '刷新地图', self.refresh_scene, small=True).grid(row=0, column=0, sticky='ew', padx=(0, 4))
         self.button(cachebar, '清除缓存', self.clear_scene_cache, small=True).grid(row=0, column=1, sticky='ew', padx=(4, 0))
         self.label(inner, '淡色为远处缓存参考，近处实时更新。\n道路、水域及复杂地形仍需实际核对。',
-            color='muted', font=('Microsoft YaHei UI', -10), justify='left').grid(
+            color='muted', font=theme.font(10), justify='left').grid(
             row=16, column=0, columnspan=2, sticky='w', pady=(7, 0))
         toolcard = self.frame(inner, card=True, border=False)
         # Hidden as a group; Tk variables retain the existing maintenance settings.
         toolcard.grid_columnconfigure(1, weight=1)
-        self.tool_title = self.label(toolcard, '手持工具耐久', font=('Microsoft YaHei UI', -11, 'bold'))
+        self.tool_title = self.label(toolcard, '手持工具耐久', font=theme.font(11, bold=True))
         self.tool_title.grid(
             row=0, column=0, sticky='w', padx=(0, 6))
         self.tool_value = self.field(toolcard, 'tool_durability', '未读取', color='muted',
-                                     font=('Consolas', -12), anchor='e')
+                                     font=theme.font(12, mono=True), anchor='e')
         self.tool_value.grid(row=0, column=1, sticky='ew')
         self.tool_progress = tk.Canvas(toolcard, width=1, height=4, bg=COLORS['button'], bd=0, highlightthickness=0)
         self.tool_progress.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(4, 3))
         self.tool_fill = self.tool_progress.create_rectangle(0, 0, 0, 4, fill=COLORS['green'], outline='')
         self.tool_hint = self.label(toolcard, '进入角色后自动检测当前手持工具', color='muted',
-            font=('Microsoft YaHei UI', -10), anchor='w', wraplength=250, justify='left')
+            font=theme.font(10), anchor='w', wraplength=250, justify='left')
         self.tool_hint.grid(row=2, column=0, columnspan=2, sticky='ew')
         self.repair_auto_var = tk.BooleanVar(self.root, True)
         self.repair_auto_check = tk.Checkbutton(toolcard, text='低于20%自动维修',
             variable=self.repair_auto_var, bg=COLORS['card'], fg=COLORS['text'],
             selectcolor=COLORS['button'], activebackground=COLORS['card'], activeforeground=COLORS['text'],
-            bd=0, highlightthickness=0, font=('Microsoft YaHei UI', -10), wraplength=250, justify='left')
+            bd=0, highlightthickness=0, font=theme.font(10), wraplength=250, justify='left')
         self.repair_auto_check.grid(row=3, column=0, columnspan=2, sticky='w', pady=(3, 0))
         self.tool_progress.bind('<Configure>', lambda event: self.render_tool_durability())
-        self.label(toolcard, '角色体力', font=('Microsoft YaHei UI', -11, 'bold')).grid(
+        self.label(toolcard, '角色体力', font=theme.font(11, bold=True)).grid(
             row=4, column=0, sticky='w', pady=(6, 0))
         self.stamina_value = self.field(toolcard, 'stamina', '未读取', color='muted',
-                                       font=('Consolas', -12), anchor='e')
+                                       font=theme.font(12, mono=True), anchor='e')
         self.stamina_value.grid(row=4, column=1, sticky='ew', pady=(6, 0))
         self.food_auto_var = tk.BooleanVar(self.root, True)
         self.food_auto_check = tk.Checkbutton(toolcard, text='低于30随机进食至100',
             variable=self.food_auto_var, bg=COLORS['card'], fg=COLORS['text'],
             selectcolor=COLORS['button'], activebackground=COLORS['card'], activeforeground=COLORS['text'],
-            bd=0, highlightthickness=0, font=('Microsoft YaHei UI', -10))
+            bd=0, highlightthickness=0, font=theme.font(10))
         self.food_auto_check.grid(row=5, column=0, columnspan=2, sticky='w', pady=(3, 0))
         self.label(toolcard,'无料理时',color='muted',font=('Microsoft YaHei UI',-10)).grid(
             row=6,column=0,sticky='w',pady=(3,0))
@@ -662,6 +976,17 @@ class CoordinateWindow:
         self.food_fallback_menu=self.dropdown(toolcard,self.food_fallback_var,
             ['仅水果','水果和菌类','全部可食用'],width=11)
         self.food_fallback_menu.grid(row=6,column=1,sticky='e',pady=(3,0))
+
+        # The former 设置 page now lives at the bottom of the map page: the
+        # navigation keeps three modules and every setting stays reachable
+        # inside the scrollable sidebar.
+        self.frame(inner, card=True, height=1).grid(
+            row=17, column=0, columnspan=2, sticky='ew', pady=(14, 8))
+        settinghead = self.frame(inner, card=True, border=False)
+        settinghead.grid(row=18, column=0, columnspan=2, sticky='ew')
+        self.label(settinghead, '设置', color='green', font=theme.font(12, bold=True)).pack(side='left')
+        self.settings_card = self.frame(inner, card=True, border=False)
+        self.settings_card.grid(row=19, column=0, columnspan=2, sticky='ew', pady=(0, 10))
 
         def scroll_sidebar(event):
             if inner.winfo_height() > self.sidebar_canvas.winfo_height():
@@ -734,11 +1059,11 @@ class CoordinateWindow:
         self.scene_none_button = self.button(parent, '清空显示', lambda: self.set_scene_categories(False), small=True)
         self.scene_none_button.grid(row=0, column=1, sticky='nsew', padx=2, pady=2)
         for button in (self.scene_all_button, self.scene_none_button):
-            button.configure(pady=2, font=('Microsoft YaHei UI', -11))
+            button.configure(pady=2, font=theme.font(11))
         self.scene_filter_buttons = {}
         for index, (category, (label, _)) in enumerate(SCENE_CATEGORIES.items()):
             button = self.button(parent, label, lambda category=category: self.toggle_scene_category(category), small=True)
-            button.configure(padx=3, pady=2, font=('Microsoft YaHei UI', -11))
+            button.configure(padx=3, pady=2, font=theme.font(11))
             button.grid(row=index // 4 + 1, column=index % 4, sticky='nsew', padx=2, pady=2)
             self.scene_filter_buttons[category] = button
         self.global_minerals_button = self.button(parent, '岩石 / 矿石全览', self.show_mineral_overview, small=True)
@@ -775,15 +1100,15 @@ class CoordinateWindow:
         all_selected = visible and self.scene_categories is None
         none_selected = not visible or self.scene_categories == set()
         for button, selected in ((self.scene_all_button, all_selected), (self.scene_none_button, none_selected)):
-            button.configure(bg=COLORS['green' if selected else 'button'],
-                             fg='#1b2815' if selected else COLORS['text'])
+            button.configure(bg=COLORS['primary' if selected else 'button'],
+                             fg=COLORS['primary_fg' if selected else 'text'])
         for category, button in self.scene_filter_buttons.items():
             label, color = SCENE_CATEGORIES[category]
             selected = visible and self.scene_categories is not None and category in self.scene_categories
             button.configure(text=('✓ ' if selected else '  ') + label,
-                             bg='#2a382d' if selected else COLORS['button'],
+                             bg=COLORS['selected'] if selected else COLORS['button'],
                              fg=color if selected or all_selected else COLORS['muted'],
-                             highlightbackground=color if selected else COLORS['line'])
+                             highlightbackground=color if selected else COLORS['button_border'])
         hint = ('物体已关闭 · 点击分类显示' if not visible else
                 '全部分类 · 点击筛选' if all_selected else
                 '已隐藏分类 · 点击显示' if none_selected else
@@ -978,6 +1303,7 @@ class CoordinateWindow:
                               state='normal' if scene.get('global_resource_state') == 'ready' else 'disabled')
         self.render_tool_durability()
         self.render_stamina()
+        self.update_status_bar(live, playing)
         self.draw_if_changed()
 
     @staticmethod
@@ -1002,7 +1328,7 @@ class CoordinateWindow:
             canvas.create_line(x+3, z+6, x+7, z+8, fill='#e8b574', width=2, tags=tag)
         elif category == 'tree':
             fill, outline = PLANT_STYLES['tree']
-            canvas.create_oval(x-6, z+3, x+7, z+7, fill='#101e17', outline='', tags='scene-tree')
+            canvas.create_oval(x-6, z+3, x+7, z+7, fill='#C4D6BC', outline='', tags='scene-tree')
             canvas.create_line(x, z-2, x, z+6, fill='#c99b6c', width=2, tags='scene-tree')
             canvas.create_polygon(x, z-11, x+4, z-10, x+5, z-7, x+7, z-5,
                                   x+6, z-1, x+3, z+1, x, z, x-3, z+1,
@@ -1111,7 +1437,7 @@ class CoordinateWindow:
         if self.scene_roads_var.get() and view.position is not None:
             for key, coords, _ in self.map_cache.geometry.visible_roads(viewport):
                 self.map_cache.polyline(key, coords, -3, [
-                    {'fill': '#263b2e', 'width': 9, 'capstyle': 'round', 'joinstyle': 'round',
+                    {'fill': '#D5DCCB', 'width': 9, 'capstyle': 'round', 'joinstyle': 'round',
                      'tags': 'reference-road-edge'},
                     {'fill': MAP_STYLE['road'], 'width': 5, 'capstyle': 'round', 'joinstyle': 'round',
                      'tags': 'reference-road'},
@@ -1174,11 +1500,11 @@ class CoordinateWindow:
         saved_line = [value for point in self.saved_points
                       for value in (px(point['position'][0]), pz(point['position'][2]))]
         if len(saved_line) >= 4:
-            canvas.create_line(*saved_line, fill='#172934', width=4, tags='saved-route-edge')
+            canvas.create_line(*saved_line, fill='#C6D6C4', width=4, tags='saved-route-edge')
             canvas.create_line(*saved_line, fill=MAP_STYLE['route_line'], width=1.5, dash=(5, 5), tags='saved-route')
         if navigation_path and view.position is not None:
             planned = [v for p in [view.position, *navigation_path] for v in (px(p[0]), pz(p[2]))]
-            canvas.create_line(*planned, fill='#102a29', width=6, tags='navigation-path-edge')
+            canvas.create_line(*planned, fill='#C8DFC7', width=6, tags='navigation-path-edge')
             canvas.create_line(*planned, fill=MAP_STYLE['navigation'], width=2.5, dash=(7, 4),
                                arrow='last', arrowshape=(8, 10, 4), tags='navigation-path')
         active = self.playback_status.get('waypoint') if self.playback_status.get('state') not in (
@@ -1196,7 +1522,7 @@ class CoordinateWindow:
             draw_player(canvas, x, y, view.trail, view.paused, direction=view.heading)
         elif not view.trail and not self.saved_points:
             canvas.create_text(w / 2, h / 2, text='等待读取角色位置\n进入游戏后自动连接', fill=COLORS['muted'],
-                               font=('Microsoft YaHei UI', -13), justify='center')
+                               font=theme.font(13), justify='center')
         if hasattr(self, 'map_hover'):
             targets = []
             for obj in nearby_models:
@@ -1584,6 +1910,7 @@ class CoordinateWindow:
     def window_configured(self, event):
         if event.widget is not self.root:
             return
+        self.apply_nav_mode(event.width)
         geometry = (event.x, event.y, event.width, event.height)
         previous, self.window_geometry = self.window_geometry, geometry
         if previous is not None and geometry != previous:
@@ -1746,6 +2073,7 @@ def main(playback_runner=None, cooking_runner=None, guidance_runner=None, cookin
         finally:
             monitor.close()
         return
+    enable_dpi_awareness()
     root = tk.Tk()
     CoordinateWindow(root, monitor, resources, playback_runner=playback_runner, scene_factory=MemorySceneMap,
                      cooking_runner=cooking_runner, guidance_runner=guidance_runner,
