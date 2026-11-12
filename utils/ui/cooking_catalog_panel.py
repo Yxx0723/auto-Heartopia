@@ -104,7 +104,10 @@ class CookingCatalogPanel:
                 ids=material['allowed_item_ids']
                 count='未读取' if self.inventory is None else str(sum(self.inventory['counts'].get(i,0) for i in ids))
                 usable='未读取' if self.inventory is None else str(sum(self.inventory['selectable_counts'].get(i,0) for i in ids))
-                text+=f"{material['name']} ×{material['quantity']}\n背包 {count} / 可用 {usable}\n\n"
+                text += (
+                    f"{material['name']} ×{material['quantity']}\n"
+                    f"背包 {count} / 可用 {usable}\n"
+                )
             text+='材料'+('充足' if status['sufficient'] else '不足或尚未确认')
         self.detail.configure(state='normal');self.detail.delete('1.0','end');self.detail.insert('1.0',text);self.detail.configure(state='disabled')
 
