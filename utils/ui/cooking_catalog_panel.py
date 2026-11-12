@@ -99,14 +99,13 @@ class CookingCatalogPanel:
         text='请选择料理。背包未读取时不会把材料数量当作 0。'
         if recipe:
             status=material_status(recipe,self.inventory)
-            text=f"{recipe['name']}\n食谱 ID：{recipe['recipe_id']}\n产物 ID：{recipe['product_id'] or '待确认'}\n"
+            text=f"{recipe['name']}\n\n"
             for material in recipe['ingredients']:
                 ids=material['allowed_item_ids']
                 count='未读取' if self.inventory is None else str(sum(self.inventory['counts'].get(i,0) for i in ids))
                 usable='未读取' if self.inventory is None else str(sum(self.inventory['selectable_counts'].get(i,0) for i in ids))
-                label=f"组 {material['material_group_id']}" if material['item_id'] is None else str(material['item_id'])
-                text+=f"{material['name']} ×{material['quantity']}（{label}）\n背包 {count} / 可用 {usable}\n"
-            text+='材料'+('充足' if status['sufficient'] else '不足或尚未确认')+'；仅选菜，不开始制作。'
+                text+=f"{material['name']} ×{material['quantity']}\n背包 {count} / 可用 {usable}\n\n"
+            text+='材料'+('充足' if status['sufficient'] else '不足或尚未确认')
         self.detail.configure(state='normal');self.detail.delete('1.0','end');self.detail.insert('1.0',text);self.detail.configure(state='disabled')
 
     def refresh_inventory(self):
