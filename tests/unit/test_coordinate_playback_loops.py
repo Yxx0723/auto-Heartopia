@@ -171,3 +171,25 @@ def test_worker_rejects_invalid_loop_count_before_starting_thread(count):
 def test_loop_count_boundaries_are_accepted(count):
     from utils.core.coordinate_points import validate_loop_count
     assert validate_loop_count(count) == count
+
+def test_default_two_second_wait_preserves_explicit_point_waits():
+    from copy import deepcopy
+    from utils.core import thresholds
+
+    game = Game()
+    data = manual_points([(0, 0, 0), (0, 0, 3), (0, 0, 6)])
+    data['points'][1]['collect_wait'] = 0.
+    data['points'][2]['collect_wait'] = .3
+    original = deepcopy(data)
+    reached = []
+
+    def report(state, message, **extra):
+        if state == 'reached':
+            reached.append(game.time)
+
+    assert drive_points(data, game.size(), lambda: game, game, game, game, report,
+                        clock=game, collect_wait_seconds=thresholds.COORD_COLLECTION_DEFAULT_WAIT)
+    released = [at for at, event in game.events if event == {'type': 'key_up', 'key': 'f'}]
+    assert len(reached) == len(released) == 3
+    assert [at - up for at, up in zip(reached, released)] == pytest.approx([2., 0., .3])
+    assert data == original and not game.keys
