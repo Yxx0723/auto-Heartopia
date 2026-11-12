@@ -498,12 +498,21 @@ class CoordinateWindow:
             self.label(coordinates, axis, color=color, font=theme.font(12, mono=True)).pack(side='left', padx=(0, 3))
             self.label(coordinates, textvariable=self.fields[axis], font=theme.font(12, mono=True)).pack(
                 side='left', padx=(0, 10))
-        bottom = group(route_page, '回放控制')
-        bottom.grid(row=2, column=0, sticky='ew', padx=4, pady=(0, 3))
-        self.guidance_button = self.button(bottom, '跟随游戏引导 · F6开始 / F9停止',
-                                           self.start_guidance_follow, small=True)
-        self.guidance_button.pack(fill='x', pady=(0, 2))
-        toolbar = self.frame(bottom)
+        # 回放控制：自绘标题栏（左侧标题、右侧状态提示），下方三行紧凑布局。
+        # 原来的状态文字在区块底部，占一整行；移到标题栏后可省一行高度。
+        bottom = self.frame(route_page, card=True)
+        bottom.grid(row=2, column=0, sticky='ew', padx=px(4), pady=(0, px(3)))
+        bottom_head = self.frame(bottom, card=True, border=False)
+        bottom_head.pack(fill='x', padx=px(7), pady=(px(4), px(2)))
+        self.label(bottom_head, '回放控制', color='green',
+                   font=theme.font(12, bold=True)).pack(side='left')
+        self.playback_label = self.field(bottom_head, 'playback', self.playback_status['message'],
+                                         color='muted', font=theme.font(10), anchor='e')
+        self.playback_label.pack(side='right', padx=(px(8), px(2)))
+        tk.Frame(bottom, bg=COLORS['line'], height=1).pack(fill='x', padx=px(6), pady=(0, px(3)))
+        bottom_body = self.frame(bottom, card=True, border=False)
+        bottom_body.pack(fill='x', padx=px(7), pady=(0, px(5)))
+        toolbar = self.frame(bottom_body)
         toolbar.pack(fill='x')
         self.label(toolbar, '起点', color='muted', font=theme.font(12)).pack(
             side='left', padx=(0, 6))
@@ -523,8 +532,8 @@ class CoordinateWindow:
         self.loop_count_spin.pack(side='left', padx=(6, 3))
         self.label(toolbar, '次', color='muted', font=theme.font(12)).pack(
             side='left', padx=(0, 12))
-        waitbar = self.frame(bottom)
-        waitbar.pack(fill='x', pady=(2, 0))
+        waitbar = self.frame(bottom_body)
+        waitbar.pack(fill='x', pady=(px(3), 0))
         self.label(waitbar, '按 F 后等待', color='muted',
                    font=theme.font(12)).pack(side='left')
         self.collect_wait_var = tk.StringVar(self.root, value=f'{policy.COORD_COLLECTION_DEFAULT_WAIT:g}')
@@ -564,7 +573,7 @@ class CoordinateWindow:
         self.path_memory_var = tk.BooleanVar(self.root, value=self.load_path_memory_option())
         self.path_memory_check = tk.Checkbutton(waitbar, text='使用路线记忆', variable=self.path_memory_var,
             command=self.save_path_memory_option,
-            bg=COLORS['bg'], fg=COLORS['text'], activebackground=COLORS['bg'],
+            bg=COLORS['card'], fg=COLORS['text'], activebackground=COLORS['card'],
             activeforeground=COLORS['text'], selectcolor=COLORS['button'],
             font=theme.font(12), bd=0, highlightthickness=0)
         self.path_memory_check.pack(side='right', padx=(5, 0))
@@ -573,10 +582,10 @@ class CoordinateWindow:
         self.clear_path_memory_button = self.button(navigationbar, '清除记忆', self.clear_path_memory, small=True)
         self.clear_path_memory_button.pack(side='left')
         self.refresh_path_memory_info()
-        self.playback_label = self.field(bottom, 'playback', self.playback_status['message'],
-                                         color='muted', font=theme.font(11), anchor='w', width=1,
-                                         wraplength=360, justify='left')
-        self.playback_label.pack(fill='x', pady=(3, 0))
+        # 第 3 行：引导跟随单独成行；主操作按钮留在前两行。
+        self.guidance_button = self.button(bottom_body, '跟随游戏引导 · F6开始 / F9停止',
+                                           self.start_guidance_follow, small=True)
+        self.guidance_button.pack(fill='x', pady=(px(4), 0))
         # Keep existing status-update calls valid without a footer or text widget.
         self._hint_state={}
         self.hint=SimpleNamespace(configure=self._hint_state.update)
