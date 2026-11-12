@@ -2,6 +2,10 @@
 
 auto-Heartopia 是《心动小镇》的 Windows 桌面辅助工具。你可以在独立窗口查看角色位置和附近资源，保存并回放自己的采集路线，跟随游戏引导，或在灶台旁自动制作料理。
 
+**导航：** [功能介绍](#功能介绍) · [获取与启动](#获取与启动) · [使用教程](#使用教程) · [从源码运行](#从源码运行开发者) · [常见问题](#常见问题) · [开发与贡献](CONTRIBUTING.md) · [更新记录](CHANGELOG.md)
+
+> **发布状态：** 当前仓库提供源码，但尚无公开的 GitHub Releases EXE。请勿将其他来源的程序误认为本仓库官方发布版。
+
 ## 功能介绍
 
 | 功能 | 可以做什么 |
@@ -76,9 +80,34 @@ auto-Heartopia 是《心动小镇》的 Windows 桌面辅助工具。你可以�
 
 先检查目标锅数。连续制作中，上一锅必须确认收菜、灶台空闲且指定成品库存增加，随后还要重新核对食谱和材料。任何一步无法确认，批次都会停止。
 
+### 为什么连续刷新背包材料时库存没有变化？
+
+相同的库存结果可能连续出现，数值不变不代表刷新失败。每次点击「刷新背包材料」后，请等待按钮从「正在读取背包材料…」恢复，再进行下一次刷新；读取过程中重复点击不会开启第二次读取。若出现「读取失败 · 点击重试」，本次库存未确认，应检查游戏连接后重试，不要依赖失败前的旧库存进行烹饪判断。
+
 ### 为什么游戏更新后部分功能失效？
 
 更新可能改变游戏界面、数据或交互方式。工具无法确认当前状态时，可能拒绝连接或停止相关功能，请关注仓库后续更新。
+
+## 从源码运行（开发者）
+
+当前桌面版入口为 `tools/coordinate_monitor.py`，启动脚本为 `Start-Heartopia.bat`。请在 Windows 10/11 中安装 Python，进入项目根目录后执行：
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+.\Start-Heartopia.bat
+```
+
+`requirements-lock.txt` 用于复现仓库记录的依赖版本。若需主动更新依赖，可参考 `requirements.txt`。软件需要与游戏进程交互，某些环境下需以管理员身份启动；请先检查代码来源，**不要运行不明来源的管理员权限程序**。运行前先通过官方入口进入游戏。
+
+基础静态检查与测试示例：
+
+```powershell
+.\.venv\Scripts\python.exe -m compileall -q utils tools tests fhoe.py get_width.py
+.\.venv\Scripts\python.exe -m pytest -q tests/unit/test_cooking.py
+```
+
+以上测试不等同于真实游戏验收。详细开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，历史工程规则见 [CLAUDE.md](CLAUDE.md)，更多测试说明见 [tests/README.md](tests/README.md)。本仓库仍保留部分上游 WebUI 与历史入口，但**当前《心动小镇》桌面版以 `tools/coordinate_monitor.py` 为准**。
 
 ## 使用须知
 

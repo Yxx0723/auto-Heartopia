@@ -1,0 +1,32 @@
+name: Windows quality checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Syntax and cooking state-machine tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check Python syntax
+        run: python -m compileall -q utils tools tests fhoe.py get_width.py
+      - name: Install test requirements
+        run: python -m pip install -r requirements-lock.txt
+      - name: Run targeted cooking regression tests
+        run: python -m pytest -q tests/unit/test_cooking.py tests/unit/test_cooking_control.py
