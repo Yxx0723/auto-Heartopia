@@ -5,20 +5,23 @@ No remote function calls, memory writes, injection or debugger are used.
 """
 import struct
 
+from utils.core.native_scene_versions import LEGACY_NATIVE_LAYOUT
+
 
 class NativeSceneMetadata:
     # GameAssembly fingerprint is checked by ReadOnlyPosition before use.
-    _class_cache_rva = 0x2f850c8
-    _type_stride = 88
-    _type_count = 14794
+    _class_cache_rva = LEGACY_NATIVE_LAYOUT.class_cache_rva
 
-    def __init__(self, read, assembly_base):
+    def __init__(self, read, assembly_base, layout=LEGACY_NATIVE_LAYOUT):
         self.read = read
-        self.root_at = assembly_base + self._class_cache_rva
+        self.layout = layout
+        self._type_stride, self._type_count = layout.type_stride, layout.type_count
+        self.root_at = assembly_base + layout.class_cache_rva
         self.root = self.pointer(self.root_at)
         self.cache = {}
-        xd = self.class_at(7737, 'XDCollider', 'XDT.Physics')
-        self.type_start = self.pointer(xd['address'] + 0x20) - 7737 * self._type_stride
+        index = layout.xd_collider
+        xd = self.class_at(index, 'XDCollider', 'XDT.Physics')
+        self.type_start = self.pointer(xd['address'] + 0x20) - index * self._type_stride
 
     def data(self, at, size):
         if not 0x10000 <= at < 0x7fffffffffff or not 0 < size <= 8 * 1024 * 1024:

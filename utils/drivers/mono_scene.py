@@ -13,6 +13,7 @@ from utils.core.terrain_map import verified_terrain_walls
 from utils.core.navigation_reference import default_reference_path, load_reference
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.native_world_collisions import NativeWorldCollisions
+from utils.core.native_scene_versions import native_scene_layout
 from utils.drivers.managed_box_lifecycle import DetachedBoxGuard
 from utils.drivers.global_minerals import GlobalMineralReader
 from utils.drivers.house_entrances import HouseEntranceReader
@@ -895,7 +896,8 @@ class MemorySceneMap:
         try:
             if self.native is None:
                 assembly_base, _, _ = self.memory._module('GameAssembly.dll')
-                self.native = NativeWorldCollisions(self.memory._read, assembly_base)
+                layout = native_scene_layout(self.memory.profile)
+                self.native = NativeWorldCollisions(self.memory._read, assembly_base, layout)
             world_colliders, world_stats = self.native.snapshot()
             colliders.extend(world_colliders)
             world_state = 'ready'

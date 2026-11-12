@@ -10,6 +10,7 @@ import struct
 
 from utils.core.scene_map import box_geometry, quaternion, rotate
 from utils.drivers.il2cpp_scene import NativeSceneMetadata
+from utils.core.native_scene_versions import LEGACY_NATIVE_LAYOUT
 
 
 # This exact local collision template was verified beside the standing player
@@ -49,9 +50,9 @@ def world_box(source, live):
 
 
 class NativeWorldCollisions:
-    def __init__(self, read, assembly_base):
-        self.meta = NativeSceneMetadata(read, assembly_base)
-        self.root_class = self.meta.class_at(10404, 'SceneLoaderRoot', 'SceneLoader')['address']
+    def __init__(self, read, assembly_base, layout=LEGACY_NATIVE_LAYOUT):
+        self.meta = NativeSceneMetadata(read, assembly_base, layout)
+        self.root_class = self.meta.class_at(layout.scene_loader_root, 'SceneLoaderRoot', 'SceneLoader')['address']
         self.geometry_cache = {}
         self.scene_key = None
 

@@ -7,22 +7,17 @@ import math
 import struct
 
 from utils.drivers.il2cpp_scene import NativeSceneMetadata
+from utils.core.native_scene_versions import native_scene_layout
 from utils.core.ui_projection import transform_point
 from utils.core.map_targeting import MapLayoutUpdating
 
 
 class NativeUiLayout:
-    _unity_hash='8db4464dd493c99f42f267a2e509f40632f59aca3fb542d573beb7bd695ba302'
-    _assembly_hash='8e44137ad5536b87fe46cc150980305bc866d12666cdbde9f0c59331cf0d8b0d'
-
     def __init__(self,memory,meta):
-        # ReadOnlyPosition already verifies the actual loaded module files.
-        # Pin this native field layout too, instead of accepting a new profile.
-        if memory.profile.get('unity_player_sha256')!=self._unity_hash \
-                or memory.profile.get('game_assembly_sha256')!=self._assembly_hash:
-            raise ValueError('当前游戏版本尚未核对原生地图布局')
+        # The reader checks the loaded files before resolving this exact build.
+        layout=native_scene_layout(memory.profile)
         self.meta=meta
-        self.native=NativeSceneMetadata(memory._read,memory._module('GameAssembly.dll')[0])
+        self.native=NativeSceneMetadata(memory._read,memory._module('GameAssembly.dll')[0],layout)
 
     @staticmethod
     def _expect(info,name,namespace):
@@ -38,7 +33,7 @@ class NativeUiLayout:
         raw_handle=m.data(obj+field['offset'],8);handle=struct.unpack('<Q',raw_handle)[0]
         if not handle:
             raise ValueError('界面句柄已失效')
-        translator=n.class_at(11618,'ObjectTranslator','MonoGame.Core')['address']
+        translator=n.class_at(n.layout.object_translator,'ObjectTranslator','MonoGame.Core')['address']
         host=n.static_ref(translator,'_hostObjectMapUnitySide')
         self._expect(n.obj(host),'HostObjectMapUnitySide','MonoGame.Core')
         refs=n.ref(host,'_objectRefs');element=n.cls(n.obj(refs)['element'])
