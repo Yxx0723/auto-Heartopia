@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from utils.core.cooking_catalog import load_catalog, material_status
+from utils.ui import theme
 from utils.ui.cooking_event_view import event_view
 
 
@@ -26,7 +27,9 @@ class CookingCatalogPanel:
         scroll = ttk.Scrollbar(body, orient='vertical',command=self.list.yview)
         scroll.pack(side='left',fill='y'); self.list.configure(yscrollcommand=scroll.set)
         self.detail = tk.Text(body, width=24,height=5,wrap='word',state='disabled',
-                              font=('Microsoft YaHei UI',-12))
+                              font=theme.font(12),bg=theme.COLORS['card'],
+                              fg=theme.COLORS['text'],relief='flat',bd=0,
+                              highlightthickness=0,padx=theme.px(6),pady=theme.px(3))
         self.detail.pack(side='left',fill='both',expand=True,padx=(5,0))
         actions = owner.frame(self.frame,card=True,border=False); actions.pack(fill='x')
         self.stock_button = owner.button(actions,'刷新背包材料',self.refresh_inventory)
@@ -36,7 +39,7 @@ class CookingCatalogPanel:
         self.batch_target=tk.StringVar(value='1')
         self.batch_count=ttk.Spinbox(batch,from_=1,to=99,textvariable=self.batch_target,width=4)
         self.batch_count.pack(side='left',padx=4)
-        self.batch_button=owner.button(batch,'开始',self.make_batch)
+        self.batch_button=owner.button(batch,'开始',self.make_batch,primary=True)
         self.batch_button.pack(side='left',fill='x',expand=True,padx=(0,3))
         self.batch_stop_button=owner.button(batch,'停止',owner.cooking.stop)
         self.batch_stop_button.pack(side='left',fill='x',expand=True)
@@ -55,13 +58,17 @@ class CookingCatalogPanel:
         self.progress.pack(fill='x',pady=(1,2))
         self.runtime_error=tk.StringVar()
         self.runtime_error_label=owner.label(self.runtime_page,'',textvariable=self.runtime_error,
-                    color='red',wraplength=390,justify='left',font=('Microsoft YaHei UI',-11),
+                    color='red',wraplength=390,justify='left',font=theme.font(11),
                     height=2,anchor='nw')
         log_area=owner.frame(self.runtime_page,card=True,border=False);log_area.pack(fill='both',expand=True)
         self.runtime_log=tk.Text(log_area,height=3,width=42,wrap='word',state='disabled',
-                                 font=('Microsoft YaHei UI',-11))
-        for status,color in (('进行中','#53665b'),('已派发','#916900'),('已确认','#27684a'),
-                             ('已完成','#27684a'),('失败','#b12b2b'),('未确认','#9b4300')):
+                                 font=theme.font(11),bg=theme.COLORS['card'],
+                                 fg=theme.COLORS['text'],relief='flat',bd=0,
+                                 highlightthickness=0,padx=theme.px(6),pady=theme.px(3))
+        # 错误 / 警告 / 正常三档用主题色区分，避免高饱和深色与浅色卡片冲突。
+        for status,color in (('进行中',theme.COLORS['muted']),('已派发',theme.COLORS['accent']),
+                             ('已确认',theme.COLORS['green']),('已完成',theme.COLORS['green']),
+                             ('失败',theme.COLORS['red']),('未确认',theme.COLORS['amber'])):
             self.runtime_log.tag_configure(status,foreground=color)
         self.runtime_log.pack(side='left',fill='both',expand=True)
         log_scroll=ttk.Scrollbar(log_area,orient='vertical',command=self.runtime_log.yview)
@@ -154,7 +161,7 @@ class CookingCatalogPanel:
                     phase=failure.get('current_step') or context.get('current_step') or row['stage']
                     last=failure.get('last_successful_step') or context.get('last_successful_step') or self.last_success
                     self.runtime_error.set(f"第 {batch.get('current_pot',row['pot'])} 锅 · 出错阶段：{phase}\n错误：{row['result']}\n最后成功：{last}\n停止原因：{batch.get('message',row['result'])}")
-                line=f"{row['time']} | 第 {row['pot']} 锅 | {row['stage']} | {row['event']} | {row['status']} | {row['result']}\n"
+                line=f"● {row['time']} | 第 {row['pot']} 锅 | {row['stage']} | {row['event']} | {row['status']} | {row['result']}\n"
                 lines.append((line,row['status']))
             except Exception:
                 # Tk or formatting errors must not propagate into the task or

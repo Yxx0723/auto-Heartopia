@@ -58,6 +58,14 @@ COLORS = {
     'selected': SAGE_200,
     'disabled': DISABLED,
     'panel_alt': CARD_ALT,
+    # 方案三「游戏伴侣风」：暖黄 / 暖橙点缀与柔和状态色。
+    'honey': '#F2C879',
+    'accent': '#E0A458',
+    'accent_soft': '#FBEED6',
+    'leaf': '#8FB782',
+    'status_on': '#5F9A6B',
+    'status_off': '#C4CDBF',
+    'status_warn': '#E0A458',
 }
 
 # Cartographic palette. Symbols keep their own darker fills so they stay
@@ -142,6 +150,103 @@ class RoundedPanel(tk.Canvas):
         self.create_polygon(points, smooth=True, fill=self.fill,
                             outline=self.outline, width=1, tags='panel-bg')
         self.tag_lower('panel-bg')
+
+
+# ---------------------------------------------------------------------------
+# 方案三「游戏伴侣风」装饰
+#
+# 全部用 Canvas 图元静态绘制：不读取图片文件、不做动画、不挂定时器。
+# 相比位图资源，这既不占额外内存，也不存在启动时反复 IO 的问题，
+# 且天然随 DPI 缩放清晰。
+# ---------------------------------------------------------------------------
+DECOR = {
+    'roof': '#D08F72', 'roof_edge': '#B9765C',
+    'wall': '#F7E8CF', 'wall_edge': '#DCC39C', 'door': '#C98A62',
+    'window': '#CFE6EE', 'window_edge': '#A9CBBA',
+    'leaf': '#8FB782', 'leaf_dark': '#6E9C68',
+    'petal': '#F3C9D0', 'petal_core': '#F2C879',
+    'cloud': '#EDF3EA', 'cloud_edge': '#DCE7D8',
+    'bush': '#A9CDA2', 'trunk': '#C4A484',
+}
+
+
+def draw_house(canvas, x, y, size=1.0, tags='decor-house'):
+    """静态小镇小屋：屋顶 + 墙 + 门 + 窗。返回 tag 便于整体删除/置前。"""
+    s = float(size)
+    w, h = 18.0 * s, 12.0 * s
+    canvas.create_rectangle(x - w / 2, y, x + w / 2, y + h, fill=DECOR['wall'],
+                            outline=DECOR['wall_edge'], width=max(1, int(round(s))), tags=tags)
+    canvas.create_polygon(x - w / 2 - 3 * s, y + 1.5 * s, x, y - 8.5 * s,
+                          x + w / 2 + 3 * s, y + 1.5 * s, fill=DECOR['roof'],
+                          outline=DECOR['roof_edge'], width=max(1, int(round(s))), tags=tags)
+    canvas.create_rectangle(x - 2.4 * s, y + h - 5.2 * s, x + 2.4 * s, y + h,
+                            fill=DECOR['door'], outline='', tags=tags)
+    canvas.create_rectangle(x + w / 2 - 6.4 * s, y + 3.2 * s,
+                            x + w / 2 - 2.6 * s, y + 6.6 * s,
+                            fill=DECOR['window'], outline=DECOR['window_edge'],
+                            width=1, tags=tags)
+    return tags
+
+
+def draw_cloud(canvas, x, y, size=1.0, tags='decor-cloud'):
+    """静态云朵，由三个椭圆组成。"""
+    s = float(size)
+    for dx, dy, rx, ry in ((-7 * s, 1 * s, 6 * s, 4 * s), (0, -1.5 * s, 7 * s, 5 * s),
+                           (7 * s, 1 * s, 6 * s, 4 * s)):
+        canvas.create_oval(x + dx - rx, y + dy - ry, x + dx + rx, y + dy + ry,
+                           fill=DECOR['cloud'], outline=DECOR['cloud_edge'], width=1, tags=tags)
+    return tags
+
+
+def draw_bush(canvas, x, y, size=1.0, tags='decor-bush'):
+    """静态草丛：两个叠放的半球。"""
+    s = float(size)
+    canvas.create_oval(x - 8 * s, y - 5 * s, x + 2 * s, y + 3 * s,
+                       fill=DECOR['bush'], outline='', tags=tags)
+    canvas.create_oval(x - 1 * s, y - 7 * s, x + 9 * s, y + 3 * s,
+                       fill=DECOR['leaf'], outline='', tags=tags)
+    return tags
+
+
+def draw_flower(canvas, x, y, size=1.0, tags='decor-flower'):
+    """静态小花：四瓣 + 花心，尺寸很小，只作点缀。"""
+    s = float(size)
+    canvas.create_line(x, y, x, y + 6 * s, fill=DECOR['leaf_dark'], width=1, tags=tags)
+    for dx, dy in ((-2.2 * s, 0), (2.2 * s, 0), (0, -2.2 * s), (0, 2.2 * s)):
+        canvas.create_oval(x + dx - 1.9 * s, y + dy - 1.9 * s, x + dx + 1.9 * s,
+                           y + dy + 1.9 * s, fill=DECOR['petal'], outline='', tags=tags)
+    canvas.create_oval(x - 1.3 * s, y - 1.3 * s, x + 1.3 * s, y + 1.3 * s,
+                       fill=DECOR['petal_core'], outline='', tags=tags)
+    return tags
+
+
+def draw_cat(canvas, x, y, size=1.0, tags='decor-cat'):
+    """静态小猫剪影：身体 + 头 + 双耳 + 尾巴。"""
+    s = float(size)
+    canvas.create_oval(x - 6 * s, y - 4 * s, x + 4 * s, y + 3 * s,
+                       fill=DECOR['roof'], outline='', tags=tags)
+    canvas.create_oval(x + 1 * s, y - 7 * s, x + 7 * s, y - 1 * s,
+                       fill=DECOR['roof'], outline='', tags=tags)
+    canvas.create_polygon(x + 2 * s, y - 6.4 * s, x + 3 * s, y - 9.4 * s, x + 4.4 * s, y - 6.6 * s,
+                          fill=DECOR['roof'], outline='', tags=tags)
+    canvas.create_polygon(x + 5.4 * s, y - 6.6 * s, x + 6.6 * s, y - 9.2 * s, x + 7.2 * s, y - 5.8 * s,
+                          fill=DECOR['roof'], outline='', tags=tags)
+    canvas.create_line(x - 6 * s, y + 1 * s, x - 9 * s, y - 3 * s, x - 7 * s, y - 5 * s,
+                       fill=DECOR['roof'], width=max(1, int(round(1.4 * s))),
+                       smooth=True, tags=tags)
+    return tags
+
+
+def draw_scene(canvas, x, y, width, tags='decor-scene', compact=False):
+    """把房屋、云、草丛组合成一幅静态小景，宽度受限时自动精简。"""
+    draw_cloud(canvas, x + 6, y - 14, 0.9, tags=tags)
+    draw_house(canvas, x + 30, y + 6, 1.0, tags=tags)
+    draw_bush(canvas, x + 52, y + 8, 0.9, tags=tags)
+    if not compact and width >= 120:
+        draw_flower(canvas, x + 64, y + 4, 0.9, tags=tags)
+        draw_cat(canvas, x + 78, y + 8, 0.9, tags=tags)
+    return tags
+
 
 
 def apply_theme(root):

@@ -447,8 +447,12 @@ class CoordinateWindow:
         for page, title in ((route_page, '采集设定'), (parameter_page, '参数设定'),
                             (map_page, '地图连接'), (cooking_page, '烹饪')):
             self.control_tabs.add(page, text=title)
-        self.label(cooking_page,'料理选择 · 单锅 / 连续制作',font=('Microsoft YaHei UI',-14)).pack(
-            anchor='w',padx=10,pady=(5,2))
+        cookhead = self.frame(cooking_page, card=True, border=False)
+        cookhead.pack(fill='x', padx=px(8), pady=(px(5), px(2)))
+        self.label(cookhead, '料理选择', color='green',
+                   font=theme.font(12, bold=True)).pack(side='left')
+        self.label(cookhead, '单锅 / 连续制作 · 先确认料理再按 F6', color='muted',
+                   font=theme.font(10)).pack(side='right')
         self.cooking_catalog=CookingCatalogPanel(self,cooking_page,runtime_parent=self.global_log_host)
         route_page.grid_columnconfigure(0, weight=1)
         def group(parent, title):
@@ -610,16 +614,48 @@ class CoordinateWindow:
         panel.pack(side='top', fill='x', padx=px(10), pady=(px(8), px(2)))
         self.status_panel = panel
         self.status_items = {}
-        self.status_brand = panel.create_text(px(18), px(20), anchor='w',
+        # 柔和状态指示灯：外圈光晕 + 实心圆点，颜色随连接状态更新。
+        self.status_lamp_halo = panel.create_oval(0, 0, 0, 0, fill='',
+                                                  outline=COLORS['status_off'],
+                                                  width=1, tags='status-lamp')
+        self.status_lamp = panel.create_oval(0, 0, 0, 0, fill=COLORS['status_off'],
+                                             outline='', tags='status-lamp')
+        self.status_brand = panel.create_text(px(30), px(20), anchor='w',
                                               text='心动小镇 · 坐标观测台',
                                               fill=COLORS['green'], font=theme.font(15, bold=True))
         for key, initial in (('connection', '连接  等待游戏'),
-                             ('task', '任务  实时地图'),
+                             ('task', '任务  自动采集'),
                              ('state', '状态  空闲')):
             self.status_items[key] = panel.create_text(px(20), px(40), anchor='w',
                                                        text=initial, fill=COLORS['muted'],
                                                        font=theme.font(11))
         panel.bind('<Configure>', self.layout_status_bar, add='+')
+
+    def move_status_lamp(self, cx, cy):
+        r, halo = px(3), px(6)
+        self.status_panel.coords(self.status_lamp, cx - r, cy - r, cx + r, cy + r)
+        self.status_panel.coords(self.status_lamp_halo, cx - halo, cy - halo,
+                                 cx + halo, cy + halo)
+
+    def draw_status_decor(self, width, height):
+        """静态小镇装饰：宽屏画完整小景，窄屏只留小屋与草丛。
+
+        只在尺寸（按 16px 量化）变化时重绘，图元数量固定且不挂任何定时器，
+        因此不会随地图/坐标刷新产生额外开销。
+        """
+        key = (int(width // px(16)), height)
+        if getattr(self, '_decor_key', None) == key:
+            return
+        self._decor_key = key
+        panel = self.status_panel
+        panel.delete('decor-scene')
+        if width >= px(900):
+            theme.draw_scene(panel, width - px(130), height / 2 + px(8),
+                             width - px(160), tags='decor-scene')
+        elif width < px(760) and width >= px(420):
+            # 窄屏是两行布局，右上角自成空白，可安全放一间小屋。
+            theme.draw_house(panel, width - px(38), px(21), 0.8, tags='decor-scene')
+            theme.draw_bush(panel, width - px(16), px(29), 0.6, tags='decor-scene')
 
     def layout_status_bar(self, event=None):
         panel = self.status_panel
@@ -628,18 +664,22 @@ class CoordinateWindow:
             return
         if width >= 760:
             panel.itemconfigure(self.status_brand, font=theme.font(15, bold=True))
-            panel.coords(self.status_brand, px(18), height / 2.)
-            start, slot = px(280), (width - px(280) - px(18)) / 3.
+            panel.coords(self.status_brand, px(30), height / 2.)
+            self.move_status_lamp(px(19), height / 2.)
+            # 右侧预留装饰宽度，避免状态文字压到小屋上。
+            start, slot = px(250), (width - px(250) - px(170)) / 3.
             for index, key in enumerate(('connection', 'task', 'state')):
                 panel.coords(self.status_items[key], start + slot * index, height / 2.)
                 panel.itemconfigure(self.status_items[key], font=theme.font(12))
         else:
             panel.itemconfigure(self.status_brand, font=theme.font(12, bold=True))
-            panel.coords(self.status_brand, px(16), px(18))
+            panel.coords(self.status_brand, px(28), px(18))
+            self.move_status_lamp(px(17), px(18))
             slot = (width - px(24)) / 3.
             for index, key in enumerate(('connection', 'task', 'state')):
                 panel.coords(self.status_items[key], px(16) + slot * index, px(40))
                 panel.itemconfigure(self.status_items[key], font=theme.font(10))
+        self.draw_status_decor(width, height)
 
     def update_status_bar(self, live, playing):
         """Refresh the fixed header. Never interferes with task execution."""
@@ -656,8 +696,8 @@ class CoordinateWindow:
                 task = '自动采集 · 回放' if getattr(self.playback, 'active', False) else '自动烹饪'
             running = '运行中' if playing else '已暂停' if paused else '空闲'
             detail = self.fields['playback'].get() if 'playback' in self.fields else ''
-            if detail and len(detail) > 16:
-                detail = detail[:15] + '…'
+            if detail and len(detail) > 10:
+                detail = detail[:9] + '…'
             narrow = panel.winfo_width() < 760
             values = {
                 'connection': (f'连接  {connection}', conn_color),
@@ -667,6 +707,11 @@ class CoordinateWindow:
             }
             for key, (text, color) in values.items():
                 panel.itemconfigure(self.status_items[key], text=text, fill=color)
+            # 指示灯与连接状态同步：绿=已连接、暖橙=暂停、灰=等待/断开。
+            lamp = (COLORS['status_on'] if live and not paused
+                    else COLORS['status_warn'] if paused else COLORS['status_off'])
+            panel.itemconfigure(self.status_lamp, fill=lamp)
+            panel.itemconfigure(self.status_lamp_halo, outline=lamp)
         except Exception:
             pass
 
@@ -675,15 +720,33 @@ class CoordinateWindow:
         # map (row 1); the module panel moves to row 2. Wide layouts use the
         # left rail instead and hide this strip. Swapping it with the map keeps
         # the same vertical budget, so the map and tab pages do not shrink.
+        # 每个模块一张圆角卡片：选中项抬升为白卡 + 绿描边，未选中融入胶囊底色。
         host = RoundedPanel(parent, radius=px(12), height=px(42),
                             fill=COLORS['segment_bg'], outline=COLORS['segment_border'])
         self.segmented = host
         self.segmented_buttons = []
+        self.segmented_cards = []
         inner = tk.Frame(host, bg=COLORS['segment_bg'], bd=0, highlightthickness=0)
         for index, (name, _, _) in enumerate(MODULES):
             inner.grid_columnconfigure(index, weight=1, uniform='segmented')
-            button = self.button(inner, name, lambda index=index: self.select_module(index), small=True)
-            button.grid(row=0, column=index, sticky='ew', padx=px(2), pady=px(3))
+            card = RoundedPanel(inner, radius=px(7), height=px(30),
+                                bg=COLORS['segment_bg'], fill=COLORS['segment_bg'],
+                                outline=COLORS['segment_bg'])
+            card.grid(row=0, column=index, sticky='ew', padx=px(3), pady=px(2))
+            button = self.button(card, name, lambda index=index: self.select_module(index),
+                                 small=True)
+            button.configure(highlightthickness=0, padx=px(4), pady=px(4))
+            item = card.create_window(0, 0, window=button, anchor='nw')
+
+            def fit(event=None, card=card, item=item):
+                width, height = card.winfo_width(), card.winfo_height()
+                if width > px(10) and height > px(8):
+                    # 内缩 3px，让卡片自身的圆角露出来（按钮是直角的）。
+                    card.coords(item, 3, 3)
+                    card.itemconfigure(item, width=width - 6, height=height - 6)
+
+            card.bind('<Configure>', fit, add='+')
+            self.segmented_cards.append(card)
             self.segmented_buttons.append(button)
         strip = host.create_window(px(3), px(3), window=inner, anchor='nw')
 
@@ -703,16 +766,20 @@ class CoordinateWindow:
                           fill=COLORS['muted'], font=theme.font(11, bold=True))
         panel.create_line(px(16), px(44), px(138), px(44), fill=COLORS['line'])
         self.nav_buttons = []
+        # 选中项左侧的圆头竖条，由 refresh_nav_highlight 移动位置。
+        self.nav_marker = panel.create_line(0, 0, 0, 0, fill=COLORS['green'],
+                                            width=px(3), capstyle='round',
+                                            state='hidden', tags='nav-marker')
         for index, (name, _, _) in enumerate(MODULES):
             button = tk.Button(panel, text=name,
                                command=lambda index=index: self.select_module(index),
                                relief='flat', bd=0, highlightthickness=0,
-                               bg=COLORS['button'], fg=COLORS['text'],
+                               bg=COLORS['card'], fg=COLORS['text'],
                                activebackground=COLORS['button_active'],
                                activeforeground=COLORS['green'],
                                disabledforeground=COLORS['disabled'],
                                cursor='hand2', font=theme.font(13), anchor='w',
-                               padx=px(12), pady=px(6))
+                               padx=px(14), pady=px(6))
             panel.create_window(px(14), px(56) + index * px(48), window=button,
                                 anchor='nw', width=px(126), height=px(38))
             self.nav_buttons.append(button)
@@ -726,6 +793,23 @@ class CoordinateWindow:
         height = self.nav_panel.winfo_height()
         if height > 10:
             self.nav_panel.coords(self.nav_footer, px(18), height - px(18))
+            self.draw_nav_decor(height)
+
+    def draw_nav_decor(self, height):
+        """宽屏左栏底部空白处的静态小景；只在高度变化时重绘。"""
+        if getattr(self, '_nav_decor_key', None) == height:
+            return
+        self._nav_decor_key = height
+        panel = self.nav_panel
+        panel.delete('decor-nav')
+        base = height - px(150)
+        if base < px(320) or height < px(420):
+            return
+        theme.draw_cloud(panel, px(44), base - px(24), 0.8, tags='decor-nav')
+        theme.draw_house(panel, px(62), base, 0.95, tags='decor-nav')
+        theme.draw_bush(panel, px(98), base + px(6), 0.8, tags='decor-nav')
+        theme.draw_cat(panel, px(120), base + px(10), 0.8, tags='decor-nav')
+        theme.draw_flower(panel, px(30), base + px(6), 0.8, tags='decor-nav')
 
     def select_module(self, index):
         self.active_module = index
@@ -739,13 +823,19 @@ class CoordinateWindow:
         for index, button in enumerate(getattr(self, 'nav_buttons', ())):
             active = index == self.active_module
             try:
-                button.configure(bg=COLORS['primary'] if active else COLORS['button'],
-                                 fg=COLORS['text'],
-                                 activebackground=COLORS['primary_active'] if active
-                                 else COLORS['button_active'])
+                button.configure(bg=COLORS['segment_bg'] if active else COLORS['card'],
+                                 fg=COLORS['green'] if active else COLORS['text'],
+                                 font=theme.font(13, bold=active),
+                                 activebackground=COLORS['button_active'])
             except Exception:
                 pass
-        # Segmented strip: the selected module becomes a raised white pill with
+        try:
+            top = px(56) + self.active_module * px(48) + px(9)
+            self.nav_panel.coords(self.nav_marker, px(10), top, px(10), top + px(20))
+            self.nav_panel.itemconfigure(self.nav_marker, state='normal')
+        except Exception:
+            pass
+        # Segmented strip: the selected module becomes a raised white card with
         # a green label; unselected items blend into the capsule, so there are
         # no repeated per-button borders.
         for index, button in enumerate(getattr(self, 'segmented_buttons', ())):
@@ -754,10 +844,16 @@ class CoordinateWindow:
                 button.configure(bg=COLORS['card'] if active else COLORS['segment_bg'],
                                  fg=COLORS['green'] if active else COLORS['text'],
                                  font=theme.font(12, bold=active),
-                                 highlightthickness=1 if active else 0,
-                                 highlightbackground=COLORS['segment_border'],
                                  activebackground=COLORS['primary_active'] if active
                                  else COLORS['segment_hover'])
+            except Exception:
+                pass
+        for index, card in enumerate(getattr(self, 'segmented_cards', ())):
+            active = index == self.active_module
+            try:
+                card.fill = COLORS['card'] if active else COLORS['segment_bg']
+                card.outline = COLORS['segment_border'] if active else COLORS['button']
+                card._redraw()
             except Exception:
                 pass
         if hasattr(self, 'status_items'):
