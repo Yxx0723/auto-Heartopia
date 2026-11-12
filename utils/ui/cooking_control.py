@@ -30,6 +30,7 @@ class CookingControl:
         self.thread = None
         self.stop_event = threading.Event()
         self.results = queue.Queue(maxsize=1)
+        self.inventory_results = deque()
         self.log_events = deque(maxlen=1000)
         self.lock = threading.RLock()
         self.stream = None
@@ -48,7 +49,8 @@ class CookingControl:
         with self.lock:
             pot = extra.get('pot') or {}
             signature = (state, message, pot.get('id'), pot.get('stirs'), pot.get('confirmed'))
-            if signature == self.signature:
+            inventory_result = state in ('inventory_ready', 'inventory_error')
+            if signature == self.signature and not inventory_result:
                 return
             self.signature = signature
             data = deepcopy({'state': state, 'message': message, **extra})
@@ -64,6 +66,9 @@ class CookingControl:
             # call Tk here, block the producer, or fail cooking for display.
             try:self.log_events.append(deepcopy(event))
             except Exception:pass
+            if inventory_result:
+                self.inventory_results.append(data)
+                return
             try:
                 self.results.get_nowait()
             except queue.Empty:
@@ -71,10 +76,13 @@ class CookingControl:
             self.results.put_nowait(data)
 
     def take_latest(self):
-        try:
-            return self.results.get_nowait()
-        except queue.Empty:
-            return None
+        with self.lock:
+            if self.inventory_results:
+                return self.inventory_results.popleft()
+            try:
+                return self.results.get_nowait()
+            except queue.Empty:
+                return None
 
     def take_log_events(self,limit=100):
         with self.lock:

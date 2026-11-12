@@ -16,20 +16,32 @@ class CookingSelectionControl(CookingEntryControl):
         self.inventory_thread = None
 
     def read_inventory(self, pid):
-        if self.active or (self.inventory_thread and self.inventory_thread.is_alive()):
-            return
+        if type(pid) is not int or pid <= 0:
+            return False
+
         def read():
-            reader = None
             try:
                 reader = self.reader_factory(pid, self.profile)
-                self.update('inventory_ready', '已读取当前随身背包材料', inventory=reader.cooking_inventory_snapshot(5))
-            except (ValueError, OSError) as exc:
-                self.update('inventory_error', '背包材料未确认：'+str(exc), inventory=None)
-            finally:
-                if reader is not None:
+                try:
+                    inventory = reader.cooking_inventory_snapshot(5)
+                finally:
                     reader.close()
-        self.inventory_thread = threading.Thread(target=read, name='cooking-stock-read', daemon=True)
-        self.inventory_thread.start()
+            except Exception as exc:
+                self.update('inventory_error', '背包材料未确认：'+str(exc), inventory=None)
+            else:
+                self.update('inventory_ready', '已读取当前随身背包材料', inventory=inventory)
+
+        with self.lock:
+            if self.active or (self.inventory_thread and self.inventory_thread.is_alive()):
+                return False
+            self.inventory_thread = threading.Thread(target=read, name='cooking-stock-read', daemon=True)
+            try:
+                self.inventory_thread.start()
+            except RuntimeError as exc:
+                self.inventory_thread = None
+                self.update('inventory_error', '背包材料未确认：'+str(exc), inventory=None)
+                return False
+            return True
 
     def start_selection(self, pid, recipe):
         if self.active or self.busy():

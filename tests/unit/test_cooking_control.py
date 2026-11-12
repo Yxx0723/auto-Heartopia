@@ -79,3 +79,93 @@ def test_worker_failure_releases_device_controls_reader_and_gate(tmp_path):
     assert gate.owner is None
     assert control.stream is None
     assert json.loads((control.path/'summary.json').read_text('utf-8'))['task_state'] == 'error'
+
+@pytest.mark.parametrize('state', ['inventory_ready', 'inventory_error'])
+def test_identical_inventory_results_survive_dedup_and_ui_polling(tmp_path, state):
+    control = CookingControl(tmp_path/'profile.json', tmp_path)
+    for _ in range(2):
+        control.update(state, 'same result', inventory=None)
+    control.update('playing', 'ordinary event')
+    assert [control.take_latest()['state'] for _ in range(3)] == [state, state, 'playing']
+    assert control.take_latest() is None
+
+
+def test_inventory_refresh_repeats_reports_failure_and_recovers(tmp_path):
+    from utils.ui.cooking_selection_control import CookingSelectionControl
+
+    reader = Mock()
+    stocks = [{'counts': {100: n}} for n in (2, 2, 2, 2, 3)]
+    reader.cooking_inventory_snapshot.side_effect = [
+        *stocks, OSError('process disappeared'), stocks[-1],
+    ]
+    control = CookingSelectionControl(tmp_path/'profile.json', tmp_path,
+                                      reader_factory=Mock(return_value=reader))
+    for expected in [*stocks, None, stocks[-1]]:
+        assert control.read_inventory(123) is True
+        control.inventory_thread.join(2)
+        assert not control.inventory_thread.is_alive()
+        result = control.take_latest()
+        assert result['inventory'] == expected
+        if expected is None:
+            assert result['state'] == 'inventory_error'
+            assert 'process disappeared' in result['message']
+        else:
+            assert result['state'] == 'inventory_ready'
+    assert reader.close.call_count == 7
+
+
+def test_refresh_button_preserves_stock_during_read_and_handles_failure(tmp_path, monkeypatch):
+    from utils.ui.cooking_catalog_panel import CookingCatalogPanel
+    from utils.ui.cooking_selection_control import CookingSelectionControl
+
+    release = threading.Event()
+    reader = Mock()
+    latest = {'counts': {100: 7}}
+    def snapshot(_):
+        assert release.wait(2)
+        return latest
+    reader.cooking_inventory_snapshot.side_effect = snapshot
+    control = CookingSelectionControl(tmp_path/'profile.json', tmp_path,
+                                      reader_factory=Mock(return_value=reader))
+    old_stock = {'counts': {100: 2}}
+    panel = CookingCatalogPanel.__new__(CookingCatalogPanel)
+    status = {'pid': 123}
+    panel.owner = SimpleNamespace(view=SimpleNamespace(status=status), cooking=control, root=None)
+    panel.inventory, panel.stock_button, panel.show_detail = old_stock, Mock(), Mock()
+
+    control.thread = Mock()
+    control.thread.is_alive.return_value = True
+    panel.refresh_inventory()
+    assert panel.inventory is old_stock and control.inventory_thread is None
+    panel.stock_button.configure.assert_not_called()
+    control.thread = None
+
+    panel.refresh_inventory()
+    thread = control.inventory_thread
+    try:
+        panel.refresh_inventory()
+        assert thread is control.inventory_thread
+        assert panel.inventory is old_stock
+        panel.show_detail.assert_not_called()
+        panel.stock_button.configure.assert_called_once_with(text='正在读取背包材料…')
+    finally:
+        release.set()
+        thread.join(2)
+    assert control.reader_factory.call_count == 1
+    panel.apply_result(control.take_latest())
+    assert panel.inventory == latest
+    panel.stock_button.configure.assert_called_with(text='刷新背包材料')
+
+    reader.cooking_inventory_snapshot.side_effect = OSError('process disappeared')
+    panel.refresh_inventory()
+    control.inventory_thread.join(2)
+    panel.apply_result(control.take_latest())
+    assert panel.inventory is None
+    panel.stock_button.configure.assert_called_with(text='读取失败 · 点击重试')
+
+    status.clear()
+    error = Mock()
+    monkeypatch.setattr('utils.ui.cooking_catalog_panel.messagebox.showerror', error)
+    panel.refresh_inventory()
+    error.assert_called_once()
+    assert control.reader_factory.call_count == 2

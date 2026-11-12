@@ -112,10 +112,14 @@ class CookingCatalogPanel:
         pid=self.owner.view.status.get('pid')
         if not pid:
             messagebox.showerror('背包未读取','请先连接游戏',parent=self.owner.root);return
-        self.inventory=None;self.show_detail()
-        self.owner.cooking.read_inventory(pid)
+        if self.owner.cooking.read_inventory(pid):
+            self.stock_button.configure(text='正在读取背包材料…')
 
     def apply_result(self,result):
+        if result.get('state') == 'inventory_ready':
+            self.stock_button.configure(text='刷新背包材料')
+        elif result.get('state') == 'inventory_error':
+            self.stock_button.configure(text='读取失败 · 点击重试')
         if 'batch' in result:
             b=result['batch']
             self.last_batch=b
