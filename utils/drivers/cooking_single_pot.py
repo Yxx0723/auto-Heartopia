@@ -16,6 +16,19 @@ class CookingObservationUpdating(ValueError):
         self.diagnostics=diagnostics
 
 
+_BINDING_STAMP_FIELDS = ('_version', '_count', '_freeCount', '_entries')
+
+
+def _binding_snapshot(address, stamp, phase, started, finished, binding_started):
+    return {
+        'address': address,
+        'phase': phase,
+        'started_offset_seconds': started - binding_started,
+        'elapsed_seconds': finished - started,
+        'fields': dict(zip(_BINDING_STAMP_FIELDS, stamp)),
+    }
+
+
 class SinglePotReader(CookingSelectionReader):
     def __init__(self, memory):
         super().__init__(memory)
@@ -81,16 +94,53 @@ class SinglePotReader(CookingSelectionReader):
             raise ValueError('当前人物归属未确认')
         return context, local, registry, role
 
-    def _binding_stamp(self, source, path):
+    def _binding_stamp(self, source, path, diagnostic=None, binding_started=None):
         m = self.ui.meta
         _, local, registry, _ = source
         hierarchy, owner, entity, components = path
-        if (m.static_ref(m.obj(local)['address'], 'ActiveHierarchies') != registry
-                or m.ref(hierarchy, '_hierarchyObject') != owner
-                or m.ref(owner, '<entity>k__BackingField') != entity
-                or m.ref(entity, '_components') != components):
-            raise ValueError('已绑定灶台的活动层级或组件归属已变化')
-        return m.dictionary_stamp(registry), m.dictionary_stamp(components, 128)
+        if diagnostic is None:
+            if (m.static_ref(m.obj(local)['address'], 'ActiveHierarchies') != registry
+                    or m.ref(hierarchy, '_hierarchyObject') != owner
+                    or m.ref(owner, '<entity>k__BackingField') != entity
+                    or m.ref(entity, '_components') != components):
+                raise ValueError('已绑定灶台的活动层级或组件归属已变化')
+            return m.dictionary_stamp(registry), m.dictionary_stamp(components, 128)
+
+        ownership = (
+            ('ActiveHierarchies', local, registry,
+             lambda: m.static_ref(m.obj(local)['address'], 'ActiveHierarchies')),
+            ('_hierarchyObject', hierarchy, owner, lambda: m.ref(hierarchy, '_hierarchyObject')),
+            ('<entity>k__BackingField', owner, entity, lambda: m.ref(owner, '<entity>k__BackingField')),
+            ('_components', entity, components, lambda: m.ref(entity, '_components')),
+        )
+        diagnostic['phase'] = 'final_ownership'
+        for field, source_address, expected, read in ownership:
+            check = {'field': field, 'source_address': source_address, 'initial': expected, 'final': None}
+            diagnostic['ownership_checks'].append(check)
+            actual = read()
+            check.update(final=actual, matches=actual == expected)
+            if actual != expected:
+                raise ValueError('已绑定灶台的活动层级或组件归属已变化')
+
+        stamps = []
+        for name, address, read in (
+            ('ActiveHierarchies', registry, lambda: m.dictionary_stamp(registry)),
+            ('_components', components, lambda: m.dictionary_stamp(components, 128)),
+        ):
+            diagnostic['phase'] = 'final_' + name
+            started = perf_counter()
+            stamp = read()
+            sample = _binding_snapshot(address, stamp, diagnostic['phase'],
+                                       started, perf_counter(), binding_started)
+            collection = diagnostic['collections'][name]
+            collection['final'] = sample
+            initial = collection['initial']['fields']
+            collection['changed_fields'] = {
+                field: {'initial': initial[field], 'final': value}
+                for field, value in sample['fields'].items() if value != initial[field]
+            }
+            stamps.append(stamp)
+        return tuple(stamps)
 
     def bind(self, stove):
         # A failed proof never leaves a binding usable by a later state read.
@@ -99,11 +149,12 @@ class SinglePotReader(CookingSelectionReader):
         previous = self.bound
         try:
             if previous is not None:
-                state = self._time_binding('quick', lambda: self._revalidate(stove))
+                state = self._time_binding('quick', lambda _record, _started: self._revalidate(stove))
                 if state is not None:
                     return state
             self.bound = self.binding_witness = None
-            return self._time_binding('full', lambda: self._bind_full(stove, previous))
+            return self._time_binding(
+                'full', lambda record, started: self._bind_full(stove, previous, record, started))
         except Exception:
             self.bound = self.binding_witness = None
             raise
@@ -112,7 +163,7 @@ class SinglePotReader(CookingSelectionReader):
         started = perf_counter()
         record = {'mode': mode, 'outcome': 'failed'}
         try:
-            result = read()
+            result = read(record, started)
             record['outcome'] = 'verified' if result is not None else 'collection_changed'
             return result
         except Exception as exc:
@@ -143,11 +194,29 @@ class SinglePotReader(CookingSelectionReader):
             raise ValueError('灶台绑定复核期间集合正在变化')
         return state if after == stamp else None
 
-    def _bind_full(self, stove, previous):
+    def _bind_full(self, stove, previous, record, binding_started):
         m = self.ui.meta
+        diagnostic = {
+            'phase': 'initial_source',
+            'stove': dict(zip(('static_id', 'entity_net_id', 'level_object_net_id'), stove)),
+            'match_count': None,
+            'collections': {
+                name: {'initial': None, 'final': None, 'changed_fields': None}
+                for name in ('ActiveHierarchies', '_components')
+            },
+            'ownership_checks': [],
+        }
+        record['collection_diagnostic'] = diagnostic
         source = self._binding_source()
-        context, _, registry, role = source
+        context, local, registry, role = source
+        diagnostic['scene'] = dict(zip(('level_node', 'level', 'cooking_system'), context))
+        diagnostic['player'] = {'entity': role, 'hierarchy': local}
+        diagnostic['phase'] = 'initial_ActiveHierarchies'
+        started = perf_counter()
         hierarchies, registry_stamp = m.dictionary(registry, with_stamp=True)
+        diagnostic['collections']['ActiveHierarchies']['initial'] = _binding_snapshot(
+            registry, registry_stamp, diagnostic['phase'], started, perf_counter(), binding_started)
+        diagnostic['phase'] = 'scan_components'
         matches = []
         for hierarchy in hierarchies:
             try:
@@ -156,7 +225,9 @@ class SinglePotReader(CookingSelectionReader):
                     continue
                 entity = m.ref(owner, '<entity>k__BackingField')
                 components = m.ref(entity, '_components')
+                component_started = perf_counter()
                 entries, component_stamp = m.dictionary(components, max_items=128, with_stamp=True)
+                component_finished = perf_counter()
                 for component in entries:
                     info = m.obj(component)
                     if (info['name'], info['namespace']) != ('CookingComponent', 'XDTLevelAndEntity.Gameplay.Component.Homeland'):
@@ -174,20 +245,42 @@ class SinglePotReader(CookingSelectionReader):
                     if self.integer(component, '_cookerStaticId') != stove[0]:
                         continue
                     matches.append(((component, entity, parent, parent_entity),
-                                    (hierarchy, owner, entity, components), component_stamp))
+                                    (hierarchy, owner, entity, components), component_stamp,
+                                    component_started, component_finished))
             except (ValueError, OSError):
                 continue  # Unrelated streaming objects never authorize a pot.
-        if len(matches) != 1 or self._binding_source() != source:
+        diagnostic['match_count'] = len(matches)
+        diagnostic['phase'] = 'unique_match'
+        if len(matches) != 1:
             raise ValueError('当前灶台的烹饪组件尚未唯一对应')
-        binding, path, component_stamp = matches[0]
+        binding, path, component_stamp, component_started, component_finished = matches[0]
+        diagnostic['matched_stove'] = dict(zip(
+            ('component', 'entity', 'parent_component', 'parent_entity'), binding))
+        diagnostic['collections']['_components']['initial'] = _binding_snapshot(
+            path[3], component_stamp, 'scan_matched_components',
+            component_started, component_finished, binding_started)
+        diagnostic['phase'] = 'recheck_source'
+        current_source = self._binding_source()
+        diagnostic['source_matches'] = current_source == source
+        diagnostic['source_recheck'] = dict(zip(
+            ('scene_context', 'player_hierarchy', 'registry', 'player_entity'), current_source))
+        if current_source != source:
+            raise ValueError('当前灶台的烹饪组件尚未唯一对应')
         stamp = (registry_stamp, component_stamp)
+        diagnostic['phase'] = 'read_player_network_id'
         self.bound = (context, stove, role, self.entity_net(role), *binding)
+        diagnostic['player']['net_id'] = self.bound[3]
+        diagnostic['phase'] = 'compare_previous_binding'
         if previous is not None and previous != self.bound:
             raise ValueError('重新绑定发现灶台组件或人物身份变化')
+        diagnostic['phase'] = 'read_stove_state'
         state = self.state()
-        if self._binding_stamp(source, path) != stamp:
+        final_stamp = self._binding_stamp(source, path, diagnostic, binding_started)
+        diagnostic['phase'] = 'compare_collection_stamps'
+        if final_stamp != stamp:
             raise ValueError('完整绑定期间活动层级或组件集合发生变化')
         self.binding_witness = (source, path, stamp)
+        diagnostic['phase'] = 'verified'
         return state
 
     def state(self):
