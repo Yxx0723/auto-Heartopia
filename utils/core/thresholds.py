@@ -136,10 +136,10 @@ COORD_RECOVERY_MAX_SIDE_DISTANCE = 2.4
 COORD_RECOVERY_RETRY_SECONDS = .5
 
 # Point collection policy: one .12 s F pulse, then a user-chosen dwell.
-# 3 s is an editable default, not a measured collection-animation duration.
+# 2 s is an editable default, not a measured collection-animation duration.
 # Cap each wait at five minutes to keep configuration and run budgets bounded.
 COORD_COLLECTION_PRESS_SECONDS = .12
-COORD_COLLECTION_DEFAULT_WAIT = 3.
+COORD_COLLECTION_DEFAULT_WAIT = 2.
 COORD_COLLECTION_MAX_WAIT = 300.
 
 
