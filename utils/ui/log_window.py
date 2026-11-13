@@ -49,10 +49,18 @@ class FullLogWindow:
                                     font=theme.font(11))
         self.count_label.pack(side='right', padx=(0, theme.px(10)))
 
+        # Footer first so the expanding text area can never squeeze it out.
+        tk.Label(self.top, anchor='w', bg=COLORS['bg'], fg=COLORS['muted'],
+                 font=theme.font(10),
+                 text=f'完整记录随任务实时追加 · 最多保留最近 {self.MAX_LINES} 行 · '
+                      '内容与主窗口日志同源，不会丢弃').pack(
+            side='bottom', fill='x', padx=theme.px(14), pady=(theme.px(6), theme.px(8)))
+
         body = tk.Frame(self.top, bg=COLORS['card'], highlightbackground=COLORS['line'],
                         highlightthickness=1, bd=0)
-        body.pack(side='top', fill='both', expand=True, padx=theme.px(12))
+        body.pack(side='top', fill='both', expand=True, padx=theme.px(12), pady=(0, theme.px(4)))
         self.text = tk.Text(body, wrap='word', state='disabled', bd=0, highlightthickness=0,
+                            height=6, width=40,
                             bg=COLORS['card'], fg=COLORS['text'], font=theme.font(11),
                             padx=theme.px(8), pady=theme.px(6))
         scroll = ttk.Scrollbar(body, orient='vertical', command=self.text.yview)
@@ -61,12 +69,6 @@ class FullLogWindow:
         self.text.configure(yscrollcommand=scroll.set)
         for status, color in STATUS_COLORS:
             self.text.tag_configure(status, foreground=color)
-
-        tk.Label(self.top, anchor='w', bg=COLORS['bg'], fg=COLORS['muted'],
-                 font=theme.font(10),
-                 text=f'完整记录随任务实时追加 · 最多保留最近 {self.MAX_LINES} 行 · '
-                      '内容与主窗口日志同源，不会丢弃').pack(
-            side='top', fill='x', padx=theme.px(14), pady=(theme.px(6), theme.px(8)))
 
         catalog.add_log_view(self)
 
@@ -132,7 +134,8 @@ class FullLogWindow:
 
     def _update_count(self):
         try:
-            lines = max(1, int(self.text.index('end-1c').split('.')[0]))
+            content = self.text.get('1.0', 'end-1c')
+            lines = len(content.splitlines())
             self.count_label.configure(text=f'{lines} 行 · 只读')
         except Exception:
             pass
