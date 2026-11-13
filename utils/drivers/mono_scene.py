@@ -775,6 +775,65 @@ class MemorySceneMap:
                 raise
             raise issue from exc
 
+    # Bounded re-sampling while a failed owner reference is being re-checked.
+    # This is deliberately small: it replaces a reader discard only when the
+    # membership can be proven stable and the owner proven removed.
+    MEMBERSHIP_RECHECK_LIMIT = 3
+
+    def _collision_membership_recovery(self, trace, stream, collision, verify_stream):
+        """Re-acquire the live collision-stream membership after a proven change.
+
+        ``meta.dictionary(..., with_stamp=True)`` exposes the Mono dictionary's
+        ``_version`` stamp, so both the membership and its generation can be
+        compared before and after the read. Only a stable membership that no
+        longer contains the failed owner is accepted as local cleanup; a still
+        present owner, an address reuse, continuous mutation, or any unverified
+        scope keeps the existing integrity gate.
+        """
+        meta = self.meta
+        context = trace.context
+        if (context.get('terminal_issue') or {}).get('kind') != 'invalid_reference':
+            return False
+        context['membership_recovery'] = 'not_verified'
+        for _ in range(self.MEMBERSHIP_RECHECK_LIMIT):
+            self.read_budget.check()
+            try:
+                verify_stream(stream)
+            except SceneReadIssue as exc:
+                if exc.kind == 'cancelled':
+                    raise
+                if exc.kind not in ('mutation', 'scope_changed'):
+                    return False
+                context['scene_scope'] = ('membership_changed_at_recheck'
+                                          if exc.kind == 'mutation'
+                                          else 'scope_or_parent_changed')
+                continue
+            except (OSError, ValueError):
+                return False
+            try:
+                members, stamp = meta.dictionary(meta.ref(stream, '_collisions'), with_stamp=True)
+            except (OSError, ValueError):
+                return False
+            context['scene_generation'] = format(hash(tuple(stamp)), 'x')
+            context['collision_stream_membership'] = 'present' if collision in members else 'absent'
+            self.read_budget.check()
+            try:
+                current, current_stamp = meta.dictionary(meta.ref(stream, '_collisions'), with_stamp=True)
+            except (OSError, ValueError):
+                return False
+            if current_stamp != stamp or current != members:
+                context['membership_stability'] = 'changed'
+                continue
+            context['membership_stability'] = 'stable'
+            if collision in current:
+                context['membership_recovery'] = 'owner_still_present'
+                return False
+            context['membership_recovery'] = 'owner_removed'
+            context['recovery_decision'] = 'rescan_verified_stream'
+            return True
+        context['membership_recovery'] = 'unstable'
+        return False
+
     def _managed_collection(self, owner, field, read, verify_scope, stage, *, trace=None,
                             inspect_failure=None):
         if trace is not None:
@@ -962,6 +1021,11 @@ class MemorySceneMap:
         def inspect_collision_failure(trace, stream, collision):
             trace.context['process_start_identity'] = self.memory.process_start_identity()
             trace.context['collision_stream_membership'] = 'unknown'
+            # First try the bounded membership re-acquisition. It covers the
+            # case where the collection changes *during* the re-check, which
+            # the narrow path below cannot distinguish from a lost owner.
+            if self._collision_membership_recovery(trace, stream, collision, verify_stream):
+                return
             try:
                 verify_stream(stream)
             except SceneReadIssue as exc:
@@ -971,7 +1035,8 @@ class MemorySceneMap:
             trace.context['scene_scope'] = 'verified_at_recheck'
             current = meta.dictionary(meta.ref(stream, '_collisions'))
             trace.context['collision_stream_membership'] = 'present' if collision in current else 'absent'
-            if collision not in current and trace.context['terminal_issue']['kind'] == 'invalid_reference':
+            if (collision not in current
+                    and (trace.context.get('terminal_issue') or {}).get('kind') == 'invalid_reference'):
                 verify_stream(stream)
                 if current != meta.dictionary(meta.ref(stream, '_collisions')):
                     return
