@@ -26,7 +26,7 @@ from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
 from utils.ui.cooking_single_pot_control import CookingSinglePotControl
 from utils.ui.cooking_catalog_panel import CookingCatalogPanel
-from utils.ui.log_window import FullLogWindow
+from utils.ui.log_window import CollectionLog, FullLogWindow
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
 from utils.ui.scene_map_worker import SceneMapWorker
@@ -449,6 +449,9 @@ class CoordinateWindow:
         self.label(cookhead, '单锅 / 连续制作 · 先确认料理再按 F6', color='muted',
                    font=theme.font(10)).pack(side='right')
         self.cooking_catalog=CookingCatalogPanel(self,cooking_page,runtime_parent=self.global_log_host)
+        self.collection_log = CollectionLog(self, self.global_log_host)
+        self.log_module = None
+        self.sync_log_module()
         route_page.grid_columnconfigure(0, weight=1)
         def group(parent, title):
             return tk.LabelFrame(parent, text=title, bg=COLORS['card'], fg=COLORS['green'],
@@ -814,7 +817,34 @@ class CoordinateWindow:
             pass
         self.refresh_nav_highlight()
 
+    def sync_log_module(self):
+        if not hasattr(self, 'collection_log') or self.active_module not in (0, 1):
+            return
+        if self.log_module == self.active_module:
+            return
+        self.log_module = self.active_module
+        self.collection_log.page.pack_forget()
+        self.cooking_catalog.runtime_page.pack_forget()
+        self.show_log_source()
+
+    def log_source(self):
+        if self.log_module == 1:
+            return self.cooking_catalog, self.cooking_catalog.runtime_page, '自动烹饪'
+        return self.collection_log, self.collection_log.page, '自动采集'
+
+    def show_log_source(self):
+        source, page, name = self.log_source()
+        self.log_title.configure(text=f'运行日志 · {name}')
+        if getattr(self, 'log_collapsed', False):
+            page.pack_forget()
+        else:
+            page.pack(fill='both', expand=True, padx=px(8), pady=px(3))
+        window = getattr(self, 'full_log_window', None)
+        if window is not None and window.alive():
+            window.set_source(source, name)
+
     def refresh_nav_highlight(self):
+        self.sync_log_module()
         for index, button in enumerate(getattr(self, 'nav_buttons', ())):
             active = index == self.active_module
             try:
@@ -903,7 +933,7 @@ class CoordinateWindow:
     def build_log_header(self):
         header = self.frame(self.global_log_host, card=True, border=False)
         header.pack(side='top', fill='x', padx=px(8), pady=(px(5), 0))
-        self.log_title = self.label(header, '运行日志 · 关键信息', color='green',
+        self.log_title = self.label(header, '运行日志 · 自动采集', color='green',
                                     font=theme.font(12, bold=True))
         self.log_title.pack(side='left')
         # 「收起」按钮已按需求移除：日志始终常驻，完整记录用独立窗口查看。
@@ -918,24 +948,13 @@ class CoordinateWindow:
         """standard / full / collapsed — content is never discarded."""
         self.log_view = mode
         self.log_collapsed = mode == 'collapsed'
-        catalog = getattr(self, 'cooking_catalog', None)
-        runtime = getattr(catalog, 'runtime_page', None) if catalog is not None else None
-        if runtime is not None:
-            try:
-                if mode == 'collapsed':
-                    runtime.pack_forget()
-                elif not runtime.winfo_ismapped():
-                    runtime.pack(fill='both', expand=True, padx=px(8), pady=px(3))
-            except Exception:
-                pass
+        if hasattr(self, 'collection_log'):
+            self.show_log_source()
         heights = {'standard': px(108), 'full': px(300), 'collapsed': px(34)}
         minsizes = {'standard': px(92), 'full': px(110), 'collapsed': px(34)}
         try:
             self.main_panes.paneconfigure(self.global_log_host,
                                           minsize=minsizes[mode], height=heights[mode])
-            self.log_title.configure(text={'standard': '运行日志 · 关键信息',
-                                           'full': '运行日志 · 完整记录',
-                                           'collapsed': '运行日志 · 已收起（完整记录保留）'}[mode])
         except Exception:
             pass
         self.root.update_idletasks()
@@ -951,14 +970,14 @@ class CoordinateWindow:
         The bottom pane keeps its size, so opening the full log never squeezes
         the map or the control area.
         """
-        catalog = getattr(self, 'cooking_catalog', None)
-        if catalog is None:
+        if not hasattr(self, 'collection_log'):
             return None
+        source, _, name = self.log_source()
         window = getattr(self, 'full_log_window', None)
         if window is not None and window.alive():
             window.raise_window()
             return window
-        self.full_log_window = FullLogWindow(self.root, catalog)
+        self.full_log_window = FullLogWindow(self.root, source, name)
         return self.full_log_window
 
     # Kept for older helper scripts that still call the previous name.
@@ -1294,6 +1313,14 @@ class CoordinateWindow:
             self.playback_status = playback
             if playback.get('state') in ('reached', 'finished', 'stopped', 'error', 'partial'):
                 self.refresh_path_memory_info()
+        if hasattr(self, 'collection_log'):
+            try:
+                events = self.playback.take_log_events()
+                for event in events:
+                    event['message'] = user_feedback(event['message'])
+                self.collection_log.apply_events(events)
+            except Exception:
+                pass  # Display failures must not stop the Tk tick.
         cooking_owner = getattr(self,'cooking',None)
         if cooking_owner and hasattr(self,'cooking_catalog'):
             try:self.cooking_catalog.apply_log_events(cooking_owner.take_log_events())
@@ -1809,6 +1836,7 @@ class CoordinateWindow:
             self.playback_status = {'state': 'idle', 'message': '萤石和橡木 · 1→12号房门联合巡查 · 点击按顺序回放启动'}
             self.render()
             self.hint.configure(text='已选择内置巡查路线，启动时读取当天场景', fg=COLORS['green'])
+            self.playback.record_log('preparation', f'已选择路线：{name}')
             return
         store = self.routes.store(name)
         data = store.load()  # Validate before replacing the current route/view.
@@ -1816,6 +1844,7 @@ class CoordinateWindow:
         self.point_store, self.route_name = store, name
         self.route_var.set(name)
         self.saved_points, self.points_error = data['points'], ''
+        self.playback.record_log('preparation', f'已选择路线：{name} · {len(self.saved_points)} 个点位')
         self.view.clear_trail()
         self.refresh_path_memory_info()
         self.refresh_route_menu()
@@ -1886,12 +1915,14 @@ class CoordinateWindow:
             self.playback_status = {'state': 'playback_wait', 'message': f'{name}房门巡查已就绪 · 1→12号 · 切回游戏按 F6 · F9停止'}
             self.render()
         except (OSError, ValueError) as exc:
+            self.playback.record_log('error', f'无法开始动态采集：{exc}')
             messagebox.showerror('无法开始动态采集', str(exc), parent=self.root)
 
     def start_guidance_follow(self):
         try:
             self.playback.start_guidance(self.view.status.get('pid'))
         except (OSError, ValueError) as exc:
+            self.playback.record_log('error', f'无法跟随游戏引导：{exc}')
             messagebox.showerror('无法跟随游戏引导', str(exc), parent=self.root)
 
 
@@ -1915,6 +1946,7 @@ class CoordinateWindow:
                                 route_path=self.point_store.path,
                                 remember_paths=self.path_memory_var.get() if hasattr(self, 'path_memory_var') else True)
         except (OSError, ValueError) as exc:
+            self.playback.record_log('error', f'无法开始点位回放：{exc}')
             messagebox.showerror('无法开始点位回放', str(exc), parent=self.root)
             return
         self.saved_points, self.points_error = data['points'], ''

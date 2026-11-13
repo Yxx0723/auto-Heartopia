@@ -2,6 +2,7 @@
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+from collections import deque
 import queue
 import threading
 
@@ -66,6 +67,9 @@ class PointPlayback:
         self.diagnostics = PlaybackDiagnostics(diagnostics_path) if diagnostics_path is not None else None
         self.results = queue.Queue(maxsize=1)
         self.result_lock = threading.Lock()
+        self.log_events = deque(maxlen=2000)
+        self.log_dropped = 0
+        self.log_signature = None
         self.stop_event = threading.Event()
         self.thread = None
         self.closed = False
@@ -111,6 +115,44 @@ class PointPlayback:
                 if self.history.archive_error:
                     status['message'] += f' · 路线学习索引写入失败：{self.history.archive_error}'
             self.results.put_nowait(status)
+            self._record_log(status)
+
+    def _record_log(self, status):
+        """Called under result_lock. Copy only the small fields used by the UI."""
+        try:
+            state, message = status['state'], status['message']
+            # Countdown ticks are useful in the status bar, but one log entry
+            # per wait is sufficient. The next collecting event starts a new wait.
+            signature = (state, None if state == 'collection_wait' else message,
+                         status.get('cycle'), status.get('waypoint'))
+            if signature == self.log_signature:
+                return
+            event = {k: status[k] for k in ('state', 'message', 'cycle', 'loop_count',
+                     'waypoint', 'waypoint_count', 'skipped_count') if k in status}
+            event['at'] = datetime.now().astimezone().isoformat(timespec='seconds')
+            if len(self.log_events) == self.log_events.maxlen:
+                self.log_dropped += 1
+            self.log_events.append(event)
+            self.log_signature = signature
+        except Exception:
+            # Display logging must not interrupt a playback or its cleanup.
+            pass
+
+    def record_log(self, state, message):
+        """UI preparation and startup errors do not replace task status."""
+        with self.result_lock:
+            self._record_log({'state': state, 'message': message})
+
+    def take_log_events(self, limit=100):
+        with self.result_lock:
+            events = []
+            if self.log_dropped and limit > 0:
+                events.append({'state': 'partial', 'message':
+                               f'日志缓冲已满，已省略最早 {self.log_dropped} 条待显示记录'})
+                self.log_dropped = 0
+            events.extend(self.log_events.popleft()
+                          for _ in range(min(max(0, limit - len(events)), len(self.log_events))))
+            return events
 
     def take_latest(self):
         try:
@@ -169,6 +211,8 @@ class PointPlayback:
                          'collect_wait_seconds': collect_wait_seconds,
                          'recovery_attempts': recovery_attempts, 'jump_on_recovery': jump_on_recovery})
                         if self.history_root is not None else None)
+        if route_path is not None:
+            self.record_log('preparation', f'当前路线：{Path(route_path).stem}')
         self.update('playback_wait', f'已就绪：{self.total} 个点 · 循环 {loop_count} 次 · 切回游戏按 F6 开始 · F9 停止')
         self.thread = threading.Thread(target=self._run, args=(deepcopy(data), pid, start_mode,
                                                               recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat),

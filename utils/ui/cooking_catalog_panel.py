@@ -6,6 +6,7 @@ from tkinter import ttk, messagebox
 from utils.core.cooking_catalog import load_catalog, material_status
 from utils.ui import theme
 from utils.ui.cooking_event_view import event_view
+from utils.ui.log_window import append_log_lines
 
 
 class CookingCatalogPanel:
@@ -81,7 +82,7 @@ class CookingCatalogPanel:
                 else:self.runtime_error_label.pack_forget()
             except Exception:pass
         self.runtime_error.trace_add('write',show_error)
-        self.runtime_lines=0;self.last_success='尚无确认操作';self.last_batch={}
+        self.last_success='尚无确认操作';self.last_batch={}
         # Same records feed the inline pane and the detached full-log window;
         # keeping them in memory means the window needs no file IO and no timer.
         self.log_buffer=deque(maxlen=2000)
@@ -174,18 +175,8 @@ class CookingCatalogPanel:
                 pass
         if lines:
             try:
-                self.runtime_log.configure(state='normal')
-                chunks=[]
-                for line,status in lines:chunks.extend((line,(status,)))
-                self.runtime_log.insert('end',*chunks)
-                self.runtime_lines+=len(lines)
-                if self.runtime_lines>500:
-                    self.runtime_log.delete('1.0',f'{self.runtime_lines-500+1}.0');self.runtime_lines=500
-                self.runtime_log.see('end')
+                append_log_lines(self.runtime_log, lines, 500)
             except Exception:pass
-            finally:
-                try:self.runtime_log.configure(state='disabled')
-                except Exception:pass
             self.log_buffer.extend(lines)
             self._broadcast_log(lines)
 
