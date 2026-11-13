@@ -116,7 +116,7 @@ class PointPlayback:
                 if self.history.archive_error:
                     status['message'] += f' · 路线学习索引写入失败：{self.history.archive_error}'
             self.log_events.append({
-                'at': self.wall_clock().isoformat(timespec='seconds'),
+                'at': datetime.now().astimezone().isoformat(timespec='seconds'),
                 'state': state,
                 'message': status['message'],
                 'waypoint': status.get('waypoint'),
