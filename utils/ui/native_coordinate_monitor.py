@@ -450,7 +450,7 @@ class CoordinateWindow:
         self.label(cookhead, '单锅 / 连续制作 · 先确认料理再按 F6', color='muted',
                    font=theme.font(10)).pack(side='right')
         self.cooking_catalog=CookingCatalogPanel(self,cooking_page,runtime_parent=self.global_log_host)
-        self.collection_log=CollectionLogPanel(self, self.global_log_host)
+        self.collection_log=CollectionLogPanel(self, self.global_log_host, message_filter=user_feedback)
         # Each module keeps its own log and history; the shared pane only
         # displays the selected module, without interrupting either worker.
         self.log_module=None
