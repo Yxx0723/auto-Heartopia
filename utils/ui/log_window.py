@@ -24,11 +24,11 @@ class FullLogWindow:
 
     MAX_LINES = 2000
 
-    def __init__(self, parent, catalog):
+    def __init__(self, parent, catalog, title='运行日志 · 自动烹饪 · 完整记录'):
         self.catalog = catalog
         self.closed = False
         self.top = tk.Toplevel(parent)
-        self.top.title('心动小镇 · 运行日志（完整记录）')
+        self.top.title('心动小镇 · ' + title)
         self.top.configure(bg=COLORS['bg'])
         self.top.minsize(theme.px(460), theme.px(260))
         self.top.geometry(self._geometry(parent))
@@ -37,8 +37,9 @@ class FullLogWindow:
 
         header = tk.Frame(self.top, bg=COLORS['bg'])
         header.pack(side='top', fill='x', padx=theme.px(12), pady=(theme.px(10), theme.px(6)))
-        tk.Label(header, text='运行日志 · 完整记录', bg=COLORS['bg'], fg=COLORS['green'],
-                 font=theme.font(13, bold=True)).pack(side='left')
+        self.header_label = tk.Label(header, text=title, bg=COLORS['bg'], fg=COLORS['green'],
+                                     font=theme.font(13, bold=True))
+        self.header_label.pack(side='left')
         tk.Button(header, text='关闭', command=self.close, relief='flat', bd=0,
                   highlightthickness=1, highlightbackground=COLORS['button_border'],
                   bg=COLORS['button'], fg=COLORS['text'],
@@ -71,6 +72,16 @@ class FullLogWindow:
             self.text.tag_configure(status, foreground=color)
 
         catalog.add_log_view(self)
+
+    def set_source(self, catalog, title):
+        """Switch the live log source without closing or recreating the window."""
+        if catalog is self.catalog:
+            return
+        self.catalog.remove_log_view(self)
+        self.catalog = catalog
+        self.top.title('心动小镇 · ' + title)
+        self.header_label.configure(text=title)
+        catalog.add_log_view(self)  # Replaces the text with this module's history.
 
     # -- placement --------------------------------------------------------
     @staticmethod
