@@ -4,7 +4,6 @@ from tkinter import messagebox
 
 from utils.core.coordinate_points import validate_collect_wait
 from utils.core import thresholds as policy
-from utils.ui import theme
 
 
 class PointWaitEditor:
@@ -37,29 +36,14 @@ class PointWaitEditor:
         tk.Label(form, text='秒（0～300）', bg=colors['bg'], fg=colors['muted']).pack(side='left')
         actions = tk.Frame(self.root, bg=colors['bg'])
         actions.pack(fill='x', padx=18)
-        self.save_button = theme.RoundedButton(
-            actions, text='保存此点', command=lambda: self.save(False), radius=12,
-            fill=colors.get('primary', colors['green']),
-            fill_active=colors.get('primary_active', colors['button']),
-            fill_pressed=colors.get('primary_press', colors['green']),
-            fg=colors.get('primary_fg', colors['text']),
-            fg_disabled=colors.get('disabled', colors['text']),
-            border=colors.get('button_border', colors['green']), back=colors['bg'],
-            font=theme.font(13), padx=12, pady=6)
+        self.save_button = tk.Button(actions, text='保存此点', command=lambda: self.save(False),
+                                     bg=colors['green'], fg='#1b2815', relief='flat', padx=12, pady=6)
         self.save_button.pack(side='left')
-        self.all_button = theme.RoundedButton(
-            actions, text='全部使用此秒数', command=lambda: self.save(True), radius=10,
-            fill=colors['button'], fill_active=colors['button_active'],
-            fill_pressed=colors.get('button_press', colors['button']), fg=colors['text'],
-            fg_disabled=colors['disabled'], border=colors.get('button_border', colors['green']),
-            back=colors['bg'], font=theme.font(13), padx=12, pady=6)
+        self.all_button = tk.Button(actions, text='全部使用此秒数', command=lambda: self.save(True),
+                                    bg=colors['button'], fg=colors['text'], relief='flat', padx=12, pady=6)
         self.all_button.pack(side='left', padx=8)
-        theme.RoundedButton(
-            actions, text='关闭', command=self.root.destroy, radius=10,
-            fill=colors['button'], fill_active=colors['button_active'],
-            fill_pressed=colors.get('button_press', colors['button']), fg=colors['text'],
-            border=colors.get('button_border', colors['green']), back=colors['bg'],
-            font=theme.font(13), padx=12, pady=6).pack(side='right')
+        tk.Button(actions, text='关闭', command=self.root.destroy,
+                  bg=colors['button'], fg=colors['text'], relief='flat', padx=12, pady=6).pack(side='right')
         self.notice = tk.Label(self.root, text='设置保存到原点位文件，坐标与顺序保持不变。',
                                bg=colors['bg'], fg=colors['muted'], anchor='w')
         self.notice.pack(fill='x', padx=18, pady=12)
