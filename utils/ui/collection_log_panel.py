@@ -59,7 +59,8 @@ def format_collection_event(event):
 class CollectionLogPanel:
     """Bounded in-memory collection log, compatible with FullLogWindow."""
 
-    def __init__(self, owner, runtime_parent):
+    def __init__(self, owner, runtime_parent, message_filter=None):
+        self.message_filter = message_filter or str
         self.runtime_page = owner.frame(runtime_parent, card=True, border=False)
         self.runtime_status = tk.StringVar(value='采集状态：空闲 · 等待任务')
         owner.label(self.runtime_page, '', textvariable=self.runtime_status,
@@ -85,11 +86,15 @@ class CollectionLogPanel:
         """Append all queued playback reports, including superseded states."""
         rows = []
         for event in events:
-            row = format_collection_event(event)
+            try:
+                safe_message = self.message_filter(event.get('message', ''))
+            except Exception:
+                safe_message = str(event.get('message', ''))
+            row = format_collection_event({**event, 'message': safe_message})
             if row is not None:
                 rows.append(row)
                 self.runtime_status.set('采集状态：' + row[1] + ' · ' +
-                                        str(event['message'])[:120])
+                                        str(safe_message)[:120])
         if not rows:
             return
         self.log_buffer.extend(rows)
