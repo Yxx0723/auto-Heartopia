@@ -30,7 +30,9 @@ def _child(connection, stop, game_pid, profile, factory, max_bytes):
             frame = {'request': request[1], 'game_pid': game_pid, 'worker_pid':os.getpid()}
             try:
                 if reader is None:
+                    opening_at = time.monotonic()
                     reader = factory(game_pid, profile)
+                    frame['reader_open_seconds'] = time.monotonic() - opening_at
                     reader.cancelled = stop.is_set
                 frame['scene'] = reader.snapshot()
             except (OSError, ValueError) as exc:
@@ -140,6 +142,7 @@ class NavigationProcessScene(MemorySceneMap):
         stats = frame.get('stats')
         self.last_read_stats = dict(stats) if isinstance(stats, dict) else {}
         self.last_read_stats['process'] = {'child_pid': self.process.pid,
+            'reader_open_seconds': frame.get('reader_open_seconds'),
             'worker_pid': frame.get('worker_pid'),
             'child_read_seconds': frame.get('child_read_seconds'), 'wire_bytes': len(raw),
             'request_seconds': max(0., time.monotonic()-started)}

@@ -111,6 +111,11 @@ class _Follower:
             and 'special_patrol' not in data else None)
         self.failed_points = set()
         self.scene_wait_started = None
+        self.scene_wait_interval = None
+        self.scene_wait_count = 0
+        self.scene_wait_total = 0.
+        self.scene_wait_longest = 0.
+        self.last_scene_wait = None
         self._memory_anchor = None
         if navigator is not None:
             navigator.traversal_memory = getattr(reader, 'traversal_memory', None)
@@ -197,6 +202,13 @@ class _Follower:
         return total
 
     def report(self, state, message, **extra):
+        if state in ('paused', 'reached', 'skipped', 'error', 'stopped'):
+            self.finish_scene_wait(state)
+        if self.scene_wait_count:
+            extra['navigation_scene_wait'] = {
+                'active': self.scene_wait_interval, 'last': self.last_scene_wait,
+                'count': self.scene_wait_count, 'total_seconds': self.scene_wait_total,
+                'longest_seconds': self.scene_wait_longest}
         extra.setdefault('traversal_scope', scene_scope(getattr(self.navigator, 'scene', None)))
         extra.setdefault('traversal_mode', 'walk' if self.clock.monotonic() >= self.direction_unsafe_until else 'unknown')
         extra.setdefault('direction_source', self.direction_source)
@@ -209,6 +221,17 @@ class _Follower:
             message = f'第 {self.cycle}/{self.loop_count} 轮 · {message}'
             extra.update(cycle=self.cycle, loop_count=self.loop_count)
         self._report(state, message, **extra)
+
+    def finish_scene_wait(self, outcome):
+        if self.scene_wait_interval is None:
+            return
+        now = self.clock.monotonic()
+        elapsed = max(0., now - self.scene_wait_interval['started_at'])
+        self.last_scene_wait = {**self.scene_wait_interval, 'ended_at': now,
+                                'seconds': elapsed, 'outcome': outcome}
+        self.scene_wait_total += elapsed
+        self.scene_wait_longest = max(self.scene_wait_longest, elapsed)
+        self.scene_wait_interval = None
 
     def guard(self):
         running, stopped = self.controls.snapshot()
@@ -1543,6 +1566,13 @@ class _Follower:
                         target = self.navigator.next_target(position, target, check=self.guard, before_plan=self.planning_release)
                     except NavigationWait as exc:
                         self.release()
+                        if exc.reason == 'scene':
+                            if self.scene_wait_interval is None:
+                                self.scene_wait_count += 1
+                                self.scene_wait_interval = {'id': self.scene_wait_count,
+                                    'waypoint': index + 1, 'started_at': planning_at}
+                        else:
+                            self.finish_scene_wait(exc.reason)
                         if self.supplements and exc.reason=='scene':
                             if self.scene_wait_started is None:
                                 self.scene_wait_started=self.clock.monotonic()
@@ -1584,6 +1614,7 @@ class _Follower:
                         self.navigation_waiting = False
                         self.last_tick = self.clock.monotonic()
                     progress_at += self.clock.monotonic() - planning_at
+                    self.finish_scene_wait('navigation_ready')
                     now = self.clock.monotonic()
                     navigation_wait_since = None
                     self.scene_wait_started = None
@@ -1787,6 +1818,7 @@ class _Follower:
                         self.active_time, self.last_tick = 0., self.clock.monotonic()
             except _Paused:
                 self.release()
+                self.finish_scene_wait('paused')
                 self.scene_wait_started = None
                 self.direction_poll_at=float('-inf')
                 self.direction_candidate=self.direction_memory=self.direction_conflict=None
@@ -1893,7 +1925,12 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
         follower.food_fallback = food_fallback
         follower.heading_cache = heading_cache
         follower.harvest_journal = harvest_journal
-        return follower.follow()
+        try:
+            return follower.follow()
+        finally:
+            if follower.scene_wait_interval is not None:
+                follower.finish_scene_wait('interrupted')
+                follower.report('navigating', '场景数据等待已结束')
     except _Stopped:
         return False
     finally:

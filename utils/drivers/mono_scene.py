@@ -681,6 +681,23 @@ class MemorySceneMap:
                                meta.dictionary, guard, budget, stage=meta.stage)
 
     def snapshot(self):
+        try:
+            return self._snapshot_attempt()
+        except (OSError, ValueError):
+            failures = getattr(self, 'collision_reference_failures', ())
+            if not failures or failures[-1].get('recovery_decision') != 'rescan_verified_stream':
+                raise
+            # A fresh snapshot rebuilds every per-scan collision collection.
+            # Never merge geometry already read from the previous membership.
+            previous = self.last_read_stats
+            self.rescan_rejected_owner = failures[-1]['owner']
+            try:
+                return self._snapshot_attempt()
+            finally:
+                self.rescan_rejected_owner = None
+                self.last_read_stats['stale_owner_rescan'] = previous
+
+    def _snapshot_attempt(self):
         self.read_budget = RecoveryBudget(cancelled=getattr(self, 'cancelled', lambda: False))
         self.phase_times, self.phase_name, self.phase_started = {}, 'registry', time.monotonic()
         self.meta.read_counts = {} if getattr(self, 'navigation_only', False) else None
@@ -898,6 +915,11 @@ class MemorySceneMap:
             trace.context['scene_scope'] = 'verified_at_recheck'
             current = meta.dictionary(meta.ref(stream, '_collisions'))
             trace.context['collision_stream_membership'] = 'present' if collision in current else 'absent'
+            if collision not in current and trace.context['terminal_issue']['kind'] == 'invalid_reference':
+                verify_stream(stream)
+                if current != meta.dictionary(meta.ref(stream, '_collisions')):
+                    return
+                trace.context['recovery_decision'] = 'rescan_verified_stream'
 
         for group in groups:
             self.read_budget.check()
@@ -914,6 +936,9 @@ class MemorySceneMap:
                 trace = None
                 if isinstance(meta, SceneMetadata):
                     trace = SceneReferenceTrace(self.memory.pid, (registry, local_hierarchy), stream, collision)
+                    if trace.context['owner'] == getattr(self, 'rescan_rejected_owner', None):
+                        raise SceneReadIssue('已失效碰撞持有者重新出现在集合中',
+                                             kind='invalid_reference', stage='managed_collision_array')
                     trace.context.update(owner_reference_source='stream._collisions',
                                          scene_generation='unknown',
                                          recovery_decision='existing_policy')

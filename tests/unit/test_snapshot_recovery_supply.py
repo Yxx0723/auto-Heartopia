@@ -8,6 +8,41 @@ from utils.drivers.mono_scene import NavigationSceneMap
 from utils.ui.scene_map_worker import SceneMapWorker
 
 
+@pytest.mark.parametrize('decision', ['rescan_verified_stream', 'existing_policy'])
+def test_only_verified_removed_owner_gets_one_fresh_snapshot(decision):
+    from utils.drivers.mono_scene import MemorySceneMap
+
+    reader = MemorySceneMap.__new__(MemorySceneMap)
+    attempts = []
+    error = SceneReadIssue('invalid owner', kind='invalid_reference')
+
+    def attempt():
+        attempts.append(None)
+        reader.collision_reference_failures = [{'recovery_decision': decision, 'owner': 'test-owner'}]
+        reader.last_read_stats = {'attempt': len(attempts)}
+        raise error
+
+    reader._snapshot_attempt = attempt
+    with pytest.raises(SceneReadIssue) as caught:
+        reader.snapshot()
+    assert caught.value is error
+    assert len(attempts) == (2 if decision == 'rescan_verified_stream' else 1)
+
+
+def test_scene_wait_intervals_count_elapsed_monotonic_time_once():
+    from utils.flows.coordinate_player import _Follower
+
+    follower = _Follower.__new__(_Follower)
+    follower.clock = Mock()
+    follower.clock.monotonic.return_value = 13.
+    follower.scene_wait_interval = {'id': 1, 'started_at': 10., 'waypoint': 2}
+    follower.scene_wait_total = follower.scene_wait_longest = 0.
+    follower.finish_scene_wait('navigation_ready')
+    follower.finish_scene_wait('stopped')
+    assert follower.scene_wait_total == follower.scene_wait_longest == 3.
+    assert follower.last_scene_wait['outcome'] == 'navigation_ready'
+
+
 def test_native_partial_read_preserves_byte_count_and_error(monkeypatch):
     import ctypes
     from utils.drivers.coordinate_memory import ReadOnlyPosition

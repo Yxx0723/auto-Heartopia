@@ -183,6 +183,9 @@ class SceneMapWorker:
             parts = parts if isinstance(parts, dict) else {}
             self.diagnostics.write({'state': result.get('state'), 'message': json.dumps({
                 'duration_seconds': max(0., now-started), 'recovery': read_stats,
+                'scan_started_at_monotonic': started,
+                'scan_finished_at_monotonic': read_finished,
+                'published_at_monotonic': now,
                 'publication_seconds': max(0., now-read_finished),
                 'geometry_preparation_seconds': geometry_preparation_seconds,
                 'supply': supply_metrics,
