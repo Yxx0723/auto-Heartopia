@@ -8,6 +8,45 @@ from utils.drivers.mono_scene import NavigationSceneMap
 from utils.ui.scene_map_worker import SceneMapWorker
 
 
+@pytest.mark.parametrize(('failure', 'expected'), [
+    ('owner_header', ['owner_header']),
+    ('field_address', ['owner_header', 'field_address']),
+    ('field_pointer', ['owner_header', 'field_address', 'field_pointer']),
+    ('array_header', ['owner_header', 'field_address', 'field_pointer', 'array_header']),
+    ('array_length', ['owner_header', 'field_address', 'field_pointer', 'array_header', 'array_length']),
+])
+def test_collision_trace_stops_at_failed_read(failure, expected):
+    from utils.core.scene_read import SceneReferenceTrace
+    from utils.drivers.mono_scene import SceneMetadata
+
+    def result(stage, value):
+        if stage == failure:
+            raise SceneReadIssue('unavailable', kind='invalid_reference')
+        return value
+
+    meta = SceneMetadata(Mock(), 1)
+    meta.obj = lambda address: result('owner_header' if address == 10 else 'array_header',
+                                      {'address': 30, 'kind': 4})
+    meta.field = lambda *_: result('field_address', {'code': 29, 'flags': 0, 'offset': 16})
+    meta.pointer = lambda _: result('field_pointer', 20)
+    meta.data = lambda *_: result('array_length', (2**64 - 1).to_bytes(8, 'little'))
+    trace = SceneReferenceTrace(7, (1, 2), 5, 10)
+    with pytest.raises(SceneReadIssue):
+        meta.array_refs(meta.ref(10, 'colliders', trace=trace), trace=trace)
+    assert [step['stage'] for step in trace.steps] == expected
+    assert trace.steps[-1]['state'] == 'failed'
+    assert all(step['seconds'] >= 0 for step in trace.steps)
+
+
+def test_collision_trace_distinguishes_empty_link_and_replacement():
+    from utils.core.scene_read import SceneReferenceTrace
+    trace = SceneReferenceTrace(7, (1, 2), 5, 10)
+    assert trace.step('field_pointer', lambda: 0) == 0
+    assert trace.step('field_pointer', lambda: 20) == 20
+    assert trace.steps[0]['state'] == 'empty'
+    assert trace.steps[1]['replacement'] is True
+
+
 @pytest.mark.parametrize('fault', ['invalid_reference', 'short_read', 'read_bounds'])
 def test_replaced_link_can_recover_read_failure_only_after_scope_proof(fault):
     current = [10]
@@ -39,6 +78,16 @@ def test_changed_link_does_not_allow_recovery_in_another_world():
     with pytest.raises(SceneReadIssue) as caught:
         read_linked_collection(lambda: current[0], read, guard, RecoveryBudget(), stage='test')
     assert caught.value.kind == 'scope_changed' and read.call_count == 1
+
+
+def test_recovery_does_not_read_a_failed_array_if_link_reverts():
+    resolve = Mock(side_effect=[10, 20, 10])
+    read = Mock(side_effect=SceneReadIssue('bad reference', kind='invalid_reference'))
+    with pytest.raises(SceneReadIssue) as caught:
+        read_linked_collection(resolve, read, Mock(), RecoveryBudget(),
+                               stage='managed_collision_array')
+    assert caught.value.kind == 'invalid_reference'
+    read.assert_called_once_with(10)
 
 
 def test_temporarily_invalid_owner_link_needs_a_valid_witness_and_scope_proof():
@@ -133,6 +182,28 @@ def test_bad_layout_is_not_promoted_even_if_a_link_changed():
     with pytest.raises(ValueError):
         read_linked_collection(lambda: current[0], read, Mock(), RecoveryBudget(), stage='test')
     assert read.call_count == 1
+
+
+@pytest.mark.parametrize(('witness', 'outcome'), [
+    (0, 'link_empty'),
+    (10, 'link_unchanged'),
+    (ValueError('unreadable'), 'witness_failed'),
+])
+def test_failed_collision_read_reports_link_witness_without_authorizing_retry(witness, outcome):
+    resolve = Mock(side_effect=[10, witness])
+    read = Mock(side_effect=SceneReadIssue('invalid', kind='invalid_reference'))
+    guard = Mock()
+    observations = {}
+    with pytest.raises(SceneReadIssue) as caught:
+        read_linked_collection(resolve, read, guard, RecoveryBudget(),
+                               stage='managed_collision_array', observations=observations)
+    assert caught.value.kind == 'invalid_reference'
+    expected = {outcome: 1, 'array_payload_failed': 1}
+    if outcome == 'witness_failed':
+        expected['witness_error:unknown'] = 1
+    assert observations == {'managed_collision_array': expected}
+    read.assert_called_once_with(10)
+    guard.assert_not_called()
 
 
 def nav_reader(error=None):

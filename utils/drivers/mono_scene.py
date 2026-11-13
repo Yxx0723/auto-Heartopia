@@ -6,7 +6,7 @@ import time
 import traceback
 import sys
 from utils.core import thresholds as policy
-from utils.core.scene_read import (SceneReadIssue, RecoveryBudget, read_collection,
+from utils.core.scene_read import (SceneReadIssue, SceneReferenceTrace, RecoveryBudget, read_collection,
                                   read_linked_collection, contextual_issue, issue_summary)
 from utils.core.scene_map import box_geometry, compose_transform
 from utils.core.terrain_map import verified_terrain_walls
@@ -209,11 +209,18 @@ class SceneMetadata:
             klass = info['parent']
         raise ValueError('场景对象缺少字段：' + name)
 
-    def ref(self, obj, name):
-        field = self.field(self.obj(obj)['address'], name)
+    def ref(self, obj, name, *, trace=None):
+        info = self.obj(obj) if trace is None else trace.step('owner_header', lambda: self.obj(obj))
+        if trace is None:
+            return self.pointer(self.reference_field_address(obj, info, name))
+        address = trace.step('field_address', lambda: self.reference_field_address(obj, info, name))
+        return trace.step('field_pointer', lambda: self.pointer(address))
+
+    def reference_field_address(self, obj, info, name):
+        field = self.field(info['address'], name)
         if field['code'] not in (18, 21, 28, 29) or field['flags'] & 16:
             raise ValueError('场景引用字段类型不符')
-        return self.pointer(obj + field['offset'])
+        return obj + field['offset']
 
     def static_ref(self, klass, name):
         field = self.field(klass, name)
@@ -228,17 +235,27 @@ class SceneMetadata:
         storage = self.pointer(vtable + 0x50 + slots * 8)
         return self.pointer(storage + field['offset'])
 
-    def array(self, address, max_items=policy.COORD_SCENE_MAX_ITEMS):
-        info = self.obj(address)
+    def array(self, address, max_items=policy.COORD_SCENE_MAX_ITEMS, *, trace=None):
+        info = self.obj(address) if trace is None else trace.step('array_header', lambda: self.obj(address))
+        if trace is None:
+            return info, self.array_length(address, info, max_items)
+        return info, trace.step('array_length', lambda: self.array_length(address, info, max_items))
+
+    def array_length(self, address, info, max_items):
         if info['kind'] not in (4, 5):
             raise ValueError('场景集合类型不符')
         length = struct.unpack('<Q', self.data(address + 24, 8))[0]
         if not 0 <= max_items <= policy.COORD_SCENE_MAX_CAPACITY or length > max_items:
             raise ValueError('场景集合过大')
-        return info, length
+        return length
 
-    def array_refs(self, address):
-        info, length = self.array(address)
+    def array_refs(self, address, *, trace=None):
+        _, length = self.array(address, trace=trace)
+        if trace is not None:
+            return trace.step('array_payload', lambda: self.array_payload(address, length))
+        return self.array_payload(address, length)
+
+    def array_payload(self, address, length):
         return list(struct.unpack('<' + 'Q' * length, self.data(address + 32, length * 8))) if length else []
 
     def _dictionary_stamp_reader(self, obj):
@@ -641,6 +658,9 @@ class MemorySceneMap:
         self.meta.stage = 'registry_start'
         self.read_failure = None
         self.managed_details = []
+        self.linked_recovery_observations = {}
+        self.collision_reference_failures = []
+        self.missing_transform_owners = {}
         self.detached_stats = {}
         try:
             return self._snapshot()
@@ -656,6 +676,9 @@ class MemorySceneMap:
                                     'managed_remote_reads': self.meta.read_counts,
                                     'failure': self.read_failure,
                                     'managed_issues': self.managed_details,
+                                    'linked_recovery_observations': self.linked_recovery_observations,
+                                    'collision_reference_failures': self.collision_reference_failures,
+                                    'missing_transform_owners': self.missing_transform_owners,
                                     'detached_boxes': dict(self.detached_stats)}
 
     def _managed_step(self, stage, operation):
@@ -668,9 +691,24 @@ class MemorySceneMap:
                 raise
             raise issue from exc
 
-    def _managed_collection(self, owner, field, read, verify_scope, stage):
+    def _managed_collection(self, owner, field, read, verify_scope, stage, *, trace=None):
+        if trace is not None:
+            try:
+                return self._managed_step(stage, lambda: read_linked_collection(
+                    lambda: self.meta.ref(owner, field, trace=trace),
+                    lambda address: read(address, trace=trace),
+                    lambda: trace.step('current_scope_and_stream_membership', verify_scope),
+                    self.read_budget, stage=stage, observations=self.linked_recovery_observations))
+            except (OSError, ValueError) as exc:
+                trace.failed = True
+                trace.context['terminal_issue'] = issue_summary(exc)
+                raise
+            finally:
+                if trace.failed and len(self.collision_reference_failures) < 16:
+                    self.collision_reference_failures.append({**trace.context, 'steps': trace.steps})
         return self._managed_step(stage, lambda: read_linked_collection(
-            lambda: self.meta.ref(owner, field), read, verify_scope, self.read_budget, stage=stage))
+            lambda: self.meta.ref(owner, field), read, verify_scope, self.read_budget, stage=stage,
+            observations=self.linked_recovery_observations))
 
     def _phase(self, name):
         now = time.monotonic()
@@ -824,7 +862,9 @@ class MemorySceneMap:
             for collision in self._managed_collection(stream, '_collisions', meta.dictionary,
                     lambda s=stream: verify_stream(s), 'managed_stream_collisions'):
                 for collider in self._managed_collection(collision, 'colliders', meta.array_refs,
-                        lambda s=stream,c=collision: verify_collision(s,c), 'managed_collision_array'):
+                        lambda s=stream,c=collision: verify_collision(s,c), 'managed_collision_array',
+                        trace=SceneReferenceTrace(self.memory.pid, (registry, local_hierarchy), stream, collision)
+                        if isinstance(meta, SceneMetadata) else None):
                     self.read_budget.check()
                     if not collider or collider in visited:
                         continue
@@ -857,6 +897,17 @@ class MemorySceneMap:
                         if not owner and not hierarchy:
                             if detached.consider(collider,info,stream):
                                 continue
+                            stream_id = SceneReferenceTrace.identity(stream)
+                            rows = self.missing_transform_owners
+                            if stream_id in rows or len(rows) < 16:
+                                row = rows.setdefault(stream_id, {
+                                    'count': 0, 'at_monotonic': time.monotonic(),
+                                    'game_pid': self.memory.pid,
+                                    'scene': SceneReferenceTrace.identity((registry, local_hierarchy)),
+                                    'group': 'empty', 'hierarchy': 'empty',
+                                    'detachment': 'unconfirmed',
+                                })
+                                row['count'] += 1
                             issue = SceneReadIssue('碰撞体父变换未确认',kind='unknown',stage='managed_shape_data')
                             issue.code = 'missing_transform_owner'
                             raise issue

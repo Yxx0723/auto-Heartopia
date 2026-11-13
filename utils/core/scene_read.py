@@ -1,5 +1,6 @@
 """Read-only scene error semantics; unknown failures retain legacy safeguards."""
 import math
+import os
 import time
 
 from utils.core import thresholds as policy
@@ -96,7 +97,45 @@ def contextual_issue(error, stage):
     return result
 
 
-def read_linked_collection(resolve, read, verify_scope, budget, *, stage):
+class SceneReferenceTrace:
+    """Record the reads already made by a single collision-array operation."""
+    def __init__(self, pid, scene, stream, owner):
+        self.context = {'game_pid': pid, 'reader_pid': os.getpid(),
+                        'captured_at_unix': time.time(),
+                        'scene': self.identity(scene), 'stream': self.identity(stream),
+                        'owner': self.identity(owner)}
+        self.steps = []
+        self.failed = False
+        self.previous_link = None
+
+    @staticmethod
+    def identity(address):
+        return format(hash(('collision-reference', address)), 'x')
+
+    def step(self, name, read):
+        started = time.monotonic()
+        row = {'stage': name, 'at_monotonic': started}
+        try:
+            value = read()
+            row['state'] = 'ok'
+            if name == 'field_pointer':
+                row['reference'] = self.identity(value) if value else None
+                row['state'] = 'ok' if value else 'empty'
+                if self.previous_link is not None:
+                    row['replacement'] = value != self.previous_link
+                self.previous_link = value
+            return value
+        except (OSError, ValueError) as exc:
+            row['state'] = 'failed'
+            row['issue'] = issue_summary(contextual_issue(exc, name))
+            self.failed = True
+            raise
+        finally:
+            row['seconds'] = time.monotonic() - started
+            self.steps.append(row)
+
+
+def read_linked_collection(resolve, read, verify_scope, budget, *, stage, observations=None):
     """Re-resolve an owner link; only proven mutations invoke scope recovery.
 
     Stable reads use the existing container stamp plus a post-read link check.
@@ -104,18 +143,35 @@ def read_linked_collection(resolve, read, verify_scope, budget, *, stage):
     Recovery shares the existing per-snapshot attempts/time budget.
     """
     address, after_read, tainted = None, False, False
+    failed_addresses = set()
     def reference_failure(exc):
         issue = contextual_issue(exc, stage)
         return issue.kind == 'invalid_reference' or getattr(issue, 'code', None) in ('short_read', 'read_bounds')
-    def witness():
+    def witness(origin, previous=None):
+        def record(outcome):
+            if observations is not None:
+                outcomes = observations.setdefault(stage, {})
+                outcomes[outcome] = outcomes.get(outcome, 0) + 1
+
         budget.check()
+        record(origin)
         if budget.retries >= budget.max_retries or budget.spent >= budget.max_seconds:
+            record('budget_exhausted')
             return None
         started, spent_before = budget.clock(), budget.spent
         try:
             value = resolve()
             budget.check()
-            return value if type(value) is int and value > 0 else None
+            if type(value) is not int or value <= 0:
+                record('link_empty')
+                return None
+            record('link_unchanged' if value == previous else 'replacement_observed')
+            return value
+        except (OSError, ValueError) as exc:
+            record('witness_failed')
+            issue = contextual_issue(exc, stage)
+            record('witness_error:' + getattr(issue, 'code', issue.kind))
+            raise
         finally:
             budget.spent += max(0., budget.clock()-started-(budget.spent-spent_before))
     def link():
@@ -127,7 +183,7 @@ def read_linked_collection(resolve, read, verify_scope, budget, *, stage):
                 tainted = True
             elif reference_failure(exc):
                 try:
-                    replacement = witness()
+                    replacement = witness('owner_link_failed')
                 except (OSError, ValueError) as proof:
                     if isinstance(proof, SceneReadIssue) and proof.kind in ('cancelled', 'scope_changed'):
                         raise
@@ -143,6 +199,8 @@ def read_linked_collection(resolve, read, verify_scope, budget, *, stage):
         return address
     def read_current(at):
         nonlocal after_read, tainted
+        if at in failed_addresses:
+            raise SceneReadIssue('场景集合重新指向已失效引用', kind='invalid_reference', stage=stage)
         try:
             result = read(at)
         except (OSError, ValueError) as exc:
@@ -155,12 +213,13 @@ def read_linked_collection(resolve, read, verify_scope, budget, *, stage):
                 # exceptional guard proves world AND membership before retry.
                 budget.check()
                 try:
-                    replacement = witness()
+                    replacement = witness('array_payload_failed', at)
                 except (OSError, ValueError) as proof:
                     if isinstance(proof, SceneReadIssue) and proof.kind in ('cancelled', 'scope_changed'):
                         raise
                     raise exc
                 if at and replacement and replacement != at:
+                    failed_addresses.add(at)
                     tainted = True
                     raise SceneReadIssue('场景集合引用在失败读取期间发生变化', kind='mutation',
                                          stage=stage, retryable=True) from exc

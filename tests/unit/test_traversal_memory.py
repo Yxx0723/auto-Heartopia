@@ -16,7 +16,7 @@ def test_failed_run_keeps_successful_partial_motion_and_all_archive_sources(tmp_
     rows=other.memory.candidates([0,0,0],scope)
     assert len(rows)==1 and rows[0]['end']==[0,0,1]
     assert other.memory.candidates([0,0,0],'scene-b')==[]
-    assert json.loads((h.path/'learning.json').read_text())['memory_database']=='../寻路记忆库.sqlite3'
+    assert json.loads((h.path/'learning.json').read_text(encoding='utf-8'))['memory_database']=='../寻路记忆库.sqlite3'
     other.close()
 
 
@@ -47,7 +47,7 @@ def test_blocked_library_does_not_disable_raw_history(tmp_path):
     h.record_motion([0,0,0],[0,0,1],.3,'a')
     h.event({'state':'error','message':'test'})
     h.close()
-    assert not h.error and (h.path/'events.jsonl').read_text()
+    assert not h.error and (h.path/'events.jsonl').read_text(encoding='utf-8')
     assert h.memory.error
 
 

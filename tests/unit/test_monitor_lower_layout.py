@@ -13,10 +13,11 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
         window = CoordinateWindow(root, FakeMonitor(), tmp_path, point_path=tmp_path/'points.json')
         tabs = window.control_tabs
         assert [tabs.tab(tab, 'text') for tab in tabs.tabs()] == ['采集设定', '参数设定', '地图连接', '烹饪']
-        assert window.cooking_entry_button.master == tabs.nametowidget(tabs.tabs()[3])
-        assert window.cooking_entry_button.cget('text') == '验证灶台入口（不制作）'
-        assert not hasattr(window, 'open_cooking')
-        for geometry in ['490x760', '460x740']:
+        catalog = window.cooking_catalog
+        assert catalog.frame.master == tabs.nametowidget(tabs.tabs()[3])
+        assert catalog.list.heading('name', 'text') == '料理列表'
+        assert catalog.stock_button.cget('text') == '刷新背包材料'
+        for geometry in ['490x900', '460x860']:
             root.geometry(geometry); tabs.select(0); root.update()
             assert tabs.winfo_rooty() > window.canvas.winfo_rooty()+window.canvas.winfo_height()
             assert window.canvas.winfo_width() > root.winfo_width()*.9
@@ -41,11 +42,12 @@ def test_compact_tabs_groups_and_map_restore_at_both_window_sizes(tmp_path, monk
             assert tabs.winfo_rooty() == tab_y
             window.toggle_scene_filters(); root.update()
             tabs.select(1); root.update()
-            assert window.recovery_jump_check.winfo_ismapped()
-            assert not window.route_menu.winfo_ismapped()
+            assert tabs.index(tabs.select()) == 0
             tabs.select(2); root.update()
+            assert not window.route_menu.winfo_ismapped()
             sidebar = window.sidebar_canvas.master
             assert sidebar.winfo_ismapped()
+            assert window.recovery_jump_check.winfo_ismapped()
             old_y = tabs.winfo_rooty()
             window.toggle_map_size(); root.update()
             assert not tabs.winfo_ismapped()
