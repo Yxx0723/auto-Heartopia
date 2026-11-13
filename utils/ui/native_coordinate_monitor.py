@@ -264,15 +264,20 @@ class CoordinateWindow:
                         font=font or theme.font(13), **options)
 
     def button(self, parent, text, action, primary=False, small=False):
-        return tk.Button(parent, text=text, command=action, relief='flat', bd=0,
-                         highlightthickness=1, highlightbackground=COLORS['button_border'],
-                         bg=COLORS['primary' if primary else 'button'],
-                         fg=COLORS['primary_fg' if primary else 'text'],
-                         activebackground=COLORS['primary_active' if primary else 'button_active'],
-                         activeforeground=COLORS['text'],
-                         disabledforeground=COLORS['disabled'], cursor='hand2',
-                         font=theme.font(12 if small else 13),
-                         padx=px(7 if small else 10), pady=px(3 if small else 6))
+        # True rounded corners: 8px for small buttons, 12px for primary
+        # actions, 10px for everything else (see theme.RoundedButton).
+        radius = 12 if primary else (8 if small else 10)
+        return theme.RoundedButton(
+            parent, text=text, command=action, radius=radius,
+            fill=COLORS['primary' if primary else 'button'],
+            fill_active=COLORS['primary_active' if primary else 'button_active'],
+            fill_pressed=COLORS['primary_press' if primary else 'button_press'],
+            fg=COLORS['primary_fg' if primary else 'text'],
+            fg_disabled=COLORS['disabled'],
+            border=COLORS['button_border'],
+            font=theme.font(12 if small else 13),
+            padx=px(7 if small else 10), pady=px(3 if small else 6),
+            takefocus=True)
 
     def field(self, parent, key, text='', **options):
         variable = DisplayValue(self.root, value=text)
@@ -322,13 +327,14 @@ class CoordinateWindow:
         return host, inner
 
     def toolbar_button(self, parent, text, action):
-        """Flat button that blends into a capsule until hovered."""
-        return tk.Button(parent, text=text, command=action, relief='flat', bd=0,
-                         highlightthickness=0, bg=COLORS['segment_bg'], fg=COLORS['text'],
-                         activebackground=COLORS['segment_hover'],
-                         activeforeground=COLORS['green'],
-                         disabledforeground=COLORS['disabled'], cursor='hand2',
-                         font=theme.font(11), padx=px(8), pady=px(3))
+        """Rounded flat button that blends into a capsule until hovered."""
+        return theme.RoundedButton(
+            parent, text=text, command=action, radius=8,
+            fill=COLORS['segment_bg'], fill_active=COLORS['segment_hover'],
+            fill_pressed=COLORS['button_active'], fg=COLORS['text'],
+            fg_active=COLORS['green'], fg_disabled=COLORS['disabled'],
+            border='', border_active='', border_pressed='',
+            font=theme.font(11), padx=px(8), pady=px(3), back=COLORS['segment_bg'])
 
     def pack_toolbar_buttons(self, inner, specs):
         """Pack capsule buttons left-to-right with hairline dividers."""
@@ -720,41 +726,38 @@ class CoordinateWindow:
         # map (row 1); the module panel moves to row 2. Wide layouts use the
         # left rail instead and hide this strip. Swapping it with the map keeps
         # the same vertical budget, so the map and tab pages do not shrink.
-        # 每个模块一张圆角卡片：选中项抬升为白卡 + 绿描边，未选中融入胶囊底色。
-        host = RoundedPanel(parent, radius=px(12), height=px(42),
+        # 每个模块一个 14px 圆角按钮：选中项抬升为白卡 + 绿描边，未选中融入胶囊底色。
+        host = RoundedPanel(parent, radius=px(15), height=px(42),
                             fill=COLORS['segment_bg'], outline=COLORS['segment_border'])
         self.segmented = host
         self.segmented_buttons = []
+        # Round four drew each item as a nested RoundedPanel card; the buttons
+        # now paint their own arcs, so the list stays empty for compatibility.
         self.segmented_cards = []
         inner = tk.Frame(host, bg=COLORS['segment_bg'], bd=0, highlightthickness=0)
         for index, (name, _, _) in enumerate(MODULES):
             inner.grid_columnconfigure(index, weight=1, uniform='segmented')
-            card = RoundedPanel(inner, radius=px(7), height=px(30),
-                                bg=COLORS['segment_bg'], fill=COLORS['segment_bg'],
-                                outline=COLORS['segment_bg'])
-            card.grid(row=0, column=index, sticky='ew', padx=px(3), pady=px(2))
-            button = self.button(card, name, lambda index=index: self.select_module(index),
-                                 small=True)
-            button.configure(highlightthickness=0, padx=px(4), pady=px(4))
-            item = card.create_window(0, 0, window=button, anchor='nw')
-
-            def fit(event=None, card=card, item=item):
-                width, height = card.winfo_width(), card.winfo_height()
-                if width > px(10) and height > px(8):
-                    # 内缩 3px，让卡片自身的圆角露出来（按钮是直角的）。
-                    card.coords(item, 3, 3)
-                    card.itemconfigure(item, width=width - 6, height=height - 6)
-
-            card.bind('<Configure>', fit, add='+')
-            self.segmented_cards.append(card)
+            button = theme.RoundedButton(
+                inner, text=name, command=lambda index=index: self.select_module(index),
+                radius=14, fill=COLORS['segment_bg'],
+                fill_active=COLORS['segment_hover'], fill_pressed=COLORS['button_active'],
+                fg=COLORS['text'], fg_active=COLORS['green'],
+                border='', border_active='', border_pressed='',
+                font=theme.font(12), padx=px(4), pady=px(4), back=COLORS['segment_bg'])
+            button.grid(row=0, column=index, sticky='ew', padx=px(2), pady=px(3))
             self.segmented_buttons.append(button)
         strip = host.create_window(px(3), px(3), window=inner, anchor='nw')
 
         def stretch(event=None):
             width = host.winfo_width()
+            height = host.winfo_height()
             if width > px(20):
                 host.itemconfigure(strip, width=width - px(6))
+            needed = inner.winfo_reqheight()
+            if height > needed > 4:
+                host.coords(strip, px(3), max(px(2), (height - needed) // 2))
 
+        inner.bind('<Configure>', stretch, add='+')
         host.bind('<Configure>', stretch, add='+')
         host.grid(row=1, column=0, sticky='ew', pady=(px(4), 0))
         host.grid_remove()
@@ -771,15 +774,13 @@ class CoordinateWindow:
                                             width=px(3), capstyle='round',
                                             state='hidden', tags='nav-marker')
         for index, (name, _, _) in enumerate(MODULES):
-            button = tk.Button(panel, text=name,
-                               command=lambda index=index: self.select_module(index),
-                               relief='flat', bd=0, highlightthickness=0,
-                               bg=COLORS['card'], fg=COLORS['text'],
-                               activebackground=COLORS['button_active'],
-                               activeforeground=COLORS['green'],
-                               disabledforeground=COLORS['disabled'],
-                               cursor='hand2', font=theme.font(13), anchor='w',
-                               padx=px(14), pady=px(6))
+            button = theme.RoundedButton(
+                panel, text=name, command=lambda index=index: self.select_module(index),
+                radius=14, fill=COLORS['card'], fill_active=COLORS['button_active'],
+                fill_pressed=COLORS['segment_hover'], fg=COLORS['text'],
+                fg_active=COLORS['green'], border='', border_active='',
+                border_pressed='', cursor='hand2', font=theme.font(13),
+                anchor='w', padx=px(14), pady=px(6), back=COLORS['card'])
             panel.create_window(px(14), px(56) + index * px(48), window=button,
                                 anchor='nw', width=px(126), height=px(38))
             self.nav_buttons.append(button)
@@ -835,9 +836,9 @@ class CoordinateWindow:
             self.nav_panel.itemconfigure(self.nav_marker, state='normal')
         except Exception:
             pass
-        # Segmented strip: the selected module becomes a raised white card with
-        # a green label; unselected items blend into the capsule, so there are
-        # no repeated per-button borders.
+        # Segmented strip: the selected module becomes a raised white rounded
+        # card with a green label; unselected items blend into the capsule, so
+        # there are no repeated per-button borders.
         for index, button in enumerate(getattr(self, 'segmented_buttons', ())):
             active = index == self.active_module
             try:
@@ -845,7 +846,8 @@ class CoordinateWindow:
                                  fg=COLORS['green'] if active else COLORS['text'],
                                  font=theme.font(12, bold=active),
                                  activebackground=COLORS['primary_active'] if active
-                                 else COLORS['segment_hover'])
+                                 else COLORS['segment_hover'],
+                                 border=COLORS['segment_border'] if active else '')
             except Exception:
                 pass
         for index, card in enumerate(getattr(self, 'segmented_cards', ())):

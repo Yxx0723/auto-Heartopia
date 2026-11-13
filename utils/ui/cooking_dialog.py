@@ -10,6 +10,7 @@ from PIL import ImageTk
 
 from utils.drivers.point_game_window import PointGameWindow
 from utils.vision.cooking_menu import DEFAULT_REQUIRED
+from utils.ui import theme
 
 
 LABELS = {'menu': '选菜标题', 'recipe': '咖啡名称', 'materials': '四格咖啡豆',
@@ -49,15 +50,30 @@ class CookingDialog:
             ttk.Spinbox(row, from_=0 if var != self.count else 1, to=high, width=8,
                         textvariable=var).pack(side='left')
         buttons = ttk.Frame(body); buttons.pack(fill='x')
-        ttk.Button(buttons, text='开始任务', command=self.start).pack(side='left', expand=True, fill='x')
-        ttk.Button(buttons, text='停止 F9', command=control.stop).pack(side='left', expand=True, fill='x', padx=(8, 0))
+        theme.RoundedButton(buttons, text='开始任务', command=self.start, radius=12,
+                            fill=theme.COLORS['primary'], fill_active=theme.COLORS['primary_active'],
+                            fill_pressed=theme.COLORS['primary_press'], fg=theme.COLORS['primary_fg'],
+                            border=theme.COLORS['button_border'],
+                            font=theme.font(13), padx=10, pady=6).pack(
+            side='left', expand=True, fill='x')
+        theme.RoundedButton(buttons, text='停止 F9', command=control.stop, radius=10,
+                            fill=theme.COLORS['button'], fill_active=theme.COLORS['button_active'],
+                            fill_pressed=theme.COLORS['button_press'], fg=theme.COLORS['text'],
+                            border=theme.COLORS['button_border'],
+                            font=theme.font(13), padx=10, pady=6).pack(
+            side='left', expand=True, fill='x', padx=(8, 0))
         ttk.Label(body, textvariable=self.status, wraplength=425).pack(fill='x', pady=12)
         ttk.Label(body, text='画面标定：点击后3秒内切回游戏，随后在截图中框选对应图标。\n'
                   '标定只截图，不会自动投料；翻炒/收菜须分别采样。', wraplength=430).pack(anchor='w')
         self.calibration_buttons = {}
         grid = ttk.Frame(body); grid.pack(fill='x', pady=8)
         for i, name in enumerate(DEFAULT_REQUIRED):
-            button = ttk.Button(grid, text=LABELS[name], command=lambda n=name: self.capture(n))
+            button = theme.RoundedButton(
+                grid, text=LABELS[name], command=lambda n=name: self.capture(n), radius=8,
+                fill=theme.COLORS['button'], fill_active=theme.COLORS['button_active'],
+                fill_pressed=theme.COLORS['button_press'], fg=theme.COLORS['text'],
+                fg_disabled=theme.COLORS['disabled'], border=theme.COLORS['button_border'],
+                font=theme.font(12), padx=8, pady=5)
             button.grid(row=i//2, column=i%2, sticky='ew', padx=3, pady=3)
             self.calibration_buttons[name] = button
         grid.columnconfigure(0, weight=1); grid.columnconfigure(1, weight=1)

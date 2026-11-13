@@ -5,7 +5,9 @@ rounded-panel helpers. No game state, no I/O and no import-time side effects.
 Everything is expressed with the standard library + Tk so the packaging spec
 and the existing module interfaces stay unchanged.
 """
+import math
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 # ---------------------------------------------------------------------------
@@ -40,6 +42,10 @@ COLORS = {
     'blue': '#4F7BA6',
     'amber': '#A9761F',
     'button': SAGE_100,
+    'button_press': SAGE_300,
+    'button_border_hover': SAGE_500,
+    'button_border_press': SAGE_600,
+    'primary_press': '#93BD8C',
     'shrub': '#6E915F',
     'shrub_outline': '#5F8A55',
     'blueberry': '#4E72A8',
@@ -118,6 +124,27 @@ def px(value):
     return scale(value)
 
 
+ui_font = font
+
+
+def rounded_points(x1, y1, x2, y2, radius, steps=6):
+    """Flat point list tracing a true rounded rectangle (quarter arcs).
+
+    ``create_polygon(..., smooth=True)`` only approximates a curve and ends up
+    with a radius far smaller than requested, so the corners are sampled from
+    real arcs instead. That keeps the declared 8/10/12/14px radii honest.
+    """
+    r = max(1., min(float(radius), (x2 - x1) / 2., (y2 - y1) / 2.))
+    points = []
+    for (cx, cy), start in (((x1 + r, y1 + r), 180.), ((x2 - r, y1 + r), 270.),
+                            ((x2 - r, y2 - r), 0.), ((x1 + r, y2 - r), 90.)):
+        for index in range(steps + 1):
+            angle = math.radians(start + 90. * index / steps)
+            points.append(cx + r * math.cos(angle))
+            points.append(cy + r * math.sin(angle))
+    return points
+
+
 class RoundedPanel(tk.Canvas):
     """A canvas with a soft rounded-card background.
 
@@ -141,15 +168,363 @@ class RoundedPanel(tk.Canvas):
         if width < 4 or height < 4:
             return
         self.delete('panel-bg')
-        radius = min(self.radius, width / 2., height / 2.)
         x1, y1, x2, y2 = 2., 2., float(width - 2), float(height - 2)
-        r = radius
-        points = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
-                  x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
-                  x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
-        self.create_polygon(points, smooth=True, fill=self.fill,
-                            outline=self.outline, width=1, tags='panel-bg')
+        points = rounded_points(x1, y1, x2, y2, self.radius)
+        self.create_polygon(points, fill=self.fill, outline=self.outline,
+                            width=1, tags='panel-bg')
         self.tag_lower('panel-bg')
+
+
+def _parent_fill(master):
+    """Background colour of the parent, used to blend the button corners."""
+    for option in ('bg', 'background'):
+        try:
+            return master.cget(option)
+        except Exception:
+            continue
+    return COLORS['bg']
+
+
+_FONT_CACHE = {}
+
+
+def _font_object(widget, spec):
+    """Cached tkinter font object; creating one per measurement is expensive."""
+    key = (str(widget.tk), spec if isinstance(spec, str) else tuple(spec))
+    cached = _FONT_CACHE.get(key)
+    if cached is not None:
+        try:
+            cached.actual()  # drops fonts whose interpreter has been destroyed
+            return cached
+        except Exception:
+            _FONT_CACHE.pop(key, None)
+    if len(_FONT_CACHE) > 64:
+        _FONT_CACHE.clear()
+    cached = tkfont.Font(root=widget, font=spec)
+    _FONT_CACHE[key] = cached
+    return cached
+
+
+class RoundedButton(tk.Canvas):
+    """A button whose visible border is a real arc, not a rectangle.
+
+    Tk's native button can only paint rectangles, so the rounded shape and the
+    label are drawn on a lightweight canvas. The widget keeps the button
+    contract the rest of the UI relies on: ``command`` callbacks, keyboard
+    activation (Space/Return), Tab focus with a visible focus ring, hover,
+    pressed and disabled states, plus ``configure``/``cget`` for the options
+    the call sites already use (text/state/bg/fg/font/padx/pady).
+
+    Redraws happen only when a state or size actually changes — there is no
+    timer, animation or bitmap resource, so idle CPU cost stays at zero.
+    """
+
+    def __init__(self, master, text='', command=None, radius=None,
+                 fill=None, fill_active=None, fill_pressed=None, fill_disabled=None,
+                 fg=None, fg_active=None, fg_disabled=None,
+                 border=None, border_active=None, border_pressed=None,
+                 font=None, padx=None, pady=None, anchor='center',
+                 width=None, height=None, back=None, cursor='hand2',
+                 state='normal', takefocus=True, **_ignored):
+        super().__init__(master, bd=0, highlightthickness=0,
+                         bg=back or _parent_fill(master), cursor=cursor,
+                         width=width or 1, height=height or 1, takefocus=takefocus)
+        self._text = '' if text is None else str(text)
+        self._command = command
+        self._radius = px(radius if radius is not None else 10)
+        self._fill = fill or COLORS['button']
+        self._fill_active = fill_active or COLORS['button_active']
+        self._fill_pressed = fill_pressed or COLORS['button_press']
+        self._fill_disabled = fill_disabled
+        self._fg = fg or COLORS['text']
+        self._fg_active = fg_active or self._fg
+        self._fg_disabled = fg_disabled or COLORS['disabled']
+        self._border = COLORS['button_border'] if border is None else border
+        self._border_active = (COLORS['button_border_hover']
+                               if border_active is None else border_active)
+        self._border_pressed = (COLORS['button_border_press']
+                                if border_pressed is None else border_pressed)
+        self._font = font or ui_font(12)
+        self._padx = px(9) if padx is None else int(padx)
+        self._pady = px(5) if pady is None else int(pady)
+        self._anchor = anchor
+        self._state = str(state)
+        self._hover = False
+        self._pressed = False
+        self._focused = False
+        self._fixed_width = width is not None
+        self._fixed_height = height is not None
+        self._shape_id = None
+        self._label_id = None
+        self._drawn = None
+        self.bind('<Configure>', self._on_configure, add='+')
+        self.bind('<Enter>', self._on_enter, add='+')
+        self.bind('<Leave>', self._on_leave, add='+')
+        self.bind('<ButtonPress-1>', self._on_press, add='+')
+        self.bind('<ButtonRelease-1>', self._on_release, add='+')
+        self.bind('<FocusIn>', self._on_focus_in, add='+')
+        self.bind('<FocusOut>', self._on_focus_out, add='+')
+        self.bind('<KeyPress-space>', self._on_key_press, add='+')
+        self.bind('<KeyRelease-space>', self._on_key_release, add='+')
+        self.bind('<KeyRelease-Return>', self._on_key_release, add='+')
+        self._resize()
+        # The first <Configure> paints the shape; skipping a pre-map redraw
+        # halves the drawing done while the window is being built.
+
+    # -- geometry ---------------------------------------------------------
+    def _text_metrics(self):
+        try:
+            measure = _font_object(self, self._font)
+            return measure.measure(self._text), measure.metrics('linespace')
+        except Exception:
+            return px(10) * max(1, len(self._text)), px(16)
+
+    def _resize(self):
+        text_width, line_height = self._text_metrics()
+        if not self._fixed_width:
+            tk.Canvas.configure(self, width=text_width + 2 * self._padx + 2)
+        if not self._fixed_height:
+            tk.Canvas.configure(self, height=line_height + 2 * self._pady + 2)
+
+    # -- state ------------------------------------------------------------
+    def _active_fill(self):
+        if self._state == 'disabled':
+            return self._fill_disabled or self._fill
+        if self._pressed:
+            return self._fill_pressed
+        if self._hover:
+            return self._fill_active
+        return self._fill
+
+    def _active_border(self):
+        if self._focused and self._state != 'disabled':
+            return COLORS['green']  # focus ring is always visible
+        if not self._border and not self._border_active and not self._border_pressed:
+            return ''  # borderless: the button blends into its container
+        if self._state == 'disabled':
+            return COLORS['line']
+        if self._focused:
+            return COLORS['green']
+        if self._pressed:
+            return self._border_pressed
+        if self._hover:
+            return self._border_active
+        return self._border
+
+    def _active_fg(self):
+        if self._state == 'disabled':
+            return self._fg_disabled
+        if self._hover and not self._pressed:
+            return self._fg_active
+        return self._fg
+
+    # -- drawing ----------------------------------------------------------
+    def _redraw(self):
+        width, height = self.winfo_width(), self.winfo_height()
+        if width <= 1 or height <= 1:
+            width, height = self.winfo_reqwidth(), self.winfo_reqheight()
+        if width < 4 or height < 4:
+            return
+        radius = max(2., min(self._radius, (width - 2) / 2., (height - 2) / 2.))
+        x1, y1, x2, y2 = 1., 1., float(width - 1), float(height - 1)
+        fill, outline = self._active_fill(), self._active_border()
+        fg = self._active_fg()
+        if self._anchor == 'w':
+            x, y, anchor = self._padx + 2, height / 2., 'w'
+        elif self._anchor == 'e':
+            x, y, anchor = width - self._padx - 2, height / 2., 'e'
+        else:
+            x, y, anchor = width / 2., height / 2., 'center'
+        # Skip identical repaints: a resize sends many <Configure> events whose
+        # size/state did not actually change.
+        signature = (width, height, round(radius, 2), fill, outline, fg,
+                     self._text, tuple(self._font) if isinstance(self._font, tuple) else self._font,
+                     anchor)
+        if signature == self._drawn:
+            return
+        self._drawn = signature
+        if self._shape_id is not None:
+            try:
+                self.coords(self._shape_id, *rounded_points(x1, y1, x2, y2, radius))
+                self.itemconfigure(self._shape_id, fill=fill, outline=outline)
+            except tk.TclError:
+                self._shape_id = None
+        if self._shape_id is None:
+            self._shape_id = self.create_polygon(
+                rounded_points(x1, y1, x2, y2, radius), fill=fill, outline=outline,
+                width=1, tags='button-shape')
+        if self._label_id is not None:
+            try:
+                self.coords(self._label_id, x, y)
+                self.itemconfigure(self._label_id, text=self._text, fill=fg,
+                                   font=self._font, anchor=anchor)
+            except tk.TclError:
+                self._label_id = None
+        if self._label_id is None:
+            self._label_id = self.create_text(x, y, text=self._text, fill=fg,
+                                              font=self._font, anchor=anchor,
+                                              tags='button-label')
+
+    # -- events -----------------------------------------------------------
+    def _on_configure(self, event=None):
+        self._redraw()
+
+    def _on_enter(self, event=None):
+        if self._state == 'disabled' or self._hover:
+            return
+        self._hover = True
+        self._redraw()
+
+    def _on_leave(self, event=None):
+        if not (self._hover or self._pressed):
+            return
+        self._hover = self._pressed = False
+        self._redraw()
+
+    def _on_press(self, event=None):
+        if self._state == 'disabled':
+            return
+        self._pressed = True
+        try:
+            self.focus_set()
+        except Exception:
+            pass
+        self._redraw()
+
+    def _on_release(self, event=None):
+        was_pressed = self._pressed
+        self._pressed = False
+        inside = True
+        if event is not None and hasattr(event, 'x'):
+            inside = 0 <= event.x <= self.winfo_width() and 0 <= event.y <= self.winfo_height()
+        self._hover = inside and self._state != 'disabled'
+        self._redraw()
+        if was_pressed and inside and self._state != 'disabled':
+            self.invoke()
+
+    def _on_focus_in(self, event=None):
+        if not self._focused:
+            self._focused = True
+            self._redraw()
+
+    def _on_focus_out(self, event=None):
+        if self._focused:
+            self._focused = False
+            self._redraw()
+
+    def _on_key_press(self, event=None):
+        self._on_press()
+        return 'break'
+
+    def _on_key_release(self, event=None):
+        if self._pressed:
+            self._pressed = False
+            self._redraw()
+            if self._state != 'disabled':
+                self.invoke()
+        return 'break'
+
+    def invoke(self):
+        if self._state != 'disabled' and callable(self._command):
+            self._command()
+
+    # -- option compatibility --------------------------------------------
+    def _set_option(self, key, value):
+        """Apply one option; returns (needs_resize, needs_redraw)."""
+        key = str(key).lower().replace('-', '')
+        if key == 'text':
+            self._text = '' if value is None else str(value)
+            return True, True
+        if key in ('bg', 'background', 'fill'):
+            self._fill = value
+            return False, True
+        if key in ('activebackground', 'fillactive'):
+            self._fill_active = value
+            return False, True
+        if key in ('fg', 'foreground'):
+            self._fg = value
+            return False, True
+        if key in ('activeforeground', 'fgactive'):
+            self._fg_active = value
+            return False, True
+        if key in ('disabledforeground', 'fgdisabled'):
+            self._fg_disabled = value
+            return False, True
+        if key == 'state':
+            self._state = str(value)
+            return False, True
+        if key == 'font':
+            self._font = value
+            return True, True
+        if key == 'padx':
+            self._padx = int(value)
+            return True, True
+        if key == 'pady':
+            self._pady = int(value)
+            return True, True
+        if key == 'anchor':
+            self._anchor = str(value)
+            return False, True
+        if key in ('border', 'outline'):
+            self._border = value
+            return False, True
+        if key in ('radius',):
+            self._radius = px(int(value))
+            return False, True
+        if key in ('command', 'action'):
+            self._command = value
+            return False, False
+        if key in ('cursor',):
+            tk.Canvas.configure(self, cursor=value)
+            return False, False
+        if key in ('width',):
+            self._fixed_width = True
+            tk.Canvas.configure(self, width=int(value))
+            return False, True
+        if key in ('height',):
+            self._fixed_height = True
+            tk.Canvas.configure(self, height=int(value))
+            return False, True
+        # Purely native-button options (relief, borderwidth, highlight*) have no
+        # meaning for a canvas shape; anything else is handed back to Tk.
+        if key in ('relief', 'bd', 'borderwidth', 'highlightthickness', 'highlightbackground',
+                   'highlightcolor', 'overrelief', 'offrelief', 'default', 'indicatoron',
+                   'takefocus', 'underline', 'wraplength', 'justify'):
+            return False, False
+        try:
+            tk.Canvas.configure(self, **{key: value})
+        except Exception:
+            pass
+        return False, False
+
+    def configure(self, cnf=None, **kwargs):
+        if isinstance(cnf, dict):
+            kwargs = {**cnf, **kwargs}
+        resize = redraw = False
+        for key, value in kwargs.items():
+            resized, redrawn = self._set_option(key, value)
+            resize = resize or resized
+            redraw = redraw or redrawn
+        if resize:
+            self._resize()
+        if redraw or resize:
+            self._redraw()
+        return None
+
+    config = configure
+
+    def cget(self, key):
+        key = str(key).lower().replace('-', '')
+        values = {'text': self._text, 'state': self._state, 'bg': self._fill,
+                  'background': self._fill, 'fg': self._fg, 'foreground': self._fg,
+                  'font': self._font, 'command': self._command,
+                  'activebackground': self._fill_active,
+                  'disabledforeground': self._fg_disabled,
+                  'padx': self._padx, 'pady': self._pady, 'anchor': self._anchor,
+                  'radius': self._radius}
+        if key in values:
+            return values[key]
+        return tk.Canvas.cget(self, key)
 
 
 # ---------------------------------------------------------------------------
