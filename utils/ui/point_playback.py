@@ -1,4 +1,5 @@
 """Native point playback worker. UI status is queued; Tk stays on its own thread."""
+from collections import deque
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -65,6 +66,10 @@ class PointPlayback:
         self.history_root = Path(diagnostics_path).parent.parent/'路线' if diagnostics_path is not None else None
         self.diagnostics = PlaybackDiagnostics(diagnostics_path) if diagnostics_path is not None else None
         self.results = queue.Queue(maxsize=1)
+        # The live status slot intentionally drops superseded frames. Preserve
+        # every task report separately so the UI log cannot lose intermediate
+        # collection/navigation events between Tk refreshes.
+        self.log_events = deque(maxlen=2000)
         self.result_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.thread = None
@@ -110,7 +115,23 @@ class PointPlayback:
                     status['message'] += f' · 回放记录写入失败：{self.history.error}'
                 if self.history.archive_error:
                     status['message'] += f' · 路线学习索引写入失败：{self.history.archive_error}'
+            self.log_events.append({
+                'at': datetime.now().astimezone().isoformat(timespec='seconds'),
+                'state': state,
+                'message': status['message'],
+                'waypoint': status.get('waypoint'),
+                'waypoint_count': status.get('waypoint_count'),
+                'cycle': status.get('cycle'),
+                'loop_count': status.get('loop_count'),
+            })
             self.results.put_nowait(status)
+
+    def take_log_events(self):
+        """Drain all reports for the UI log, independent of the latest-status slot."""
+        with self.result_lock:
+            events = list(self.log_events)
+            self.log_events.clear()
+            return events
 
     def take_latest(self):
         try:

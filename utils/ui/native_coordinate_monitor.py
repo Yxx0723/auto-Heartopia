@@ -26,6 +26,7 @@ from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
 from utils.ui.cooking_single_pot_control import CookingSinglePotControl
 from utils.ui.cooking_catalog_panel import CookingCatalogPanel
+from utils.ui.collection_log_panel import CollectionLogPanel
 from utils.ui.log_window import FullLogWindow
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
@@ -449,6 +450,11 @@ class CoordinateWindow:
         self.label(cookhead, '单锅 / 连续制作 · 先确认料理再按 F6', color='muted',
                    font=theme.font(10)).pack(side='right')
         self.cooking_catalog=CookingCatalogPanel(self,cooking_page,runtime_parent=self.global_log_host)
+        self.collection_log=CollectionLogPanel(self, self.global_log_host, message_filter=user_feedback)
+        # Each module keeps its own log and history; the shared pane only
+        # displays the selected module, without interrupting either worker.
+        self.log_module=None
+        self.sync_log_module()
         route_page.grid_columnconfigure(0, weight=1)
         def group(parent, title):
             return tk.LabelFrame(parent, text=title, bg=COLORS['card'], fg=COLORS['green'],
@@ -813,6 +819,7 @@ class CoordinateWindow:
         except Exception:
             pass
         self.refresh_nav_highlight()
+        self.sync_log_module()
 
     def refresh_nav_highlight(self):
         for index, button in enumerate(getattr(self, 'nav_buttons', ())):
@@ -869,6 +876,7 @@ class CoordinateWindow:
                 if index != self.active_module:
                     self.active_module = index
                     self.refresh_nav_highlight()
+                self.sync_log_module()
                 return
         # The merged-away 参数设定 page keeps its tab (page state and tests rely
         # on the four-page structure) but has no navigation entry, so fall back
@@ -900,6 +908,34 @@ class CoordinateWindow:
             self.segmented.grid()
         self.refresh_nav_highlight()
 
+    def current_log_source(self):
+        return self.cooking_catalog if self.log_module == 'cooking' else self.collection_log
+
+    def sync_log_module(self):
+        """Select the bottom-panel and full-window log for the active module.
+
+        地图与设置 keeps the previously selected source. Both caches continue
+        receiving events even while their panels are hidden.
+        """
+        if not all(hasattr(self, key) for key in ('collection_log', 'cooking_catalog', 'log_title')):
+            return
+        module = ('collection' if self.active_module == 0 else
+                  'cooking' if self.active_module == 1 else
+                  (self.log_module or 'collection'))
+        if module == self.log_module:
+            return
+        self.log_module = module
+        for source in (self.collection_log, self.cooking_catalog):
+            source.runtime_page.pack_forget()
+        source = self.current_log_source()
+        if getattr(self, 'log_view', 'standard') != 'collapsed':
+            source.runtime_page.pack(fill='both', expand=True, padx=px(8), pady=px(3))
+        name = '自动采集' if module == 'collection' else '自动烹饪'
+        self.log_title.configure(text='运行日志 · ' + name)
+        window = getattr(self, 'full_log_window', None)
+        if window is not None and window.alive():
+            window.set_source(source, f'运行日志 · {name} · 完整记录')
+
     def build_log_header(self):
         header = self.frame(self.global_log_host, card=True, border=False)
         header.pack(side='top', fill='x', padx=px(8), pady=(px(5), 0))
@@ -918,8 +954,8 @@ class CoordinateWindow:
         """standard / full / collapsed — content is never discarded."""
         self.log_view = mode
         self.log_collapsed = mode == 'collapsed'
-        catalog = getattr(self, 'cooking_catalog', None)
-        runtime = getattr(catalog, 'runtime_page', None) if catalog is not None else None
+        source = self.current_log_source() if hasattr(self, 'collection_log') else None
+        runtime = getattr(source, 'runtime_page', None) if source is not None else None
         if runtime is not None:
             try:
                 if mode == 'collapsed':
@@ -951,14 +987,15 @@ class CoordinateWindow:
         The bottom pane keeps its size, so opening the full log never squeezes
         the map or the control area.
         """
-        catalog = getattr(self, 'cooking_catalog', None)
-        if catalog is None:
+        if not hasattr(self, 'collection_log'):
             return None
+        source = self.current_log_source()
+        name = '自动采集' if self.log_module == 'collection' else '自动烹饪'
         window = getattr(self, 'full_log_window', None)
         if window is not None and window.alive():
             window.raise_window()
             return window
-        self.full_log_window = FullLogWindow(self.root, catalog)
+        self.full_log_window = FullLogWindow(self.root, source, title=f'运行日志 · {name} · 完整记录')
         return self.full_log_window
 
     # Kept for older helper scripts that still call the previous name.
@@ -1290,6 +1327,14 @@ class CoordinateWindow:
             if scene is not None and not self.view.paused:
                 self.scene_state = scene
         playback = self.playback.take_latest()
+        # Read the independent queue: the latest-status slot intentionally
+        # discards intermediate worker states, but the log must not.
+        collection_events = self.playback.take_log_events()
+        if collection_events:
+            try:
+                self.collection_log.apply_log_events(collection_events)
+            except Exception:
+                pass  # Log rendering must not interrupt playback or Tk updates.
         if playback is not None:
             self.playback_status = playback
             if playback.get('state') in ('reached', 'finished', 'stopped', 'error', 'partial'):
