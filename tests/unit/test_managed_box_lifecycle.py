@@ -121,6 +121,38 @@ def test_wrong_type_and_unknown_image_never_create_provisional_proof(monkeypatch
     assert guard.revalidate()==0 and not guard.proofs
 
 
+def test_rejected_class_is_not_reparsed_for_each_rootless_box():
+    guard, _, info, _ = guard_fixture()
+    guard.image_verified = Mock(return_value=False)
+    assert not guard.consider(3000, info, 2000)
+    assert not guard.consider(3001, info, 2000)
+    guard.image_verified.assert_called_once_with(info)
+    assert guard.stats['unconfirmed'] == 2
+
+
+@pytest.mark.parametrize('mode', ['restored', 'empty', 'foreign', 'replaced', 'removed'])
+def test_parent_recheck_requires_current_membership_and_owner(mode):
+    from utils.core.scene_read import RecoveryBudget
+
+    reader = plane_reader()
+    reader.read_budget = RecoveryBudget()
+    meta = reader.meta
+    refs = {(20, 'colliders'): 30, (40, '_stream'): 10, (40, '_group'): 50,
+            (40, '_hierarchy'): 60, (60, '_hierarchyObject'): 50}
+    if mode == 'empty':
+        refs[40, '_group'] = refs[40, '_hierarchy'] = 0
+    if mode == 'foreign':
+        refs[40, '_hierarchy'] = 61
+    meta.ref.side_effect = lambda obj, name: refs[obj, name]
+    meta.obj.side_effect = lambda obj: (
+        {'address': 71 if mode == 'replaced' else 70} if obj == 40 else
+        {'name': 'Hierarchy', 'namespace': 'XDTGame.Core'})
+    meta.array_refs.return_value = [] if mode == 'removed' else [40]
+    verify = Mock()
+    assert reader._live_managed_parent(10, 20, 40, 70, verify, {50: 60}, [60]) == (mode == 'restored')
+    verify.assert_called_once_with(10, 20)
+
+
 def test_pinned_digest_is_valid_sha256():
     from utils.drivers.managed_box_lifecycle import PHYSICS_IMAGE_SHA256
     assert len(PHYSICS_IMAGE_SHA256)==64

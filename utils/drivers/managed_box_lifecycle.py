@@ -16,6 +16,7 @@ class DetachedBoxGuard:
     def __init__(self, meta, check, images):
         self.meta, self.check, self.images = meta, check, images
         self.image_attempts, self.proofs = {}, {}
+        self.rejected_classes = set()
         self.stats = {'provisional':0, 'confirmed':0, 'changed':0, 'unconfirmed':0}
 
     def image_verified(self, info):
@@ -70,11 +71,16 @@ class DetachedBoxGuard:
             return False
 
     def consider(self, collider, info, stream):
-        if (info.get('name'),info.get('namespace')) == ('DynamicBoxCollider','XDTGame.Core.Physics') \
-                and self.image_verified(info) and self.detached(collider,info,stream):
-            self.proofs[collider] = (info,stream)
-            self.stats['provisional'] += 1
-            return True
+        if (info.get('name'),info.get('namespace')) == ('DynamicBoxCollider','XDTGame.Core.Physics'):
+            klass = info['address']
+            if klass not in self.rejected_classes:
+                if not self.image_verified(info):
+                    # A failed proof can only make this scan more conservative.
+                    self.rejected_classes.add(klass)
+                elif self.detached(collider,info,stream):
+                    self.proofs[collider] = (info,stream)
+                    self.stats['provisional'] += 1
+                    return True
         self.stats['unconfirmed'] += 1
         return False
 

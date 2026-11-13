@@ -289,6 +289,34 @@ def nav_reader(error=None):
     return source
 
 
+@pytest.mark.parametrize('local_change', [True, False])
+def test_parent_recheck_only_accelerates_verified_local_change(local_change):
+    from tests.unit.test_scene_read_recovery import quality_scene
+
+    issue = SceneReadIssue('changed', kind='mutation' if local_change else 'scope_changed',
+                           stage='managed_parent_recheck', retryable=local_change,
+                           scope_verified=local_change)
+    issue.code = 'collision_membership_changed' if local_change else 'scene_root_changed'
+    reader, replacement = nav_reader(), nav_reader()
+    reader.snapshot.side_effect = [quality_scene(10.), issue, quality_scene(10.)]
+    replacement.snapshot.return_value = quality_scene(10.)
+    worker = SceneMapWorker('profile', factory=Mock(side_effect=[reader, replacement]),
+                            clock=lambda: 10.)
+    try:
+        worker.set_pid(7)
+        worker.poll_once()
+        assert worker.navigation_snapshot(7) is not None
+        worker.poll_once()
+        assert worker.navigation_snapshot(7) is None
+        assert worker.retry_delay == pytest.approx(.1 if local_change else 2.)
+        assert reader.close.call_count == (0 if local_change else 1)
+        worker.poll_once()
+        assert worker.navigation_snapshot(7) is not None
+        assert worker.reader is (reader if local_change else replacement)
+    finally:
+        worker.close()
+
+
 @pytest.mark.parametrize('kind,code', [('invalid_reference', None), ('unknown', 'read_bounds'),
                                       ('unknown', 'short_read')])
 def test_known_navigation_reference_failure_restarts_fresh_without_two_second_idle(kind, code):

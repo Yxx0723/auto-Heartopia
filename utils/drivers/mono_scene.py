@@ -648,6 +648,33 @@ class MemorySceneMap:
             return self.meta.ref(transform, '_hierarchy')
         return self.meta.ref(owner, '_hierarchy')
 
+    def _live_managed_parent(self, stream, collision, collider, klass, verify_collision, owners, active):
+        """Prove a live parent before paying for another complete observation."""
+        if not self.read_budget.reserve():
+            return False
+        started = self.read_budget.clock()
+        try:
+            meta = self.meta
+            verify_collision(stream, collision)
+            array = meta.ref(collision, 'colliders')
+            if not array or collider not in meta.array_refs(array):
+                return False
+            if meta.obj(collider)['address'] != klass or meta.ref(collider, '_stream') != stream:
+                return False
+            owner = meta.ref(collider, '_group')
+            hierarchy = meta.ref(collider, '_hierarchy')
+            if owner not in owners or owners[owner] not in active:
+                return False
+            if hierarchy and hierarchy != owners[owner]:
+                return False
+            hierarchy = owners[owner]
+            info = meta.obj(hierarchy)
+            return ((info['name'], info['namespace']) == ('Hierarchy', 'XDTGame.Core')
+                    and meta.ref(hierarchy, '_hierarchyObject') == owner
+                    and meta.ref(collision, 'colliders') == array)
+        finally:
+            self.read_budget.spent += self.read_budget.clock() - started
+
     def refresh_live_objects(self, observations, registry, world, *, active=None, stats=None, check=lambda: None):
         """Late recheck after collision reads; never retain a vanished moving icon."""
         meta = self.meta
@@ -682,7 +709,7 @@ class MemorySceneMap:
 
     def snapshot(self):
         try:
-            return self._snapshot_attempt()
+            result = self._snapshot_attempt()
         except (OSError, ValueError):
             failures = getattr(self, 'collision_reference_failures', ())
             if not failures or failures[-1].get('recovery_decision') != 'rescan_verified_stream':
@@ -696,8 +723,19 @@ class MemorySceneMap:
             finally:
                 self.rescan_rejected_owner = None
                 self.last_read_stats['stale_owner_rescan'] = previous
+        if not getattr(self, 'managed_parent_recovered', False):
+            return result
+        previous = self.last_read_stats
+        # Rebuild geometry and observation times from live data. The partial
+        # attempt is never published or merged with the replacement.
+        try:
+            return self._snapshot_attempt(check_parent_recovery=False)
+        finally:
+            self.last_read_stats['managed_parent_rescan'] = previous
 
-    def _snapshot_attempt(self):
+    def _snapshot_attempt(self, *, check_parent_recovery=True):
+        self.check_parent_recovery = check_parent_recovery
+        self.managed_parent_recovered = False
         self.read_budget = RecoveryBudget(cancelled=getattr(self, 'cancelled', lambda: False))
         self.phase_times, self.phase_name, self.phase_started = {}, 'registry', time.monotonic()
         self.meta.read_counts = {} if getattr(self, 'navigation_only', False) else None
@@ -875,33 +913,51 @@ class MemorySceneMap:
             self._detached_image_cache = {}
         detached = DetachedBoxGuard(meta,self.read_budget.check,self._detached_image_cache)
         self.detached_stats = detached.stats
+        rootless_candidates = []
 
-        def changed():
-            raise SceneReadIssue('托管碰撞场景或归属已变化', kind='scope_changed', stage=meta.stage)
+        def changed(code):
+            local_change = (meta.stage == 'managed_parent_recheck'
+                            and code == 'collision_membership_changed')
+            issue = SceneReadIssue('托管碰撞场景或归属已变化',
+                                   kind='mutation' if local_change else 'scope_changed',
+                                   stage=meta.stage, retryable=local_change,
+                                   scope_verified=local_change)
+            issue.code = code
+            raise issue
 
-        def verify_group(group):
+        def verify_scene_root():
             self.read_budget.check()
             current = self.memory.snapshot()
             if self.local_hierarchy(current) != local_hierarchy \
                     or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
-                changed()
+                changed('scene_root_changed')
+
+        def verify_group(group):
+            verify_scene_root()
             hierarchy = owners[group]
             active = self.read_registry(registry, hierarchy_class, local_hierarchy, self.read_budget)
             if hierarchy not in active or meta.ref(hierarchy, '_hierarchyObject') != group \
                     or meta.obj(group)['address'] != group_types[group]:
-                changed()
+                changed('scope_snapshot_inconsistent')
 
         def verify_stream(stream):
             group, anchor = stream_anchors[stream]
             verify_group(group)
-            if anchor not in meta.dictionary(meta.ref(group, '_colliders')) \
-                    or meta.ref(anchor, '_stream') != stream:
-                changed()
+            if anchor not in meta.dictionary(meta.ref(group, '_colliders')):
+                changed('scope_snapshot_inconsistent')
+            if meta.ref(anchor, '_stream') != stream:
+                changed('collision_stream_changed')
 
         def verify_collision(stream, collision):
             verify_stream(stream)
-            if collision not in meta.dictionary(meta.ref(stream, '_collisions')):
-                changed()
+            reference = meta.ref(stream, '_collisions')
+            if collision not in meta.dictionary(reference):
+                if meta.stage == 'managed_parent_recheck':
+                    verify_stream(stream)
+                    if meta.ref(stream, '_collisions') != reference:
+                        changed('scope_snapshot_inconsistent')
+                    verify_scene_root()
+                changed('collision_membership_changed')
 
         def inspect_collision_failure(trace, stream, collision):
             trace.context['process_start_identity'] = self.memory.process_start_identity()
@@ -977,6 +1033,9 @@ class MemorySceneMap:
                         if not owner and not hierarchy:
                             if detached.consider(collider,info,stream):
                                 continue
+                            if (self.check_parent_recovery and getattr(self, 'navigation_only', False)
+                                    and isinstance(meta, SceneMetadata) and len(rootless_candidates) < 5):
+                                rootless_candidates.append((stream, collision, collider, info['address']))
                             stream_id = SceneReferenceTrace.identity(stream)
                             rows = self.missing_transform_owners
                             if stream_id in rows or len(rows) < 16:
@@ -1093,6 +1152,18 @@ class MemorySceneMap:
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
             raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
+        if (world_state == 'ready' and not discovery_unknown
+                and 0 < managed_unknown == len(rootless_candidates) <= 4):
+            self._phase('managed_parent_recheck')
+            meta.stage = 'managed_parent_recheck'
+            try:
+                self.managed_parent_recovered = all(self._live_managed_parent(
+                    stream, collision, collider, klass, verify_collision, owners, active)
+                    for stream, collision, collider, klass in rootless_candidates)
+            except (OSError, ValueError) as exc:
+                if isinstance(exc, SceneReadIssue) and (exc.kind in ('cancelled', 'scope_changed')
+                        or (exc.kind == 'mutation' and exc.scope_verified)):
+                    raise
         self.read_budget.check()
         root_verified_at = time.monotonic()
         managed_complete = not (discovery_unknown or managed_unknown)
