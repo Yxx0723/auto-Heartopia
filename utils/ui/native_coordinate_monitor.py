@@ -451,7 +451,7 @@ class CoordinateWindow:
         self.label(cookhead, '单锅 / 连续制作 · 先确认料理再按 F6', color='muted',
                    font=theme.font(10)).pack(side='right')
         self.cooking_catalog=CookingCatalogPanel(self,cooking_page,runtime_parent=self.global_log_host)
-        self.collection_log = CollectionLog(self, self.global_log_host)
+        self.collection_log = CollectionLog(self, self.global_log_host, self.collection_log_status)
         self.log_module = None
         self.sync_log_module()
         route_page.grid_columnconfigure(0, weight=1)
@@ -837,6 +837,10 @@ class CoordinateWindow:
     def show_log_source(self):
         source, page, name = self.log_source()
         self.log_title.configure(text=f'运行日志 · {name}')
+        if self.log_module == 0:
+            self.collection_log_status.pack(side='left', fill='x', expand=True, padx=px(6))
+        else:
+            self.collection_log_status.pack_forget()
         if getattr(self, 'log_collapsed', False):
             page.pack_forget()
         else:
@@ -942,6 +946,8 @@ class CoordinateWindow:
         self.log_full_button = self.button(header, '完整日志 ↗', self.open_full_log, small=True)
         self.log_full_button.configure(padx=px(8), pady=px(2))
         self.log_full_button.pack(side='right', padx=(0, px(2)))
+        self.collection_log_status = self.label(header, '采集状态：空闲 · 暂无运行记录',
+                                                color='muted', font=theme.font(10), width=1)
         separator = tk.Frame(self.global_log_host, bg=COLORS['line'], height=1, bd=0,
                              highlightthickness=0)
         separator.pack(side='top', fill='x', padx=px(8), pady=(px(5), 0))

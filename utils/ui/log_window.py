@@ -42,12 +42,11 @@ def append_log_lines(widget, lines, max_lines):
 class CollectionLog:
     """Collection history and its compact view in the shared log host."""
 
-    def __init__(self, owner, host):
+    def __init__(self, owner, host, status_label):
         self.history = deque(maxlen=2000)
         self.views = []
         self.page = owner.frame(host, card=True, border=False)
-        self.status = owner.label(self.page, '采集状态：空闲 · 暂无运行记录', color='muted')
-        self.status.pack(fill='x')
+        self.status = status_label
         self.text = tk.Text(self.page, wrap='word', height=3, width=40, state='disabled',
                             bg=COLORS['card'], fg=COLORS['text'], font=theme.font(11))
         scroll = ttk.Scrollbar(self.page, orient='vertical', command=self.text.yview)

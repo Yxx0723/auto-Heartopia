@@ -44,6 +44,8 @@ def test_module_logs_keep_history_and_move_one_full_window(tmp_path, monkeypatch
         collection, cooking = window.collection_log, window.cooking_catalog
         playback, controller = window.playback, window.cooking
         assert '暂无运行记录' in collection.status.cget('text')
+        assert collection.status.master is window.log_title.master
+        assert collection.status not in collection.page.winfo_children()
         assert window.log_title.cget('text') == '运行日志 · 自动采集'
         collection.apply_events([{'state': 'reached', 'message': '已完成采集与等待 1/1'}])
         cooking.apply_log_events([{'state': 'batch_wait', 'message': '烹饪测试记录'}])
@@ -54,6 +56,7 @@ def test_module_logs_keep_history_and_move_one_full_window(tmp_path, monkeypatch
             window.select_module(module)
             root.update_idletasks()
             assert full.catalog is source
+            assert bool(collection.status.winfo_ismapped()) == (source is collection)
             assert window.open_full_log() is full
             assert collection.views == ([full] if source is collection else [])
             assert cooking.log_views == ([full] if source is cooking else [])
@@ -87,10 +90,18 @@ def test_module_logs_keep_history_and_move_one_full_window(tmp_path, monkeypatch
         assert len(collection.text.get('1.0', 'end-1c').splitlines()) == 500
         assert len(window.full_log_window.text.get('1.0', 'end-1c').splitlines()) == 2000
         assert '事件 2099' in window.full_log_window.text.get('1.0', 'end')
-        for geometry in ('490x900', '460x860', '1024x900'):
+        collection.apply_events([{'state': 'stopped', 'message': '回放已停止'}])
+        assert collection.status.cget('text') == '采集状态：停止'
+        collection.status.configure(text='采集状态：' + '较长状态' * 20)
+        for scale, geometry in ((1.33, '490x900'), (1.33, '460x860'), (2.0, '460x860'),
+                                (1.33, '1024x900')):
+            root.tk.call('tk', 'scaling', scale)
             root.geometry(geometry)
             root.update_idletasks()
             assert window.log_full_button.winfo_ismapped()
+            assert collection.status.winfo_ismapped()
+            assert collection.status.winfo_rootx() >= window.log_title.winfo_rootx() + window.log_title.winfo_width()
+            assert collection.status.winfo_rootx() + collection.status.winfo_width() <= window.log_full_button.winfo_rootx()
             assert window.log_full_button.winfo_rootx()+window.log_full_button.winfo_width() <= (
                 window.global_log_host.winfo_rootx()+window.global_log_host.winfo_width())
     finally:
