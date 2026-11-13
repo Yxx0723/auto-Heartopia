@@ -906,12 +906,10 @@ class CoordinateWindow:
         self.log_title = self.label(header, '运行日志 · 关键信息', color='green',
                                     font=theme.font(12, bold=True))
         self.log_title.pack(side='left')
-        self.log_toggle = self.button(header, '收起 ▴', self.toggle_log, small=True)
-        self.log_toggle.configure(padx=px(8), pady=px(2))
-        self.log_toggle.pack(side='right')
+        # 「收起」按钮已按需求移除：日志始终常驻，完整记录用独立窗口查看。
         self.log_full_button = self.button(header, '完整日志 ↗', self.open_full_log, small=True)
         self.log_full_button.configure(padx=px(8), pady=px(2))
-        self.log_full_button.pack(side='right', padx=(0, px(4)))
+        self.log_full_button.pack(side='right', padx=(0, px(2)))
         separator = tk.Frame(self.global_log_host, bg=COLORS['line'], height=1, bd=0,
                              highlightthickness=0)
         separator.pack(side='top', fill='x', padx=px(8), pady=(px(5), 0))
@@ -935,7 +933,6 @@ class CoordinateWindow:
         try:
             self.main_panes.paneconfigure(self.global_log_host,
                                           minsize=minsizes[mode], height=heights[mode])
-            self.log_toggle.configure(text='还原 ▾' if mode == 'collapsed' else '收起 ▴')
             self.log_title.configure(text={'standard': '运行日志 · 关键信息',
                                            'full': '运行日志 · 完整记录',
                                            'collapsed': '运行日志 · 已收起（完整记录保留）'}[mode])
