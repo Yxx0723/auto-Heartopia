@@ -343,19 +343,22 @@ class CoordinateWindow:
         return buttons
 
     def build_map_toolbar(self, parent):
-        """Two rows of capsule groups replacing the bare button strip.
+        """Single capsule row above the map.
 
-        Row one holds the scene filter toggle (left) and the view controls
-        (right); row two holds the route actions. Commands, widget attributes
-        and behaviour are unchanged, only the grouping and styling differ.
+        Left capsule: scene filter toggle + route overview; right capsule: the
+        view controls. The old second row is gone — the trail buttons
+        (清空轨迹 / 导出实走路段) were removed by request and 路线全览 moved up,
+        so the map gets the row's height back.
         """
         head = self.frame(parent, card=True)
         self.plothead = head
-        head.grid(row=0, column=0, sticky='ew', padx=px(4), pady=(px(4), 0))
+        head.grid(row=0, column=0, sticky='ew', padx=px(4), pady=(px(4), px(3)))
         left, left_inner = self.toolbar_pill(head)
         left.pack(side='left')
-        self.scene_filters_toggle = self.pack_toolbar_buttons(
-            left_inner, [('分类筛选 ▾', self.toggle_scene_filters)])[0]
+        (self.scene_filters_toggle,
+         self.route_overview_button) = self.pack_toolbar_buttons(
+            left_inner, [('分类筛选 ▾', self.toggle_scene_filters),
+                         ('路线全览', self.show_route_overview)])
         right, right_inner = self.toolbar_pill(head)
         right.pack(side='right')
         self.map_expand_button = self.pack_toolbar_buttons(right_inner, [
@@ -363,15 +366,6 @@ class CoordinateWindow:
             ('＋', lambda: self.set_zoom(self.zoom * 1.5)),
             ('重置缩放', self.reset_map_view),
             ('大地图', self.toggle_map_size)])[-1]
-        actions = self.frame(parent, card=True)
-        self.map_actions = actions
-        actions.grid(row=1, column=0, sticky='ew', padx=px(4), pady=(px(4), px(3)))
-        pill, inner = self.toolbar_pill(actions)
-        pill.pack(side='left')
-        self.pack_toolbar_buttons(inner, [
-            ('路线全览', self.show_route_overview),
-            ('清空轨迹', self.clear_trail),
-            ('导出实走路段', self.export_walk_trail)])
         return head
 
     def build(self):
