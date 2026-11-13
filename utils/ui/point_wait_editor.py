@@ -39,9 +39,12 @@ class PointWaitEditor:
         actions.pack(fill='x', padx=18)
         self.save_button = theme.RoundedButton(
             actions, text='保存此点', command=lambda: self.save(False), radius=12,
-            fill=colors['green'], fill_active=colors['green'],
+            fill=colors.get('primary', colors['green']),
+            fill_active=colors.get('primary_active', colors['button']),
             fill_pressed=colors.get('primary_press', colors['green']),
-            fg='#1b2815', border=colors['green'], back=colors['bg'],
+            fg=colors.get('primary_fg', colors['text']),
+            fg_disabled=colors.get('disabled', colors['text']),
+            border=colors.get('button_border', colors['green']), back=colors['bg'],
             font=theme.font(13), padx=12, pady=6)
         self.save_button.pack(side='left')
         self.all_button = theme.RoundedButton(

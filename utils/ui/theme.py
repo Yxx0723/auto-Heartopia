@@ -63,6 +63,7 @@ COLORS = {
     'segment_hover': SAGE_100,
     'selected': SAGE_200,
     'disabled': DISABLED,
+    'disabled_on_dark': '#D7E2D2',
     'panel_alt': CARD_ALT,
     # 方案三「游戏伴侣风」：暖黄 / 暖橙点缀与柔和状态色。
     'honey': '#F2C879',
@@ -185,6 +186,15 @@ def _parent_fill(master):
     return COLORS['bg']
 
 
+def _is_dark(color):
+    """True for a dark hex fill, where the muted disabled text would vanish."""
+    try:
+        red, green, blue = (int(color[index:index + 2], 16) for index in (1, 3, 5))
+    except Exception:
+        return False
+    return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0 < 0.55
+
+
 _FONT_CACHE = {}
 
 
@@ -238,7 +248,8 @@ class RoundedButton(tk.Canvas):
         self._fill_disabled = fill_disabled
         self._fg = fg or COLORS['text']
         self._fg_active = fg_active or self._fg
-        self._fg_disabled = fg_disabled or COLORS['disabled']
+        self._fg_disabled = fg_disabled or (
+            COLORS['disabled_on_dark'] if _is_dark(self._fill) else COLORS['disabled'])
         self._border = COLORS['button_border'] if border is None else border
         self._border_active = (COLORS['button_border_hover']
                                if border_active is None else border_active)
