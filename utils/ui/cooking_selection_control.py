@@ -63,8 +63,7 @@ class CookingSelectionControl(CookingEntryControl):
             return super()._execute(pid, window)
         device = controls = reader = None
         try:
-            self.path = self.root/('选菜-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid4().hex[:8])
-            self.path.mkdir(parents=True, exist_ok=False)
+            self.create_record_directory('选菜-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid4().hex[:8])
             with self.lock:
                 self.stream = (self.path/'events.jsonl').open('a', encoding='utf-8')
             device = self.device_factory(window)

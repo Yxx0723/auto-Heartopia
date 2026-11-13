@@ -118,11 +118,19 @@ class CookingControl:
         except ValueError as exc:
             self.update('error', str(exc))
 
+    def create_record_directory(self, name):
+        self.path = None
+        path = self.root/name
+        try:
+            path.mkdir(parents=True, exist_ok=False)
+        except OSError as exc:
+            raise OSError(f'无法创建烹饪记录目录：{path}（{exc}）') from exc
+        self.path = path
+
     def _execute(self, pid, window, menu, session, max_star):
         reader = device = controls = None
         try:
-            self.path = self.root/(datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid4().hex[:8])
-            self.path.mkdir(parents=True, exist_ok=False)
+            self.create_record_directory(datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid4().hex[:8])
             with self.lock:
                 self.stream = (self.path/'events.jsonl').open('a', encoding='utf-8')
             device = self.device_factory(window)

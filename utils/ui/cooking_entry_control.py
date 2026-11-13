@@ -6,13 +6,15 @@ from uuid import uuid4
 
 from utils.drivers.cooking_menu_state import CookingMenuStateReader
 from utils.drivers.input_task_gate import InputTaskGate
+from utils.drivers.cooking_record_paths import pending_entry_journals
 from utils.ui.cooking_control import CookingControl
 
 
 class CookingEntryControl(CookingControl):
-    def __init__(self,*args,menu_factory=CookingMenuStateReader,**kwargs):
+    def __init__(self,*args,menu_factory=CookingMenuStateReader,legacy_entry_root=None,**kwargs):
         super().__init__(*args,**kwargs)
         self.menu_factory=menu_factory
+        self.legacy_entry_root=legacy_entry_root
 
     def start(self,pid):
         if self.active or self.busy():
@@ -30,20 +32,21 @@ class CookingEntryControl(CookingControl):
     def entry_journal(self,binding):
         # Recover ambiguous input across application restarts, never bypass it
         # by silently allocating a new task journal.
-        for path in sorted(self.root.glob('入口验证-*/entry.json'),reverse=True):
-            saved=json.loads(path.read_text(encoding='utf-8-sig'))
-            if saved.get('entry_dispatched') and saved.get('state')!='RECIPE_VALIDATED':
-                if saved.get('binding')!=binding:
-                    raise ValueError('存在其他游戏会话的未确认入口记录，请先核对灶台状态')
-                return path
+        pending = pending_entry_journals(self.root, self.legacy_entry_root)
+        if len(pending) > 1:
+            raise ValueError('存在多份未确认入口记录，请先核对灶台状态和新旧记录目录')
+        if pending:
+            path, saved_binding = pending[0]
+            if saved_binding != binding:
+                raise ValueError('存在其他游戏会话的未确认入口记录，请先核对灶台状态')
+            return path
         return self.path/'entry.json'
 
     def _execute(self,pid,window):
         reader=device=controls=None
         result={}
         try:
-            self.path=self.root/('入口验证-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid4().hex[:8])
-            self.path.mkdir(parents=True,exist_ok=False)
+            self.create_record_directory('入口验证-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid4().hex[:8])
             with self.lock:
                 self.stream=(self.path/'events.jsonl').open('a',encoding='utf-8')
             binding='p0-game-'+str(pid)
@@ -82,6 +85,9 @@ class CookingEntryControl(CookingControl):
                 if self.stream:
                     self.stream.close();self.stream=None
             if self.path:
-                (self.path/'summary.json').write_text(json.dumps(
-                    {'task_state':self.task_state,'started_pots':0,'entry':result},
-                    ensure_ascii=False,indent=2),'utf-8')
+                try:
+                    (self.path/'summary.json').write_text(json.dumps(
+                        {'task_state':self.task_state,'started_pots':0,'entry':result},
+                        ensure_ascii=False,indent=2),'utf-8')
+                except OSError as exc:
+                    self.update('error',f'无法保存烹饪记录：{self.path}（{exc}）')

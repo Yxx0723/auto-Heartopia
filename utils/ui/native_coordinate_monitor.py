@@ -25,6 +25,7 @@ from utils.drivers.input_task_gate import InputTaskGate
 from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
 from utils.ui.cooking_single_pot_control import CookingSinglePotControl
+from utils.drivers.cooking_record_paths import legacy_cooking_record_dir, resolve_cooking_record_dir
 from utils.ui.cooking_catalog_panel import CookingCatalogPanel
 from utils.ui.log_window import CollectionLog, FullLogWindow
 from utils.drivers.route_path_memory import RoutePathMemory
@@ -204,7 +205,8 @@ class CoordinateWindow:
                                       guidance_scene_factory=NavigationSceneMap if scene_factory is MemorySceneMap else None,
                                       scene_provider=self.navigation_scene, scene_refresh=self.refresh_scene,
                                       diagnostics_path=diagnostics_dir / '日志' / '点位回放.jsonl', input_gate=self.input_gate)
-        self.cooking = CookingSinglePotControl(self.resources/'profile.json', Path(r'C:\Users\user\Desktop\烹饪记录'),
+        self.cooking = CookingSinglePotControl(self.resources/'profile.json', resolve_cooking_record_dir(),
+            legacy_entry_root=legacy_cooking_record_dir(),
                                       busy=lambda: self.playback.active, input_gate=self.input_gate,
                                       runner=cooking_entry_runner, selection_runner=cooking_selection_runner,
                                       single_pot_runner=single_pot_runner)

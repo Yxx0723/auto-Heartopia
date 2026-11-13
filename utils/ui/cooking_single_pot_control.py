@@ -48,8 +48,7 @@ class CookingSinglePotControl(CookingSelectionControl):
             return super()._execute(pid,window,recipe)
         reader=device=controls=None
         try:
-            self.path=self.root/('单锅-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid4().hex[:8])
-            self.path.mkdir(parents=True,exist_ok=False)
+            self.create_record_directory('单锅-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid4().hex[:8])
             with self.lock:self.stream=(self.path/'events.jsonl').open('a',encoding='utf-8')
             device=self.device_factory(window)
             controls=self.controls_factory(window,window.size(),self,self.stop_event.is_set)
@@ -83,8 +82,7 @@ class CookingSinglePotControl(CookingSelectionControl):
         reader=device=controls=None
         initial={'target_pots':target,'current_pot':0,'completed_pots':0,'total_products':0}
         try:
-            self.path=self.root/('连续制作-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid4().hex[:8])
-            self.path.mkdir(parents=True,exist_ok=False)
+            self.create_record_directory('连续制作-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid4().hex[:8])
             with self.lock:self.stream=(self.path/'events.jsonl').open('a',encoding='utf-8')
             device=self.device_factory(window)
             controls=self.controls_factory(window,window.size(),self,self.stop_event.is_set)
