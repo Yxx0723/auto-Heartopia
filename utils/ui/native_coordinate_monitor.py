@@ -26,6 +26,7 @@ from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
 from utils.ui.cooking_single_pot_control import CookingSinglePotControl
 from utils.ui.cooking_catalog_panel import CookingCatalogPanel
+from utils.ui.log_window import FullLogWindow
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
 from utils.ui.scene_map_worker import SceneMapWorker
@@ -908,7 +909,7 @@ class CoordinateWindow:
         self.log_toggle = self.button(header, '收起 ▴', self.toggle_log, small=True)
         self.log_toggle.configure(padx=px(8), pady=px(2))
         self.log_toggle.pack(side='right')
-        self.log_full_button = self.button(header, '完整日志 ▾', self.expand_full_log, small=True)
+        self.log_full_button = self.button(header, '完整日志 ↗', self.open_full_log, small=True)
         self.log_full_button.configure(padx=px(8), pady=px(2))
         self.log_full_button.pack(side='right', padx=(0, px(4)))
         separator = tk.Frame(self.global_log_host, bg=COLORS['line'], height=1, bd=0,
@@ -935,7 +936,6 @@ class CoordinateWindow:
             self.main_panes.paneconfigure(self.global_log_host,
                                           minsize=minsizes[mode], height=heights[mode])
             self.log_toggle.configure(text='还原 ▾' if mode == 'collapsed' else '收起 ▴')
-            self.log_full_button.configure(text='标准视图 ▴' if mode == 'full' else '完整日志 ▾')
             self.log_title.configure(text={'standard': '运行日志 · 关键信息',
                                            'full': '运行日志 · 完整记录',
                                            'collapsed': '运行日志 · 已收起（完整记录保留）'}[mode])
@@ -948,9 +948,24 @@ class CoordinateWindow:
         self.set_log_view('standard' if getattr(self, 'log_view', 'standard') == 'collapsed'
                           else 'collapsed')
 
-    def expand_full_log(self):
-        """Toggle between the key-information view and the full log view."""
-        self.set_log_view('standard' if getattr(self, 'log_view', 'standard') == 'full' else 'full')
+    def open_full_log(self):
+        """Show the complete log in its own window; reuse it if already open.
+
+        The bottom pane keeps its size, so opening the full log never squeezes
+        the map or the control area.
+        """
+        catalog = getattr(self, 'cooking_catalog', None)
+        if catalog is None:
+            return None
+        window = getattr(self, 'full_log_window', None)
+        if window is not None and window.alive():
+            window.raise_window()
+            return window
+        self.full_log_window = FullLogWindow(self.root, catalog)
+        return self.full_log_window
+
+    # Kept for older helper scripts that still call the previous name.
+    expand_full_log = open_full_log
 
     def build_sidebar(self, sidebar):
         # Runtime scene statistics may grow to several lines. Keep the tool near
@@ -2120,6 +2135,9 @@ class CoordinateWindow:
             self.root.after_cancel(self.map_hover_job)
         if self.draw_job is not None:
             self.root.after_cancel(self.draw_job)
+        window = getattr(self, 'full_log_window', None)
+        if window is not None:
+            window.close()
         if getattr(self, 'cooking', None):
             self.cooking.close()
         self.playback.close()

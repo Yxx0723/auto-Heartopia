@@ -1,4 +1,5 @@
 """Compact offline catalogue inside the existing cooking tab."""
+from collections import deque
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -81,6 +82,10 @@ class CookingCatalogPanel:
             except Exception:pass
         self.runtime_error.trace_add('write',show_error)
         self.runtime_lines=0;self.last_success='尚无确认操作';self.last_batch={}
+        # Same records feed the inline pane and the detached full-log window;
+        # keeping them in memory means the window needs no file IO and no timer.
+        self.log_buffer=deque(maxlen=2000)
+        self.log_views=[]
         self.list.bind('<<TreeviewSelect>>',self.changed)
         self.category.trace_add('write',self.filter);self.query.trace_add('write',self.filter)
         self.filter()
@@ -181,6 +186,37 @@ class CookingCatalogPanel:
             finally:
                 try:self.runtime_log.configure(state='disabled')
                 except Exception:pass
+            self.log_buffer.extend(lines)
+            self._broadcast_log(lines)
+
+    def log_lines(self):
+        """Snapshot of the retained records, oldest first."""
+        return list(self.log_buffer)
+
+    def add_log_view(self, view):
+        """Register a detached view; it is filled with the retained history."""
+        if view not in self.log_views:
+            self.log_views.append(view)
+        try:
+            view.set_lines(self.log_lines())
+        except Exception:
+            pass
+
+    def remove_log_view(self, view):
+        try:
+            self.log_views.remove(view)
+        except ValueError:
+            pass
+
+    def _broadcast_log(self, lines):
+        for view in list(self.log_views):
+            try:
+                if view.alive():
+                    view.append(lines)
+                else:
+                    self.remove_log_view(view)
+            except Exception:
+                self.remove_log_view(view)
 
     def confirm(self):
         if self.recipe is None:
