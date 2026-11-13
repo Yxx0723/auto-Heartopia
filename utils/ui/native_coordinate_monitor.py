@@ -30,6 +30,7 @@ from utils.ui.cooking_catalog_panel import CookingCatalogPanel
 from utils.ui.log_window import CollectionLog, FullLogWindow
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
+from utils.ui.blueberry_survey_panel import BlueberrySurveyPanel
 from utils.ui.scene_map_worker import SceneMapWorker
 from utils.ui.map_draw_cache import MapDrawCache, Viewport, object_key, muted_color, nearby_model_key
 from utils.ui.collision_display import collision_faces
@@ -506,6 +507,8 @@ class CoordinateWindow:
         # 原来的状态文字在区块底部，占一整行；移到标题栏后可省一行高度。
         bottom = self.frame(route_page, card=True)
         bottom.grid(row=2, column=0, sticky='ew', padx=px(4), pady=(0, px(3)))
+        self.blueberry_survey = BlueberrySurveyPanel(self, route_page)
+        self.blueberry_survey.frame.grid(row=3, column=0, sticky='ew', padx=px(4))
         bottom_head = self.frame(bottom, card=True, border=False)
         bottom_head.pack(fill='x', padx=px(7), pady=(px(4), px(2)))
         self.label(bottom_head, '回放控制', color='green',
@@ -1316,6 +1319,8 @@ class CoordinateWindow:
             scene = self.scene_worker.take_latest()
             if scene is not None and not self.view.paused:
                 self.scene_state = scene
+        if hasattr(self, 'blueberry_survey'):
+            self.blueberry_survey.poll()
         playback = self.playback.take_latest()
         if playback is not None:
             self.playback_status = playback

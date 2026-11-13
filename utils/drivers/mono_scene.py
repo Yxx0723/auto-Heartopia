@@ -935,10 +935,12 @@ class MemorySceneMap:
         except (ValueError, OSError):
             pass  # Missing entrances must not discard live objects or collision geometry.
         terrain = ()
-        if world_state == 'ready' and global_state == 'ready':
+        main_terrain = False
+        if world_state == 'ready':
             try:
-                terrain = verified_terrain_walls(self.memory.profile.get('game_assembly_sha256'),
-                                                 self.native.main_terrain_loaded())
+                main_terrain = self.native.main_terrain_loaded()
+                if global_state == 'ready':
+                    terrain = verified_terrain_walls(self.memory.profile.get('game_assembly_sha256'), main_terrain)
             except ValueError:
                 pass  # A changing scene must not receive the previous world's terrain.
         colliders.extend(terrain)
@@ -977,6 +979,8 @@ class MemorySceneMap:
                    'managed_unknown': managed_unknown,
                    'managed_issues': managed_details}
         return {'quality': quality, 'navigation_only': getattr(self, 'navigation_only', False),
+                'survey_scene': 'startown' if main_terrain else None,
+                'survey_version': self.memory.profile.get('game_assembly_sha256'),
                 'terrain_state': 'ready' if terrain else 'unavailable',
                 'navigation_reference': getattr(self, 'navigation_reference', None) if terrain else None,
                 'terrain_revision': 'main-terrain-v1' if terrain else None,

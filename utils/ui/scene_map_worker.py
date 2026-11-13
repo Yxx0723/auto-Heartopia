@@ -75,6 +75,24 @@ class SceneMapWorker:
                 return None
             return self.latest_scene
 
+    def survey_snapshot(self, pid):
+        """Fresh raw map publication, never the display cache or a navigation request."""
+        with self.lock:
+            scene = self.latest_scene
+            if pid is None or pid != self.pid or self.stop.is_set() or not scene:
+                return None
+            if scene.get('state') != 'ready' or scene.get('world_state') != 'ready' \
+                    or scene.get('navigation_only') or scene.get('survey_scene') != 'startown' \
+                    or not scene.get('survey_version') or not scene.get('quality'):
+                return None
+            now = self.clock()
+            entities = scene['quality'].get('parts', {}).get('entities', {})
+            observed = entities.get('observed_from')
+            if (type(observed) not in (int, float) or not 0 <= now - observed <= policy.COORD_NAV_SCENE_MAX_AGE
+                    or not navigation_quality_valid(scene, now)):
+                return None
+            return scene
+
     def navigation_metrics(self, pid):
         with self.lock:
             return self.supply.metrics(self.clock()) if pid == self.pid else None
