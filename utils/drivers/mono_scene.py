@@ -86,19 +86,28 @@ class SceneMetadata:
         self.read_counts = None
         self.batch_object_headers = False
         self.field_cache = {}
+        self.owner_header_observation = None
 
     def data(self, address, size):
         if not 0x10000 <= address < 0x7fffffffffff or not 0 < size <= policy.COORD_SCENE_MAX_BYTES:
             raise ValueError('场景数据范围无效')
         if self.read_counts is not None:
             self.read_counts[self.stage] = self.read_counts.get(self.stage, 0) + 1
-        value = self.read(address, size)
+        observation = self.owner_header_observation
+        if observation is not None and isinstance(getattr(self.read, '__self__', None), ReadOnlyPosition):
+            value = self.read(address, size, observation=observation)
+        else:
+            value = self.read(address, size)
         if value is None or len(value) != size:
             raise ValueError('场景数据正在变化')
         return value
 
     def pointer(self, address):
         value = struct.unpack('<Q', self.data(address, 8))[0]
+        observation = self.owner_header_observation
+        if observation is not None and observation['header_step'] == 'vtable_pointer':
+            observation['vtable_status'] = ('empty' if not value else
+                'in_range' if 0x10000 <= value < 0x7fffffffffff else 'out_of_range')
         if value and not 0x10000 <= value < 0x7fffffffffff:
             raise SceneReadIssue('场景引用无效', kind='invalid_reference', stage=self.stage)
         return value
@@ -172,7 +181,12 @@ class SceneMetadata:
                 'from_previous_pot':{'state':'unconfirmed'},
                 'cause':{'state':'unconfirmed','reason':'domain mismatch alone does not prove invalidation, mutation or scene change'}}
             return error
+        observation = self.owner_header_observation
+        if observation is not None:
+            observation['header_step'] = 'vtable_pointer'
         vtable = self.pointer(address)
+        if observation is not None:
+            observation['header_step'] = 'vtable_class_and_domain'
         if not self.batch_object_headers:
             domain=self.pointer(vtable + 16)
             if domain != self.domain:
@@ -183,10 +197,14 @@ class SceneMetadata:
         raw = self.data(vtable, 24)
         klass, domain = struct.unpack_from('<Q', raw)[0], struct.unpack_from('<Q', raw, 16)[0]
         if domain and not 0x10000 <= domain < 0x7fffffffffff:
+            if observation is not None:
+                observation['header_step'] = 'domain_pointer_out_of_range'
             raise SceneReadIssue('场景引用无效', kind='invalid_reference', stage=self.stage)
         if domain != self.domain:
             raise domain_error(vtable,domain,'batched_24_byte_header')
         if klass and not 0x10000 <= klass < 0x7fffffffffff:
+            if observation is not None:
+                observation['header_step'] = 'class_pointer_out_of_range'
             raise SceneReadIssue('场景引用无效', kind='invalid_reference', stage=self.stage)
         return self.cls(klass)
 
@@ -210,7 +228,18 @@ class SceneMetadata:
         raise ValueError('场景对象缺少字段：' + name)
 
     def ref(self, obj, name, *, trace=None):
-        info = self.obj(obj) if trace is None else trace.step('owner_header', lambda: self.obj(obj))
+        if trace is None:
+            info = self.obj(obj)
+        else:
+            observation = {'owner_reference_status': 'nonempty' if obj else 'empty',
+                           'memory_region_status': 'unknown', 'memory_read_status': 'unknown',
+                           'actual_bytes_read': 'unknown', 'native_error_code': 'unknown'}
+            self.owner_header_observation = observation
+            try:
+                info = trace.step('owner_header', lambda: self.obj(obj))
+            finally:
+                self.owner_header_observation = None
+                trace.steps[-1].update(observation)
         if trace is None:
             return self.pointer(self.reference_field_address(obj, info, name))
         address = trace.step('field_address', lambda: self.reference_field_address(obj, info, name))
@@ -691,7 +720,8 @@ class MemorySceneMap:
                 raise
             raise issue from exc
 
-    def _managed_collection(self, owner, field, read, verify_scope, stage, *, trace=None):
+    def _managed_collection(self, owner, field, read, verify_scope, stage, *, trace=None,
+                            inspect_failure=None):
         if trace is not None:
             try:
                 return self._managed_step(stage, lambda: read_linked_collection(
@@ -702,6 +732,13 @@ class MemorySceneMap:
             except (OSError, ValueError) as exc:
                 trace.failed = True
                 trace.context['terminal_issue'] = issue_summary(exc)
+                if inspect_failure is not None and any(
+                        step['stage'] == 'owner_header' and step['state'] == 'failed'
+                        for step in trace.steps):
+                    try:
+                        trace.step('failure_scope_and_membership', inspect_failure)
+                    except (OSError, ValueError):
+                        pass
                 raise
             finally:
                 if trace.failed and len(self.collision_reference_failures) < 16:
@@ -849,6 +886,19 @@ class MemorySceneMap:
             if collision not in meta.dictionary(meta.ref(stream, '_collisions')):
                 changed()
 
+        def inspect_collision_failure(trace, stream, collision):
+            trace.context['process_start_identity'] = self.memory.process_start_identity()
+            trace.context['collision_stream_membership'] = 'unknown'
+            try:
+                verify_stream(stream)
+            except SceneReadIssue as exc:
+                if exc.kind == 'scope_changed':
+                    trace.context['scene_scope'] = 'scope_or_parent_changed'
+                raise
+            trace.context['scene_scope'] = 'verified_at_recheck'
+            current = meta.dictionary(meta.ref(stream, '_collisions'))
+            trace.context['collision_stream_membership'] = 'present' if collision in current else 'absent'
+
         for group in groups:
             self.read_budget.check()
             for collider in self._managed_collection(group, '_colliders', meta.dictionary,
@@ -861,10 +911,15 @@ class MemorySceneMap:
             self.read_budget.check()
             for collision in self._managed_collection(stream, '_collisions', meta.dictionary,
                     lambda s=stream: verify_stream(s), 'managed_stream_collisions'):
+                trace = None
+                if isinstance(meta, SceneMetadata):
+                    trace = SceneReferenceTrace(self.memory.pid, (registry, local_hierarchy), stream, collision)
+                    trace.context.update(owner_reference_source='stream._collisions',
+                                         scene_generation='unknown',
+                                         recovery_decision='existing_policy')
                 for collider in self._managed_collection(collision, 'colliders', meta.array_refs,
                         lambda s=stream,c=collision: verify_collision(s,c), 'managed_collision_array',
-                        trace=SceneReferenceTrace(self.memory.pid, (registry, local_hierarchy), stream, collision)
-                        if isinstance(meta, SceneMetadata) else None):
+                        trace=trace, inspect_failure=lambda: inspect_collision_failure(trace, stream, collision)):
                     self.read_budget.check()
                     if not collider or collider in visited:
                         continue

@@ -8,6 +8,44 @@ from utils.drivers.mono_scene import NavigationSceneMap
 from utils.ui.scene_map_worker import SceneMapWorker
 
 
+def test_native_partial_read_preserves_byte_count_and_error(monkeypatch):
+    import ctypes
+    from utils.drivers.coordinate_memory import ReadOnlyPosition
+
+    memory = ReadOnlyPosition.__new__(ReadOnlyPosition)
+    memory.handle = 1
+    memory.kernel = Mock()
+    def read(handle, address, buffer, size, count):
+        count._obj.value = 3
+        return False
+    memory.kernel.ReadProcessMemory.side_effect = read
+    monkeypatch.setattr(ctypes, 'get_last_error', lambda: 299)
+    memory.reference_region = Mock(return_value={'memory_region_status': 'committed_readable'})
+    observation = {}
+    assert memory._read(0x10000, 8, observation=observation) is None
+    assert observation == {'actual_bytes_read': 3, 'requested_bytes': 8,
+                           'native_error_code': 299, 'memory_read_status': 'partial',
+                           'memory_region_status': 'committed_readable'}
+
+
+@pytest.mark.parametrize(('state', 'protect', 'expected'), [
+    (0x10000, 0, 'free'), (0x2000, 0, 'reserved'),
+    (0x1000, 0x104, 'committed_unreadable'), (0x1000, 4, 'committed_readable'),
+])
+def test_native_region_observation(state, protect, expected):
+    from utils.drivers.coordinate_memory import ReadOnlyPosition
+
+    memory = ReadOnlyPosition.__new__(ReadOnlyPosition)
+    memory.handle = 1
+    memory.kernel = Mock()
+    def query(handle, address, output, size):
+        output._obj.state = state
+        output._obj.protect = protect
+        return size
+    memory.kernel.VirtualQueryEx.side_effect = query
+    assert memory.reference_region(0x10000)['memory_region_status'] == expected
+
+
 @pytest.mark.parametrize(('failure', 'expected'), [
     ('owner_header', ['owner_header']),
     ('field_address', ['owner_header', 'field_address']),

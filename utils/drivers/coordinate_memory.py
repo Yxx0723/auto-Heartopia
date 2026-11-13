@@ -167,12 +167,42 @@ class ReadOnlyPosition:
             return info.base, info.size, Path(file.value)
         raise ValueError('游戏模块未加载，请进入角色后再开始')
 
-    def _read(self, address, size):
+    def _read(self, address, size, *, observation=None):
         data, count = ctypes.create_string_buffer(size), ctypes.c_size_t()
-        if not self.kernel.ReadProcessMemory(self.handle, address, data, size, ctypes.byref(count)) \
-                or count.value != size:
+        success = self.kernel.ReadProcessMemory(self.handle, address, data, size, ctypes.byref(count))
+        if not success or count.value != size:
+            if observation is not None:
+                error = ctypes.get_last_error() if not success else None
+                observation.update(actual_bytes_read=count.value, requested_bytes=size,
+                                   native_error_code=error,
+                                   memory_read_status='partial' if count.value else 'failed')
+                observation.update(self.reference_region(address))
             return None
         return data.raw
+
+    def reference_region(self, address):
+        from utils.drivers.food_inventory import MemoryInfo
+
+        query = self.kernel.VirtualQueryEx
+        query.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.POINTER(MemoryInfo), ctypes.c_size_t]
+        query.restype = ctypes.c_size_t
+        info = MemoryInfo()
+        if query(self.handle, address, ctypes.byref(info), ctypes.sizeof(info)) != ctypes.sizeof(info):
+            return {'memory_region_status': 'unknown', 'region_error_code': ctypes.get_last_error()}
+        readable = not info.protect & 0x100 and info.protect & 0xff in (2, 4, 8, 0x20, 0x40, 0x80)
+        status = {0x10000: 'free', 0x2000: 'reserved',
+                  0x1000: 'committed_readable' if readable else 'committed_unreadable'}
+        return {'memory_region_status': status.get(info.state, 'unknown'),
+                'memory_region_protection': info.protect}
+
+    def process_start_identity(self):
+        query = self.kernel.GetProcessTimes
+        query.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+        query.restype = wintypes.BOOL
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not query(self.handle, *(ctypes.byref(value) for value in times)):
+            return 'unknown'
+        return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
 
     def read(self):
         return self.snapshot()['position']
