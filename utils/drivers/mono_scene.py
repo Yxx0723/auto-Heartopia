@@ -714,7 +714,7 @@ class MemorySceneMap:
         """
         started = time.monotonic()
         stats = {'candidates': len(candidates), 'streams': 0, 'removed': 0, 'verified': 0,
-                 'unresolved': 0, 'seconds': 0., 'recovered': False}
+                 'unresolved': 0, 'seconds': 0., 'recovered': False, 'error': None}
         try:
             self._phase('managed_parent_membership')
             removed, remaining = self._removed_managed_candidates(candidates, verify_stream)
@@ -735,6 +735,11 @@ class MemorySceneMap:
             stats['recovered'] = (bool(candidates)
                                   and (stats['removed'] + stats['verified']) == stats['candidates'])
             return stats
+        except (OSError, ValueError) as exc:
+            # The caller keeps the batch unknown on failure; record why so a
+            # silent downgrade to partial is never left unexplained.
+            stats['error'] = f'{type(exc).__name__}: {exc}'[:160]
+            raise
         finally:
             stats['seconds'] = max(0., time.monotonic()-started)
             self.managed_parent_recheck_stats = stats
