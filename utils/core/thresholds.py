@@ -391,12 +391,17 @@ COORD_SCENE_MIN_IDLE_SECONDS = .05
 COORD_SCENE_COLLECTION_ATTEMPTS = 2
 COORD_SCENE_READ_EXTRA_ATTEMPTS = 8
 COORD_SCENE_READ_EXTRA_SECONDS = .1
-# Bounded parent-transform recheck. Every candidate still has to prove its own
-# group, hierarchy, live collider array and collision stream membership; only
-# the number of candidates that may run the proof inside one scan is raised.
-# Larger batches fall back to the existing scan-level retry, never to a partial
-# publication. The extra read allowance is granted per scan, not per candidate.
-COORD_SCENE_PARENT_RECHECK_CANDIDATES = 16
+# Bounded parent-transform recheck, resolved in two levels. Level one settles a
+# whole batch per collision stream: a collider whose collision left a verified
+# stream was unloaded, so it is neither an obstacle nor an unknown. That batch
+# can be as large as a streaming unload, hence the wide collection cap; the
+# per-object proof below it stays small because each proof also re-reads the
+# registry. Neither level may publish an unproven collider: whatever stays a
+# member without a proven parent keeps the snapshot ineligible.
+COORD_SCENE_PARENT_RECHECK_CANDIDATES = 1024
+COORD_SCENE_PARENT_PROOF_CANDIDATES = 4
+# Engineering read allowance for the recheck: one bounded re-sampling per
+# stream, not per candidate.
 COORD_SCENE_PARENT_RECHECK_SECONDS = .05
 # Same-scope transient recovery only; engineering backoff/log budgets.
 COORD_SCENE_TRANSIENT_RETRY_SECONDS = .1

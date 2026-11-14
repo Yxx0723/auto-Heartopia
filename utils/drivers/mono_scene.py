@@ -651,40 +651,97 @@ class MemorySceneMap:
     def parent_recheck_candidate(self, meta, rootless_candidates):
         """Whether one more rootless collider may join this scan's recheck.
 
-        The cap is a bounded batch size, not a completeness shortcut: a larger
-        batch keeps the existing scan-level retry instead of a partial publish.
+        The cap bounds collection only, not completeness: a streaming unload can
+        legitimately empty a large batch of parents at once, and those are
+        settled per stream without a per-object read burst. The expensive
+        per-object proof stays capped separately by
+        ``COORD_SCENE_PARENT_PROOF_CANDIDATES``.
         """
         return (self.check_parent_recovery and getattr(self, 'navigation_only', False)
                 and isinstance(meta, SceneMetadata)
                 and len(rootless_candidates) < policy.COORD_SCENE_PARENT_RECHECK_CANDIDATES)
 
-    def _run_parent_recheck(self, candidates, verify_collision, owners, active):
-        """Prove every candidate parent inside this scan, bounded by the cap.
+    def _removed_managed_candidates(self, candidates, verify_stream):
+        """Prove which candidates already left the live collision set.
 
-        Each candidate still runs the full ``_live_managed_parent`` proof: live
-        collision array, collision stream membership, group ownership and the
-        hierarchy back-reference. Stops at the first unproven candidate so an
-        unknown object keeps blocking navigation eligibility.
+        One stable double read of a stream's collision collection settles every
+        candidate sharing that stream, so a large unload costs two reads per
+        stream instead of a read burst per collider. ``with_stamp=True`` exposes
+        the Mono dictionary ``_version`` stamp, so an actively mutating
+        collection is never mistaken for a removal.
+
+        A collider whose collision left a verified stream has been unloaded: it
+        stays unpublished exactly as before and stops being an unknown, because
+        it is not an obstacle anymore. Candidates still present keep the
+        per-object proof and therefore keep blocking navigation.
+        """
+        meta = self.meta
+        streams = {item[0] for item in candidates}
+        # One bounded re-sampling per stream, never per candidate.
+        self.read_budget.grant(len(streams) * (1 + self.MEMBERSHIP_RECHECK_LIMIT),
+                               len(streams) * policy.COORD_SCENE_PARENT_RECHECK_SECONDS)
+        settled = {}
+        for stream in streams:
+            for _ in range(self.MEMBERSHIP_RECHECK_LIMIT):
+                self.read_budget.check()
+                verify_stream(stream)
+                first, stamp = meta.dictionary(meta.ref(stream, '_collisions'), with_stamp=True)
+                self.read_budget.check()
+                current, current_stamp = meta.dictionary(meta.ref(stream, '_collisions'), with_stamp=True)
+                if current_stamp == stamp and current == first:
+                    settled[stream] = current
+                    break
+            if stream not in settled:
+                issue = SceneReadIssue('碰撞流成员持续变化，正在重新读取地图', kind='mutation',
+                                       stage=meta.stage, retryable=True, scope_verified=True)
+                issue.code = 'collision_membership_unstable'
+                raise issue
+        removed, remaining = [], []
+        for item in candidates:
+            (remaining if item[1] in settled[item[0]] else removed).append(item)
+        return removed, remaining
+
+    def _run_parent_recheck(self, candidates, verify_collision, verify_stream, owners, active):
+        """Resolve a rootless batch in two bounded levels.
+
+        Level one settles unloaded colliders per stream (see
+        ``_removed_managed_candidates``). Level two keeps the original
+        per-object proof for whatever is still a member: live collision array,
+        collision stream membership, group ownership and the hierarchy
+        back-reference, stopping at the first unproven candidate. Beyond the
+        proof cap the batch simply stays unknown instead of spending an
+        unbounded read burst.
         """
         started = time.monotonic()
-        stats = {'candidates': len(candidates), 'verified': 0, 'seconds': 0.,
-                 'recovered': False}
-        # Exactly one extra read per candidate; the time and cancellation
-        # checks inside reserve() stay in force and nothing is pre-charged.
-        self.read_budget.grant(len(candidates), policy.COORD_SCENE_PARENT_RECHECK_SECONDS)
+        stats = {'candidates': len(candidates), 'streams': 0, 'removed': 0, 'verified': 0,
+                 'unresolved': 0, 'seconds': 0., 'recovered': False}
         try:
-            for stream, collision, collider, klass in candidates:
-                self.read_budget.check()
-                if not self._live_managed_parent(stream, collision, collider, klass,
-                                                 verify_collision, owners, active):
-                    break
-                stats['verified'] += 1
-            stats['recovered'] = bool(candidates) and stats['verified'] == stats['candidates']
+            self._phase('managed_parent_membership')
+            removed, remaining = self._removed_managed_candidates(candidates, verify_stream)
+            stats['streams'] = len({item[0] for item in candidates})
+            stats['removed'] = len(removed)
+            stats['unresolved'] = len(remaining)
+            if len(remaining) <= policy.COORD_SCENE_PARENT_PROOF_CANDIDATES:
+                # Exactly one extra read per candidate; the time and cancellation
+                # checks inside reserve() stay in force and nothing is pre-charged.
+                self.read_budget.grant(len(remaining), 0.)
+                self._phase('managed_parent_recheck')
+                for stream, collision, collider, klass in remaining:
+                    self.read_budget.check()
+                    if not self._live_managed_parent(stream, collision, collider, klass,
+                                                     verify_collision, owners, active):
+                        break
+                    stats['verified'] += 1
+            stats['recovered'] = (bool(candidates)
+                                  and (stats['removed'] + stats['verified']) == stats['candidates'])
             return stats
         finally:
             stats['seconds'] = max(0., time.monotonic()-started)
             self.managed_parent_recheck_stats = stats
-            self.managed_parent_recovered = stats['recovered']
+            # Only a proven live parent requires rebuilt geometry, and that
+            # rebuild is the whole-scan rescan below. A batch that was merely
+            # unloaded is already complete on this read.
+            self.managed_parent_recovered = stats['recovered'] and stats['verified'] > 0
 
     def _live_managed_parent(self, stream, collision, collider, klass, verify_collision, owners, active):
         """Prove a live parent before paying for another complete observation."""
@@ -1294,7 +1351,12 @@ class MemorySceneMap:
             self._phase('managed_parent_recheck')
             meta.stage = 'managed_parent_recheck'
             try:
-                self._run_parent_recheck(rootless_candidates, verify_collision, owners, active)
+                resolved = self._run_parent_recheck(rootless_candidates, verify_collision,
+                                                    verify_stream, owners, active)
+                # Proven-removed and proven-live colliders both stop being an
+                # unknown; anything else keeps the snapshot ineligible below.
+                managed_unknown = max(0, managed_unknown
+                                      - resolved['removed'] - resolved['verified'])
             except (OSError, ValueError) as exc:
                 if isinstance(exc, SceneReadIssue) and (exc.kind in ('cancelled', 'scope_changed')
                         or (exc.kind == 'mutation' and exc.scope_verified)):

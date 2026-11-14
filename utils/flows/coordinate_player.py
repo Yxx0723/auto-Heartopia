@@ -1662,6 +1662,11 @@ class _Follower:
                         context = {'state': 'unavailable', 'contact_confirmed': False,
                                    'diagnostic_error': str(exc)}
                     scene_snapshot = getattr(self.navigator, 'scene', None) or {}
+                    parts = (scene_snapshot.get('quality') or {}).get('parts') or {}
+                    starts = [parts.get(key, {}).get('observed_from')
+                              for key in ('managed_collisions', 'native_collisions')
+                              if isinstance(parts.get(key), dict)]
+                    starts = [value for value in starts if isinstance(value, (int, float))]
                     self.report('recovering', f'点位 {index + 1}/{len(points)} · 检测到移动无进展，已记录现场',
                                 waypoint=index+1, waypoint_count=len(points), position=list(position),
                                 target=list(points[index]['position']), steering_target=list(target),
@@ -1672,7 +1677,7 @@ class _Follower:
                                 physical_stall=physically_stalled,
                                 point_drive_seconds=self.travel_progress.elapsed,
                                 navigation_snapshot_context=scene_snapshot.get('cache_context'),
-                                navigation_snapshot_generated_at=scene_snapshot.get('generated_at'),
+                                navigation_snapshot_generated_at=min(starts) if starts else None,
                                 navigation_reference_revision=getattr(self.navigator, 'reference_revision', None),
                                 navigation_last_decision=getattr(self.navigator, 'last_decision', None),
                                 navigation_wait_codes=dict(getattr(self, 'navigation_wait_codes', {}) or {}),
