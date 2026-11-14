@@ -20,9 +20,13 @@ from utils.core.scene_map import collider_footprint
 
 class NavigationWait(Exception):
     """No fresh geometry or no route; retry without advancing the saved point."""
-    def __init__(self, message, reason='no_path'):
+    def __init__(self, message, reason='no_path', code=None):
         super().__init__(message)
         self.reason = reason
+        # Optional sub-reason for diagnosis only. ``reason`` keeps driving the
+        # recovery branches; ``code`` separates a throttled retry from a real
+        # search failure so repeated waits are never miscounted as fresh tries.
+        self.code = code
 
 
 def point_segment_distance(point, a, b):
@@ -288,7 +292,7 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
         found_local = reached is not None
         if reached is None:
             if remaining <= horizon or remaining - math.dist(world(best), goal) < policy.COORD_NAV_MIN_PROGRESS:
-                raise NavigationWait('暂未找到可通行路径，正在重新寻路')
+                raise NavigationWait('暂未找到可通行路径，正在重新寻路', code='search_empty')
             reached = best
         nodes = [reached]
         while nodes[-1] != (0, 0):
@@ -646,7 +650,7 @@ class LocalNavigator:
             self.path = []
         if not self.path:
             if now < self.retry_at:
-                raise NavigationWait('暂未找到可通行路径，正在重新寻路')
+                raise NavigationWait('暂未找到可通行路径，正在重新寻路', code='retry_wait')
             # Reuse a map only while it covers the entire next search window.
             profiles = [(policy.COORD_NAV_SEARCH_RADIUS, policy.COORD_NAV_GRID_STEP,
                          policy.COORD_NAV_MAX_NODES, policy.COORD_NAV_HORIZON),
@@ -715,7 +719,7 @@ class LocalNavigator:
                 'escalated':escalate,'reached_local':bool(self.path and getattr(self.path,'reached_local',True))}
             if not self.path:
                 self.retry_at = now + policy.COORD_NAV_RETRY_SECONDS
-                raise NavigationWait('暂未找到可通行路径，正在重新寻路')
+                raise NavigationWait('暂未找到可通行路径，正在重新寻路', code='search_empty')
             self.retry_at = 0.
             self.last_decision = {'kind':'alternative_approach' if self.risks.count else 'normal_plan',
                                   'risk_count':self.risks.count, 'risk_revision':self.risks.revision,
@@ -739,5 +743,5 @@ class LocalNavigator:
         if self.risks.repeats_failed_entry(current, (selected[0], selected[2]), position[1]):
             self.invalidate()
             self.retry_at = now + policy.COORD_NAV_RETRY_SECONDS
-            raise NavigationWait('新路径仍从重复失败方向接近，退开后更换入口', reason='no_path')
+            raise NavigationWait('新路径仍从重复失败方向接近，退开后更换入口', reason='no_path', code='repeat_entry')
         return selected

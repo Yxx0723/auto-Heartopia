@@ -391,6 +391,13 @@ COORD_SCENE_MIN_IDLE_SECONDS = .05
 COORD_SCENE_COLLECTION_ATTEMPTS = 2
 COORD_SCENE_READ_EXTRA_ATTEMPTS = 8
 COORD_SCENE_READ_EXTRA_SECONDS = .1
+# Bounded parent-transform recheck. Every candidate still has to prove its own
+# group, hierarchy, live collider array and collision stream membership; only
+# the number of candidates that may run the proof inside one scan is raised.
+# Larger batches fall back to the existing scan-level retry, never to a partial
+# publication. The extra read allowance is granted per scan, not per candidate.
+COORD_SCENE_PARENT_RECHECK_CANDIDATES = 16
+COORD_SCENE_PARENT_RECHECK_SECONDS = .05
 # Same-scope transient recovery only; engineering backoff/log budgets.
 COORD_SCENE_TRANSIENT_RETRY_SECONDS = .1
 COORD_SCENE_DIAGNOSTIC_SECONDS = 5.

@@ -1566,6 +1566,23 @@ class _Follower:
                         target = self.navigator.next_target(position, target, check=self.guard, before_plan=self.planning_release)
                     except NavigationWait as exc:
                         self.release()
+                        # Diagnosis only: a throttled retry and a real empty
+                        # search share reason='no_path', so they are counted
+                        # separately here. Recovery branches still read reason.
+                        wait_code = getattr(exc, 'code', None) or exc.reason
+                        wait_counts = getattr(self, 'navigation_wait_codes', None)
+                        if wait_counts is None:
+                            wait_counts = self.navigation_wait_codes = {}
+                        wait_counts[wait_code] = wait_counts.get(wait_code, 0) + 1
+                        scene_context = (getattr(self.navigator, 'scene', None) or {}).get('cache_context')
+                        previous_failure = getattr(self, 'last_navigation_failure', None)
+                        source_changed = (previous_failure is None
+                                          or previous_failure.get('scene_context') != scene_context
+                                          or previous_failure.get('waypoint') != index)
+                        self.last_navigation_failure = {'scene_context': scene_context,
+                                                        'waypoint': index, 'code': wait_code,
+                                                        'position': list(position),
+                                                        'search': dict(getattr(self.navigator, 'search_diagnostics', None) or {})}
                         if exc.reason == 'scene':
                             if self.scene_wait_interval is None:
                                 self.scene_wait_count += 1
@@ -1601,7 +1618,11 @@ class _Follower:
                         if now - self.last_report >= .5:
                             self.report('navigating', f'点位 {index + 1}/{len(points)} · {exc} · F6暂停 · F9停止',
                                         waypoint=index + 1, waypoint_count=len(points), navigation_path=[],
-                                        navigation_wait_reason=exc.reason, target=points[index]['position'])
+                                        navigation_wait_reason=exc.reason, target=points[index]['position'],
+                                        navigation_wait_code=wait_code,
+                                        navigation_wait_codes=dict(wait_counts),
+                                        navigation_source_changed=source_changed,
+                                        navigation_search=dict(getattr(self.navigator, 'search_diagnostics', None) or {}))
                             self.last_report = now
                         try:
                             self.wait(.1)
@@ -1640,6 +1661,7 @@ class _Follower:
                         # Optional diagnostics must never abort recovery.
                         context = {'state': 'unavailable', 'contact_confirmed': False,
                                    'diagnostic_error': str(exc)}
+                    scene_snapshot = getattr(self.navigator, 'scene', None) or {}
                     self.report('recovering', f'点位 {index + 1}/{len(points)} · 检测到移动无进展，已记录现场',
                                 waypoint=index+1, waypoint_count=len(points), position=list(position),
                                 target=list(points[index]['position']), steering_target=list(target),
@@ -1649,6 +1671,11 @@ class _Follower:
                                     if physically_stalled else 0.),
                                 physical_stall=physically_stalled,
                                 point_drive_seconds=self.travel_progress.elapsed,
+                                navigation_snapshot_context=scene_snapshot.get('cache_context'),
+                                navigation_snapshot_generated_at=scene_snapshot.get('generated_at'),
+                                navigation_reference_revision=getattr(self.navigator, 'reference_revision', None),
+                                navigation_last_decision=getattr(self.navigator, 'last_decision', None),
+                                navigation_wait_codes=dict(getattr(self, 'navigation_wait_codes', {}) or {}),
                                 collision_context=context)
                     if self.navigator:
                         self.approach_attempt(index)

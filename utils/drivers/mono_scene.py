@@ -648,6 +648,44 @@ class MemorySceneMap:
             return self.meta.ref(transform, '_hierarchy')
         return self.meta.ref(owner, '_hierarchy')
 
+    def parent_recheck_candidate(self, meta, rootless_candidates):
+        """Whether one more rootless collider may join this scan's recheck.
+
+        The cap is a bounded batch size, not a completeness shortcut: a larger
+        batch keeps the existing scan-level retry instead of a partial publish.
+        """
+        return (self.check_parent_recovery and getattr(self, 'navigation_only', False)
+                and isinstance(meta, SceneMetadata)
+                and len(rootless_candidates) < policy.COORD_SCENE_PARENT_RECHECK_CANDIDATES)
+
+    def _run_parent_recheck(self, candidates, verify_collision, owners, active):
+        """Prove every candidate parent inside this scan, bounded by the cap.
+
+        Each candidate still runs the full ``_live_managed_parent`` proof: live
+        collision array, collision stream membership, group ownership and the
+        hierarchy back-reference. Stops at the first unproven candidate so an
+        unknown object keeps blocking navigation eligibility.
+        """
+        started = time.monotonic()
+        stats = {'candidates': len(candidates), 'verified': 0, 'seconds': 0.,
+                 'recovered': False}
+        # Exactly one extra read per candidate; the time and cancellation
+        # checks inside reserve() stay in force and nothing is pre-charged.
+        self.read_budget.grant(len(candidates), policy.COORD_SCENE_PARENT_RECHECK_SECONDS)
+        try:
+            for stream, collision, collider, klass in candidates:
+                self.read_budget.check()
+                if not self._live_managed_parent(stream, collision, collider, klass,
+                                                 verify_collision, owners, active):
+                    break
+                stats['verified'] += 1
+            stats['recovered'] = bool(candidates) and stats['verified'] == stats['candidates']
+            return stats
+        finally:
+            stats['seconds'] = max(0., time.monotonic()-started)
+            self.managed_parent_recheck_stats = stats
+            self.managed_parent_recovered = stats['recovered']
+
     def _live_managed_parent(self, stream, collision, collider, klass, verify_collision, owners, active):
         """Prove a live parent before paying for another complete observation."""
         if not self.read_budget.reserve():
@@ -704,8 +742,21 @@ class MemorySceneMap:
             current = self.memory.snapshot()
             if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
                 raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
-        return read_collection(lambda: meta.static_ref(hierarchy_class, 'ActiveHierarchies'),
-                               meta.dictionary, guard, budget, stage=meta.stage)
+        # Registry reads run inline on the scanning thread; there is no second
+        # initialisation owner. Record the attempt count so a repeated retry can
+        # never be mistaken for a duplicate registry build.
+        before = budget.retries
+        started = time.monotonic()
+        try:
+            return read_collection(lambda: meta.static_ref(hierarchy_class, 'ActiveHierarchies'),
+                                   meta.dictionary, guard, budget, stage=meta.stage)
+        finally:
+            rows = self.__dict__.setdefault('registry_stats', {}).setdefault(
+                meta.stage if isinstance(meta.stage, str) else 'registry',
+                {'reads': 0, 'retries': 0, 'seconds': 0.})
+            rows['reads'] += 1
+            rows['retries'] += max(0, budget.retries - before)
+            rows['seconds'] = round(rows['seconds'] + max(0., time.monotonic()-started), 4)
 
     def snapshot(self):
         try:
@@ -736,6 +787,7 @@ class MemorySceneMap:
     def _snapshot_attempt(self, *, check_parent_recovery=True):
         self.check_parent_recovery = check_parent_recovery
         self.managed_parent_recovered = False
+        self.managed_parent_recheck_stats = None
         self.read_budget = RecoveryBudget(cancelled=getattr(self, 'cancelled', lambda: False))
         self.phase_times, self.phase_name, self.phase_started = {}, 'registry', time.monotonic()
         self.meta.read_counts = {} if getattr(self, 'navigation_only', False) else None
@@ -745,6 +797,8 @@ class MemorySceneMap:
         self.linked_recovery_observations = {}
         self.collision_reference_failures = []
         self.missing_transform_owners = {}
+        self.native_rebuild_stats = None
+        self.registry_stats = {}
         self.detached_stats = {}
         try:
             return self._snapshot()
@@ -763,6 +817,9 @@ class MemorySceneMap:
                                     'linked_recovery_observations': self.linked_recovery_observations,
                                     'collision_reference_failures': self.collision_reference_failures,
                                     'missing_transform_owners': self.missing_transform_owners,
+                                    'managed_parent_recheck': self.managed_parent_recheck_stats,
+                                    'native_rebuild': self.native_rebuild_stats,
+                                    'registry_stats': self.registry_stats,
                                     'detached_boxes': dict(self.detached_stats)}
 
     def _managed_step(self, stage, operation):
@@ -1098,8 +1155,7 @@ class MemorySceneMap:
                         if not owner and not hierarchy:
                             if detached.consider(collider,info,stream):
                                 continue
-                            if (self.check_parent_recovery and getattr(self, 'navigation_only', False)
-                                    and isinstance(meta, SceneMetadata) and len(rootless_candidates) < 5):
+                            if self.parent_recheck_candidate(meta, rootless_candidates):
                                 rootless_candidates.append((stream, collision, collider, info['address']))
                             stream_id = SceneReferenceTrace.identity(stream)
                             rows = self.missing_transform_owners
@@ -1148,18 +1204,33 @@ class MemorySceneMap:
         meta.stage = 'native_collisions'
         self._phase('native_collisions')
         world_stats, world_state = {}, 'unavailable'
+        rebuild = {'attempts': 0, 'created': 0, 'discarded': 0, 'seconds': 0.,
+                   'reason': None}
+        rebuild_started = time.monotonic()
         try:
             if self.native is None:
                 assembly_base, _, _ = self.memory._module('GameAssembly.dll')
                 layout = native_scene_layout(self.memory.profile)
                 self.native = NativeWorldCollisions(self.memory._read, assembly_base, layout)
+                rebuild['created'] += 1
+            rebuild['attempts'] = 1
             world_colliders, world_stats = self.native.snapshot()
             colliders.extend(world_colliders)
             world_state = 'ready'
-        except ValueError:
+        except ValueError as exc:
             # Streaming replacement invalidates this read; never retain an old
-            # world's obstacles. The worker retries with a fresh snapshot.
+            # world's obstacles, and never re-read through a reader whose
+            # geometry cache belongs to the replaced layer. The next scan builds
+            # a fresh reader; the worker already retries after the minimum idle
+            # interval, so the outage is exactly one full scan and the old
+            # geometry is never published as new.
             self.native = None
+            rebuild['discarded'] += 1
+            rebuild['reason'] = f'{type(exc).__name__}: {exc}'[:160]
+        finally:
+            rebuild['seconds'] = max(0., time.monotonic()-rebuild_started)
+            rebuild['state'] = world_state
+            self.native_rebuild_stats = rebuild
         native_observed_to = time.monotonic()
         meta.stage = 'scope_validation'
         self._phase('scope_validation')
@@ -1218,13 +1289,12 @@ class MemorySceneMap:
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
             raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
         if (world_state == 'ready' and not discovery_unknown
-                and 0 < managed_unknown == len(rootless_candidates) <= 4):
+                and 0 < managed_unknown == len(rootless_candidates)
+                <= policy.COORD_SCENE_PARENT_RECHECK_CANDIDATES):
             self._phase('managed_parent_recheck')
             meta.stage = 'managed_parent_recheck'
             try:
-                self.managed_parent_recovered = all(self._live_managed_parent(
-                    stream, collision, collider, klass, verify_collision, owners, active)
-                    for stream, collision, collider, klass in rootless_candidates)
+                self._run_parent_recheck(rootless_candidates, verify_collision, owners, active)
             except (OSError, ValueError) as exc:
                 if isinstance(exc, SceneReadIssue) and (exc.kind in ('cancelled', 'scope_changed')
                         or (exc.kind == 'mutation' and exc.scope_verified)):
