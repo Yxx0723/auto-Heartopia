@@ -333,14 +333,25 @@ class _Follower:
         return min(travel,max(.02,distance(position,target))) if precise else travel
 
     def apply_movement(self,keys,position,target):
+        # Keep the last decision for the stall report: an empty set means the
+        # navigator found no clear pulse at all, which is not the same failure as
+        # pressing keys and not moving.
+        self.last_applied_keys = set(keys)
         self.set_keys(keys)
 
     def wait_movement(self,started,remaining,final):
         if final:
             self.clock.sleep(min(policy.COORD_SAMPLE_SECONDS,
                                  max(.01,remaining/(2*self.calibration_speed))))
-            self.release()
-            self.wait(policy.COORD_NAV_APPROACH_SETTLE_SECONDS)
+            # Release only on arrival. Releasing every iteration between the
+            # approach radius and the reach radius turned the last ~0.4 units
+            # into a 0.05 s press / 0.08 s release creep: the character never
+            # accumulated speed, so the remaining distance stopped improving by
+            # COORD_STUCK_DISTANCE and the no-progress window fired as a
+            # movement stall. Arrival is still decided geometrically every tick.
+            if remaining <= policy.COORD_REACH_RADIUS:
+                self.release()
+                self.wait(policy.COORD_NAV_APPROACH_SETTLE_SECONDS)
         else:
             self.clock.sleep(policy.COORD_SAMPLE_SECONDS)
 
@@ -1671,6 +1682,9 @@ class _Follower:
                                 waypoint=index+1, waypoint_count=len(points), position=list(position),
                                 target=list(points[index]['position']), steering_target=list(target),
                                 input_keys=attempted_keys, incident_kind='movement_stall',
+                                movement_remaining=remaining,
+                                movement_best_remaining=None if best == math.inf else best,
+                                movement_last_keys=sorted(getattr(self,'last_applied_keys',()) or ()),
                                 stalled_seconds=max(now-progress_at,
                                     self.travel_progress.elapsed-self.travel_progress.motion_at
                                     if physically_stalled else 0.),
