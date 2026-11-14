@@ -427,6 +427,7 @@ class LocalNavigator:
         Moving outward from existing padding uses the same escape rule as A*.
         """
         preferred = direction_keys(position, target, basis, reach_radius=reach_radius)
+        self.steering_rejections = []
         if preferred and preferred_keys is not None:
             preferred_keys = set(preferred_keys)
             if preferred_keys not in [set(k) for k in ('w', 'd', 's', 'a', 'wd', 'ds', 'sa', 'aw')]:
@@ -448,17 +449,26 @@ class LocalNavigator:
             # physical clearance still checks the actual pulse distance.
             risk_end = tuple(a+b*max(travel, policy.COORD_APPROACH_FOCUS_DISTANCE
                                     + policy.COORD_APPROACH_REPEAT_LATERAL) for a,b in zip(start,unit))
-            repeated = self.risks.repeats_failed_entry(start, risk_end, position[1])
-            return (obstacles.clear(start, end, escape=True) and not repeated,
+            repeated = self.risks.failed_entry_ids(start, risk_end, position[1])
+            clear = obstacles.clear(start, end, escape=True)
+            if not clear or repeated:
+                self.steering_rejections.append({
+                    'candidate_direction': ''.join(sorted(keys)),
+                    'failed_entry_id': repeated,
+                    'candidate_rejection_reason': [
+                        reason for rejected, reason in ((not clear, 'geometry'), (repeated, 'failed_entry'))
+                        if rejected]})
+            return (clear and not repeated,
                     sum(a * b for a, b in zip(delta, unit)) - obstacles.risk_cost(start,end))
 
         preferred_vector = key_vector(preferred,basis)
         norm = math.hypot(*preferred_vector)
         preferred_end = tuple(a+b/norm*travel for a,b in zip(start,preferred_vector))
-        if candidate(preferred)[0] and obstacles.risk_cost(start,preferred_end) == 0:
+        preferred_result = candidate(preferred)
+        if preferred_result[0] and obstacles.risk_cost(start,preferred_end) == 0:
             return preferred
         alternatives = [(score, set(keys)) for keys in ('w', 'd', 's', 'a', 'wd', 'ds', 'sa', 'aw')
-                        for clear, score in [candidate(set(keys))] if clear]
+                        for clear, score in [preferred_result if set(keys) == preferred else candidate(set(keys))] if clear]
         return max(alternatives, key=lambda item: item[0])[1] if alternatives else set()
 
     def recovery_keys(self, position, target, basis, travel):

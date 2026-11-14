@@ -107,7 +107,10 @@ class ApproachRisks:
             self.revision += 1
 
     def repeats_failed_entry(self, start, end, height, mode='walk'):
-        """Reject a repeated local approach, not a new physical wall.
+        return bool(self.failed_entry_ids(start, end, height, mode))
+
+    def failed_entry_ids(self, start, end, height, mode='walk'):
+        """Identify a repeated local approach, not a new physical wall.
 
         An isolated failure stays a soft cost. Two independent failures must
         overlap this directed corridor, height band and movement mode. Reverse
@@ -115,9 +118,9 @@ class ApproachRisks:
         """
         length = math.dist(start, end)
         if length < 1e-9:
-            return False
+            return ()
         direction = tuple((b-a)/length for a, b in zip(start, end))
-        matches = 0
+        matches = []
         for entry in self.entries:
             if entry['expires_at'] <= self.clock() or entry['mode'] != mode \
                     or abs(height-entry['start'][1]) > policy.COORD_APPROACH_HEIGHT_BAND:
@@ -127,8 +130,8 @@ class ApproachRisks:
             if sum(a*b for a, b in zip(direction, entry['direction'])) < policy.COORD_DIRECTION_INDEPENDENT_COSINE:
                 continue
             if segment_gap(entry['focus'], start, end) <= policy.COORD_APPROACH_REPEAT_LATERAL:
-                matches += 1
-        return matches >= policy.COORD_APPROACH_REPEAT_FAILURES
+                matches.append(entry['identity'])
+        return tuple(matches) if len(matches) >= policy.COORD_APPROACH_REPEAT_FAILURES else ()
 
     def revalidate(self, obstacles):
         entries = [e for e in self.entries if e['geometry'] is None or local_geometry(obstacles,e['start']) in (

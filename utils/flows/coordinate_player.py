@@ -358,6 +358,78 @@ class _Follower:
     def recover_no_path(self,target,basis,segment_start,index,total):
         return self.recover(target,basis,segment_start,index,total)
 
+    def terminal_retreat(self, destination, basis, origin):
+        """Leave the blocked entry using freshly checked, leased movement."""
+        navigator = self.navigator
+        scope = scene_scope(navigator.scene)
+        if scope is None:
+            raise NavigationWait('退让前无法确认场景', reason='scene')
+        position = self.read(force=True)
+        if (distance(position, destination) <= policy.COORD_REACH_RADIUS
+                and abs(position[1] - destination[1]) <= policy.COORD_MAX_HEIGHT_ERROR):
+            return 'arrival', position
+        goal = navigator.path_escape_target(position, destination, 1, origin,
+                                            self.guard, self.release)
+        if scene_scope(navigator.scene) != scope:
+            raise NavigationWait('退让规划期间场景已改变', reason='scene')
+        if goal is None:
+            return 'no_safe_exit', position
+        scene = navigator.scene or {}
+        context = (scene.get('cache_context'), scene.get('terrain_revision'))
+        end = self.clock.monotonic() + policy.COORD_RECOVERY_LEG_SECONDS
+        while self.clock.monotonic() < end:
+            started = self.clock.monotonic()
+            position = self.read(force=True)
+            remaining = distance(position, goal)
+            if remaining <= policy.COORD_REACH_RADIUS:
+                return 'replan', position
+            travel = self.steering_travel(position, goal, True)
+            keys = navigator.path_escape_keys(position, goal, basis, travel, context,
+                                             self.guard, self.release)
+            if not keys:
+                return 'no_safe_exit_pulse', position
+            if abs(position[1] - origin[1]) > policy.COORD_MAX_HEIGHT_ERROR:
+                return 'exit_height_changed', position
+            if self.clock.monotonic() >= end:
+                return 'exit_timeout', position
+            self.steering_travel(position, goal, True)  # arm against the refreshed collision lease
+            self.move_deadline = min(self.move_deadline, end)
+            self.apply_movement(keys, position, goal)
+            self.wait_movement(started, remaining, True)
+        return 'exit_timeout', position
+
+    def recover_terminal_entry(self, terminal_attempts, index, total, point, position, basis):
+        self.release()
+        attempt = (self.cycle, index)
+        started = self.clock.monotonic()
+        details = dict(approach_attempt_id=f'{self.cycle}:{index + 1}',
+                       target_point_id=point.get('id', index + 1),
+                       candidate_rejections=list(self.navigator.steering_rejections),
+                       movement_pulse_generated=False, movement_last_keys=[],
+                       player_position_before=list(position))
+        outcome, after = 'attempt_already_used', position
+        try:
+            if attempt not in terminal_attempts:
+                terminal_attempts.add(attempt)
+                outcome, after = self.terminal_retreat(point['position'], basis, position)
+        except NavigationWait:
+            outcome = 'snapshot_unavailable'
+        except ValueError:
+            outcome = 'position_or_safety_unconfirmed'
+            raise
+        except (_Paused, _Stopped, _MovementRetry):
+            outcome = 'interrupted'
+            raise
+        finally:
+            self.release()
+            self.report('recovering', '末段无可行移动方向，检查离开与重进',
+                        waypoint=index + 1, waypoint_count=total,
+                        **details, player_position_after=list(after),
+                        recovery_decision=outcome, reentry_attempt=int(outcome != 'attempt_already_used'),
+                        recovery_duration=self.clock.monotonic() - started)
+        if outcome not in ('replan', 'arrival', 'snapshot_unavailable'):
+            raise _SkipPoint(f'末段无可行移动方向，离开重进结束：{outcome}')
+
     def before_waypoint_navigation(self,index,target,position):
         return False
 
@@ -1316,6 +1388,7 @@ class _Follower:
         segment_start = None
         navigation_leg = None
         navigation_wait_since = None
+        terminal_attempts = set()
         while index < len(points):
             cycle_started = self.clock.monotonic()
             try:
@@ -1585,6 +1658,8 @@ class _Follower:
                         if wait_counts is None:
                             wait_counts = self.navigation_wait_codes = {}
                         wait_counts[wait_code] = wait_counts.get(wait_code, 0) + 1
+                        if exc.reason == 'no_path' and (self.cycle, index) in terminal_attempts:
+                            raise _SkipPoint(f'离开后未找到安全重进入口：{exc}') from exc
                         scene_context = (getattr(self.navigator, 'scene', None) or {}).get('cache_context')
                         previous_failure = getattr(self, 'last_navigation_failure', None)
                         source_changed = (previous_failure is None
@@ -1810,6 +1885,16 @@ class _Follower:
                     steering_travel = self.steering_travel(position,target,bool(special_steering))
                     desired = self.navigator.steering_keys(position, target, basis,
                         steering_travel, **special_steering)
+                    if (not desired and not special_steering and self.waypoints is not None
+                            and self.navigator.last_decision.get('kind') == 'collection_terminal_approach'
+                            and len(self.navigator.steering_rejections) == 8):
+                        self.recover_terminal_entry(terminal_attempts, index, len(points),
+                                                    points[index], position, basis)
+                        self.travel_progress.begin_probe(self.position)
+                        self.navigator.invalidate()
+                        anchor = navigation_leg = None
+                        best, progress_at = math.inf, self.clock.monotonic()
+                        continue
                 if anchor is None or desired != anchor_keys:
                     anchor, anchor_keys, anchor_at = position, set(desired), now
                 self.apply_movement(desired,position,target)
