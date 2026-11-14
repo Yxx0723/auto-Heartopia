@@ -648,6 +648,166 @@ class MemorySceneMap:
             return self.meta.ref(transform, '_hierarchy')
         return self.meta.ref(owner, '_hierarchy')
 
+    def parent_recheck_candidate(self, meta, rootless_candidates):
+        """Whether one more rootless collider may join this scan's recheck.
+
+        The cap bounds collection only, not completeness: a streaming unload can
+        legitimately empty a large batch of parents at once, and those are
+        settled per stream without a per-object read burst. The expensive
+        per-object proof stays capped separately by
+        ``COORD_SCENE_PARENT_PROOF_CANDIDATES``.
+        """
+        return (self.check_parent_recovery and getattr(self, 'navigation_only', False)
+                and isinstance(meta, SceneMetadata)
+                and len(rootless_candidates) < policy.COORD_SCENE_PARENT_RECHECK_CANDIDATES)
+
+    def _removed_managed_candidates(self, candidates, verify_stream, scanned_members, checks):
+        """Prove which candidates already left the live collision set.
+
+        One stable double read of a stream's collision collection settles every
+        candidate sharing that stream, so a large unload costs two reads per
+        stream instead of a read burst per collider. ``with_stamp=True`` exposes
+        the Mono dictionary ``_version`` stamp, so an actively mutating
+        collection is never mistaken for a removal.
+
+        A collider whose collision left a verified stream has been unloaded: it
+        stays unpublished exactly as before and stops being an unknown, because
+        it is not an obstacle anymore. Candidates still present keep the
+        per-object proof and therefore keep blocking navigation.
+        """
+        meta = self.meta
+        streams = {item[0] for item in candidates}
+        # One bounded re-sampling per stream, never per candidate.
+        self.read_budget.grant(0,
+                               len(streams) * policy.COORD_SCENE_PARENT_RECHECK_SECONDS)
+        settled = {}
+        for stream in streams:
+            self.read_budget.check()
+            verify_stream(stream)
+            reference = meta.ref(stream, '_collisions')
+            first, stamp = meta.dictionary(reference, with_stamp=True)
+            self.read_budget.check()
+            current, current_stamp = meta.dictionary(reference, with_stamp=True)
+            verify_stream(stream)
+            current = frozenset(current)
+            removable = {collision for source, collision, *_ in candidates if source == stream}
+            initial = scanned_members[stream]
+            added, removed = current - initial, initial - current
+            reference_changed = reference != meta.ref(stream, '_collisions')
+            stamp_changed = current_stamp != stamp
+            members_match = current == frozenset(first)
+            checks.append({
+                'step': 'membership_double_read',
+                'dictionary_reference_changed': reference_changed,
+                'version_changed': (stamp[0] != current_stamp[0]
+                                    if isinstance(stamp, tuple) else None),
+                'dictionary_stamp_changed': stamp_changed,
+                'double_read_members_match': members_match,
+                'initial_members': len(initial), 'recheck_members': len(current),
+                'added_members': len(added), 'removed_members': len(removed),
+                'removed_non_candidates': len(removed - removable),
+            })
+            if reference_changed or stamp_changed or not members_match or added or removed - removable:
+                stable_replacement = not (reference_changed or stamp_changed or not members_match)
+                self._parent_membership_changed(fresh_scan=stable_replacement)
+            settled[stream] = (reference, stamp, current)
+        removed, remaining = [], []
+        for item in candidates:
+            (remaining if item[1] in settled[item[0]][2] else removed).append(item)
+        return removed, remaining, settled
+
+    def _parent_membership_changed(self, *, fresh_scan=False):
+        issue = SceneReadIssue('碰撞流成员变化，正在重新读取地图', kind='mutation',
+                               stage=self.meta.stage, retryable=True, scope_verified=True)
+        issue.code = 'collision_membership_changed'
+        issue.fresh_parent_scan = fresh_scan
+        raise issue
+
+    def _run_parent_recheck(self, candidates, verify_collision, verify_stream, owners, active, scanned_members,
+                            geometry_members=()):
+        """Resolve a rootless batch in two bounded levels.
+
+        Level one settles unloaded colliders per stream (see
+        ``_removed_managed_candidates``). Level two keeps the original
+        per-object proof for whatever is still a member: live collision array,
+        collision stream membership, group ownership and the hierarchy
+        back-reference, stopping at the first unproven candidate. Beyond the
+        proof cap the batch simply stays unknown instead of spending an
+        unbounded read burst.
+        """
+        started = time.monotonic()
+        stats = {'candidates': len(candidates), 'streams': 0, 'removed': 0, 'verified': 0,
+                 'unresolved': 0, 'seconds': 0., 'recovered': False, 'error': None,
+                 'membership_checks': [], 'object_proof_entered': False,
+                 'full_rescan_triggered': False}
+        budget = self.read_budget
+        retries_before = budget.retries
+        try:
+            self._phase('managed_parent_membership')
+            removed, remaining, settled = self._removed_managed_candidates(
+                candidates, verify_stream, scanned_members, stats['membership_checks'])
+            if any((stream, collision) in geometry_members for stream, collision, *_ in removed):
+                stats['membership_checks'].append({'step': 'removed_with_geometry'})
+                self._parent_membership_changed()
+            self.read_budget.spent += max(0., time.monotonic() - started)
+            stats['streams'] = len(settled)
+            stats['removed'] = len(removed)
+            stats['unresolved'] = len(remaining)
+            if len(remaining) <= policy.COORD_SCENE_PARENT_PROOF_CANDIDATES:
+                # Exactly one extra read per candidate; the time and cancellation
+                # checks inside reserve() stay in force and nothing is pre-charged.
+                self.read_budget.grant(len(remaining), 0.)
+                self._phase('managed_parent_recheck')
+                for stream, collision, collider, klass in remaining:
+                    self.read_budget.check()
+                    stats['object_proof_entered'] = True
+                    if not self._live_managed_parent(stream, collision, collider, klass,
+                                                     verify_collision, owners, active):
+                        break
+                    stats['verified'] += 1
+            if self.read_budget.spent >= self.read_budget.max_seconds:
+                stats['error'] = {'code': 'parent_proof_budget_exhausted'}
+                stats['removed'] = 0
+                return stats
+            for stream, (reference, stamp, _) in settled.items():
+                self.read_budget.check()
+                verify_stream(stream)
+                reference_changed = self.meta.ref(stream, '_collisions') != reference
+                final_stamp = None if reference_changed else self.meta.dictionary_stamp(reference)
+                stamp_changed = None if reference_changed else final_stamp != stamp
+                stats['membership_checks'].append({
+                    'step': 'final_membership_stamp',
+                    'dictionary_reference_changed': reference_changed,
+                    'dictionary_stamp_changed': stamp_changed,
+                    'version_changed': (stamp[0] != final_stamp[0]
+                                        if isinstance(stamp, tuple) and final_stamp is not None else None),
+                })
+                if reference_changed or stamp_changed:
+                    self._parent_membership_changed()
+            stats['recovered'] = (bool(candidates)
+                                  and (stats['removed'] + stats['verified']) == stats['candidates'])
+            return stats
+        except (OSError, ValueError) as exc:
+            # The caller keeps the batch unknown on failure; record why so a
+            # silent downgrade to partial is never left unexplained.
+            stats['error'] = issue_summary(contextual_issue(exc, self.meta.stage))
+            raise
+        finally:
+            stats['seconds'] = max(0., time.monotonic()-started)
+            stats['budget'] = {
+                'retries_before': retries_before, 'retries_after': budget.retries,
+                'retries_used': budget.retries - retries_before,
+                'retry_limit': budget.max_retries,
+                'seconds_spent': budget.spent, 'seconds_limit': budget.max_seconds,
+                'retry_limit_reached': budget.retries >= budget.max_retries,
+                'time_limit_reached': budget.spent >= budget.max_seconds,
+            }
+            self.managed_parent_recheck_stats = stats
+            # Only a proven live parent requires rebuilt geometry, and that
+            # rebuild is the whole-scan rescan below. A batch that was merely
+            # unloaded is already complete on this read.
+            self.managed_parent_recovered = stats['recovered'] and stats['verified'] > 0
+
     def _live_managed_parent(self, stream, collision, collider, klass, verify_collision, owners, active):
         """Prove a live parent before paying for another complete observation."""
         if not self.read_budget.reserve():
@@ -708,35 +868,81 @@ class MemorySceneMap:
                                meta.dictionary, guard, budget, stage=meta.stage)
 
     def snapshot(self):
+        navigation = getattr(self, 'navigation_only', False)
+        started = time.monotonic()
+        recovery_limit = started + policy.COORD_NAV_RECOVERY_DEADLINE_SECONDS
+        previous_scans, attempts = {}, []
+        scan_kind = 'initial'
+        self.rescan_scope = None
+        self.rescan_deadline = None
+        self.rescan_rejected_owner = None
         try:
-            result = self._snapshot_attempt()
-        except (OSError, ValueError):
-            failures = getattr(self, 'collision_reference_failures', ())
-            if not failures or failures[-1].get('recovery_decision') != 'rescan_verified_stream':
-                raise
-            # A fresh snapshot rebuilds every per-scan collision collection.
-            # Never merge geometry already read from the previous membership.
-            previous = self.last_read_stats
-            self.rescan_rejected_owner = failures[-1]['owner']
-            try:
-                return self._snapshot_attempt()
-            finally:
-                self.rescan_rejected_owner = None
-                self.last_read_stats['stale_owner_rescan'] = previous
-        if not getattr(self, 'managed_parent_recovered', False):
-            return result
-        previous = self.last_read_stats
-        # Rebuild geometry and observation times from live data. The partial
-        # attempt is never published or merged with the replacement.
-        try:
-            return self._snapshot_attempt(check_parent_recovery=False)
+            while True:
+                attempt_started = time.monotonic()
+                self.last_read_stats = {}
+                self.collision_reference_failures = []
+                self.verified_collision_exit = self.verified_collision_error = None
+                try:
+                    if scan_kind == 'initial' or (scan_kind == 'stale_owner_rescan' and not navigation):
+                        result = self._snapshot_attempt()
+                    else:
+                        result = self._snapshot_attempt(check_parent_recovery=False)
+                    self._check_rescan_deadline()
+                except (OSError, ValueError) as exc:
+                    attempts.append(self._scan_timing(scan_kind, attempt_started, issue_summary(exc)))
+                    if navigation and scan_kind == 'initial' and getattr(exc, 'fresh_parent_scan', False):
+                        next_scan = 'parent_membership_rescan'
+                    elif (scan_kind != 'stale_owner_rescan' and self.collision_reference_failures
+                            and self.collision_reference_failures[-1].get('recovery_decision')
+                            == 'rescan_verified_stream'
+                            and (not navigation or (self.verified_collision_exit is not None
+                                                    and self.verified_collision_error is exc))):
+                        next_scan = 'stale_owner_rescan'
+                        self.rescan_rejected_owner = self.collision_reference_failures[-1]['owner']
+                        self.rescan_scope = self.verified_collision_exit
+                    else:
+                        raise
+                    if navigation and time.monotonic() >= recovery_limit:
+                        attempts[-1]['rescan_blocked'] = 'deadline'
+                        raise
+                else:
+                    attempts.append(self._scan_timing(scan_kind, attempt_started))
+                    if scan_kind != 'initial' or not getattr(self, 'managed_parent_recovered', False):
+                        return result
+                    next_scan = 'managed_parent_rescan'
+                    recheck = self.last_read_stats.get('managed_parent_recheck')
+                    if navigation:
+                        self.rescan_deadline = recovery_limit
+                        self._check_rescan_deadline()
+                    if isinstance(recheck, dict):
+                        recheck['full_rescan_triggered'] = True
+                previous_scans[next_scan] = self.last_read_stats
+                scan_kind = next_scan
+                if navigation:
+                    self.rescan_deadline = recovery_limit
         finally:
-            self.last_read_stats['managed_parent_rescan'] = previous
+            self.last_read_stats.update(previous_scans, scan_attempts=attempts)
+            self.rescan_scope = self.rescan_deadline = self.rescan_rejected_owner = None
+            self.verified_collision_exit = self.verified_collision_error = None
+
+    @staticmethod
+    def _scan_timing(kind, started, issue=None):
+        return {'kind': kind, 'started_at': started, 'finished_at': time.monotonic(), 'issue': issue}
+
+    def _check_rescan_deadline(self):
+        deadline = getattr(self, 'rescan_deadline', None)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise SceneReadIssue('碰撞完整重扫已超时', kind='cancelled', stage='control')
+
+    def _scan_cancelled(self):
+        self._check_rescan_deadline()
+        return getattr(self, 'cancelled', lambda: False)()
 
     def _snapshot_attempt(self, *, check_parent_recovery=True):
         self.check_parent_recovery = check_parent_recovery
         self.managed_parent_recovered = False
-        self.read_budget = RecoveryBudget(cancelled=getattr(self, 'cancelled', lambda: False))
+        self.managed_parent_recheck_stats = None
+        self.read_budget = RecoveryBudget(cancelled=self._scan_cancelled)
         self.phase_times, self.phase_name, self.phase_started = {}, 'registry', time.monotonic()
         self.meta.read_counts = {} if getattr(self, 'navigation_only', False) else None
         self.meta.stage = 'registry_start'
@@ -763,6 +969,7 @@ class MemorySceneMap:
                                     'linked_recovery_observations': self.linked_recovery_observations,
                                     'collision_reference_failures': self.collision_reference_failures,
                                     'missing_transform_owners': self.missing_transform_owners,
+                                    'managed_parent_recheck': self.managed_parent_recheck_stats,
                                     'detached_boxes': dict(self.detached_stats)}
 
     def _managed_step(self, stage, operation):
@@ -802,7 +1009,7 @@ class MemorySceneMap:
             except SceneReadIssue as exc:
                 if exc.kind == 'cancelled':
                     raise
-                if exc.kind not in ('mutation', 'scope_changed'):
+                if exc.kind != 'mutation' and (isinstance(meta, SceneMetadata) or exc.kind != 'scope_changed'):
                     return False
                 context['scene_scope'] = ('membership_changed_at_recheck'
                                           if exc.kind == 'mutation'
@@ -811,20 +1018,29 @@ class MemorySceneMap:
             except (OSError, ValueError):
                 return False
             try:
-                members, stamp = meta.dictionary(meta.ref(stream, '_collisions'), with_stamp=True)
+                reference = meta.ref(stream, '_collisions')
+                members, stamp = meta.dictionary(reference, with_stamp=True)
             except (OSError, ValueError):
                 return False
             context['scene_generation'] = format(hash(tuple(stamp)), 'x')
             context['collision_stream_membership'] = 'present' if collision in members else 'absent'
             self.read_budget.check()
             try:
-                current, current_stamp = meta.dictionary(meta.ref(stream, '_collisions'), with_stamp=True)
+                current_reference = meta.ref(stream, '_collisions')
+                current, current_stamp = meta.dictionary(current_reference, with_stamp=True)
+                if isinstance(meta, SceneMetadata):
+                    verify_stream(stream)
+                    if (reference != meta.ref(stream, '_collisions')
+                            or stamp != meta.dictionary_stamp(reference)):
+                        context['membership_stability'] = 'changed'
+                        continue
             except (OSError, ValueError):
                 return False
-            if current_stamp != stamp or current != members:
+            if current_reference != reference or current_stamp != stamp or current != members:
                 context['membership_stability'] = 'changed'
                 continue
             context['membership_stability'] = 'stable'
+            self.read_budget.check()
             if collision in current:
                 context['membership_recovery'] = 'owner_still_present'
                 return False
@@ -833,6 +1049,36 @@ class MemorySceneMap:
             return True
         context['membership_recovery'] = 'unstable'
         return False
+
+    def _empty_vtable_rescan_proof(self, trace, stream, collision, verify_stream):
+        issue = trace.context.get('terminal_issue', {})
+        if (issue.get('stage'), issue.get('code'), issue.get('kind')) != (
+                'managed_collision_array', 'read_bounds', 'unknown'):
+            return False
+        if not any(step.get('stage') == 'owner_header' and step.get('state') == 'failed'
+                   and step.get('owner_reference_status') == 'nonempty'
+                   and step.get('header_step') == 'vtable_class_and_domain'
+                   and step.get('vtable_status') == 'empty'
+                   and (step.get('issue') or {}).get('code') == 'read_bounds'
+                   for step in trace.steps):
+            return False
+        trace.context['empty_vtable_recovery'] = 'unverified'
+        self.read_budget.check()
+        verify_stream(stream)
+        reference = self.meta.ref(stream, '_collisions')
+        first, stamp = self.meta.dictionary(reference, with_stamp=True)
+        self.read_budget.check()
+        second, second_stamp = self.meta.dictionary(reference, with_stamp=True)
+        verify_stream(stream)
+        if (reference != self.meta.ref(stream, '_collisions') or stamp != second_stamp
+                or stamp != self.meta.dictionary_stamp(reference) or first != second
+                or collision in first or collision in second):
+            return False
+        self.read_budget.check()
+        trace.context.update(empty_vtable_recovery='stable_owner_exit',
+                             collision_stream_membership='absent',
+                             recovery_decision='rescan_verified_stream')
+        return True
 
     def _managed_collection(self, owner, field, read, verify_scope, stage, *, trace=None,
                             inspect_failure=None):
@@ -853,6 +1099,8 @@ class MemorySceneMap:
                         trace.step('failure_scope_and_membership', inspect_failure)
                     except (OSError, ValueError):
                         pass
+                if trace.context.get('recovery_decision') == 'rescan_verified_stream':
+                    self.verified_collision_error = exc
                 raise
             finally:
                 if trace.failed and len(self.collision_reference_failures) < 16:
@@ -875,6 +1123,9 @@ class MemorySceneMap:
         meta = self.meta
         hierarchy_class = meta.obj(local_hierarchy)['address']
         registry = meta.static_ref(hierarchy_class, 'ActiveHierarchies')
+        recovery_scope = getattr(self, 'rescan_scope', None)
+        if recovery_scope is not None and recovery_scope[:2] != (registry, local_hierarchy):
+            raise SceneReadIssue('完整重扫期间场景变化', kind='scope_changed', stage='registry_start')
         meta.stage = 'registry_start'
         entries = self.read_registry(registry, hierarchy_class, local_hierarchy, self.read_budget)
         transforms, owners, skipped = {}, {}, 0
@@ -973,6 +1224,8 @@ class MemorySceneMap:
         detached = DetachedBoxGuard(meta,self.read_budget.check,self._detached_image_cache)
         self.detached_stats = detached.stats
         rootless_candidates = []
+        scanned_members = {}
+        geometry_members = set()
 
         def changed(code):
             local_change = (meta.stage == 'managed_parent_recheck'
@@ -1024,7 +1277,12 @@ class MemorySceneMap:
             # First try the bounded membership re-acquisition. It covers the
             # case where the collection changes *during* the re-check, which
             # the narrow path below cannot distinguish from a lost owner.
-            if self._collision_membership_recovery(trace, stream, collision, verify_stream):
+            navigation = getattr(self, 'navigation_only', False)
+            verified = self._collision_membership_recovery(trace, stream, collision, verify_stream)
+            if navigation and not verified:
+                verified = self._empty_vtable_rescan_proof(trace, stream, collision, verify_stream)
+            if verified:
+                self.verified_collision_exit = (registry, local_hierarchy, stream, collision)
                 return
             try:
                 verify_stream(stream)
@@ -1035,7 +1293,7 @@ class MemorySceneMap:
             trace.context['scene_scope'] = 'verified_at_recheck'
             current = meta.dictionary(meta.ref(stream, '_collisions'))
             trace.context['collision_stream_membership'] = 'present' if collision in current else 'absent'
-            if (collision not in current
+            if (not navigation and collision not in current
                     and (trace.context.get('terminal_issue') or {}).get('kind') == 'invalid_reference'):
                 verify_stream(stream)
                 if current != meta.dictionary(meta.ref(stream, '_collisions')):
@@ -1050,10 +1308,24 @@ class MemorySceneMap:
                 if stream:
                     streams.add(stream)
                     stream_anchors.setdefault(stream, (group, collider))
+        if recovery_scope is not None and recovery_scope[2] not in streams:
+            raise SceneReadIssue('完整重扫期间碰撞流变化', kind='scope_changed',
+                                 stage='managed_stream_collisions')
         for stream in streams:
             self.read_budget.check()
-            for collision in self._managed_collection(stream, '_collisions', meta.dictionary,
-                    lambda s=stream: verify_stream(s), 'managed_stream_collisions'):
+            recovery_stream = recovery_scope is not None and stream == recovery_scope[2]
+            if recovery_stream:
+                def read_stamped_members(reference):
+                    members, stamp = meta.dictionary(reference, with_stamp=True)
+                    return members, (reference, stamp)
+                members, recovered_stream_stamp = self._managed_collection(
+                    stream, '_collisions', read_stamped_members,
+                    lambda s=stream: verify_stream(s), 'managed_stream_collisions')
+            else:
+                members = self._managed_collection(stream, '_collisions', meta.dictionary,
+                        lambda s=stream: verify_stream(s), 'managed_stream_collisions')
+            scanned_members[stream] = frozenset(members)
+            for collision in members:
                 trace = None
                 if isinstance(meta, SceneMetadata):
                     trace = SceneReferenceTrace(self.memory.pid, (registry, local_hierarchy), stream, collision)
@@ -1098,8 +1370,7 @@ class MemorySceneMap:
                         if not owner and not hierarchy:
                             if detached.consider(collider,info,stream):
                                 continue
-                            if (self.check_parent_recovery and getattr(self, 'navigation_only', False)
-                                    and isinstance(meta, SceneMetadata) and len(rootless_candidates) < 5):
+                            if self.parent_recheck_candidate(meta, rootless_candidates):
                                 rootless_candidates.append((stream, collision, collider, info['address']))
                             stream_id = SceneReferenceTrace.identity(stream)
                             rows = self.missing_transform_owners
@@ -1135,6 +1406,7 @@ class MemorySceneMap:
                             geometry['category'] = category
                             geometry['source'] = 'verified-solid-collider'
                         colliders.append(geometry)
+                        geometry_members.add((stream, collision))
                     except ValueError as exc:
                         if isinstance(exc, SceneReadIssue) and exc.kind in ('cancelled','scope_changed'):
                             raise
@@ -1217,14 +1489,28 @@ class MemorySceneMap:
         current = self.memory.snapshot()
         if self.local_hierarchy(current) != local_hierarchy or meta.static_ref(hierarchy_class, 'ActiveHierarchies') != registry:
             raise SceneReadIssue('场景已切换，正在重新读取地图', kind='scope_changed', stage=meta.stage)
+        if recovery_scope is not None:
+            stream, rejected_owner = recovery_scope[2:]
+            meta.stage = 'managed_collision_array'
+            verify_stream(stream)
+            reference = meta.ref(stream, '_collisions')
+            final_members, stamp = meta.dictionary(reference, with_stamp=True)
+            verify_stream(stream)
+            if ((reference, stamp) != recovered_stream_stamp
+                    or reference != meta.ref(stream, '_collisions') or stamp != meta.dictionary_stamp(reference)
+                    or frozenset(final_members) != scanned_members[stream]
+                    or rejected_owner in final_members):
+                raise SceneReadIssue('完整重扫期间碰撞成员变化', kind='invalid_reference', stage=meta.stage)
         if (world_state == 'ready' and not discovery_unknown
-                and 0 < managed_unknown == len(rootless_candidates) <= 4):
+                and 0 < managed_unknown == len(rootless_candidates)
+                <= policy.COORD_SCENE_PARENT_RECHECK_CANDIDATES):
             self._phase('managed_parent_recheck')
             meta.stage = 'managed_parent_recheck'
             try:
-                self.managed_parent_recovered = all(self._live_managed_parent(
-                    stream, collision, collider, klass, verify_collision, owners, active)
-                    for stream, collision, collider, klass in rootless_candidates)
+                resolved = self._run_parent_recheck(rootless_candidates, verify_collision,
+                                                    verify_stream, owners, active, scanned_members, geometry_members)
+                # Live geometry must be rebuilt by snapshot() before publication.
+                managed_unknown -= resolved['removed']
             except (OSError, ValueError) as exc:
                 if isinstance(exc, SceneReadIssue) and (exc.kind in ('cancelled', 'scope_changed')
                         or (exc.kind == 'mutation' and exc.scope_verified)):

@@ -44,6 +44,15 @@ class RecoveryBudget:
         self.retries += 1
         return True
 
+    def grant(self, retries=0, seconds=0.):
+        """Widen the allowance for one finite phase with a known read count.
+
+        The caller must know the exact upper bound in advance; the per-read
+        cancellation and time checks stay in force. Nothing is pre-charged.
+        """
+        self.max_retries += max(0, int(retries))
+        self.max_seconds += max(0., float(seconds))
+
 
 def read_collection(resolve, read, guard, budget, *, stage, charge_mutation_guard=False):
     """Retry only a verified mutation, re-resolving the owner field each time."""

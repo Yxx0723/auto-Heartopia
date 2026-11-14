@@ -153,3 +153,23 @@ def test_verified_recovery_triggers_one_full_rescan_instead_of_reader_discard():
         reader.snapshot()
     assert caught.value is error
     assert len(attempts) == 2  # one full rescan, no stale geometry merged
+
+@pytest.mark.parametrize('mode', ['stable', 'present', 'changed', 'scope', 'generic'])
+def test_empty_vtable_requires_stable_owner_exit(mode):
+    members = [OWNER] if mode == 'present' else []
+    stamp = OTHER_STAMP if mode == 'changed' else STABLE_STAMP
+    reader, verify, trace = fixture([(members, STABLE_STAMP), (members, stamp)],
+                                    terminal_kind='unknown')
+    trace.context['terminal_issue'].update(stage='managed_collision_array', code='read_bounds')
+    trace.steps = [{'stage': 'owner_header', 'state': 'failed',
+                    'owner_reference_status': 'nonempty', 'header_step': 'vtable_class_and_domain',
+                    'vtable_status': 'in_range' if mode == 'generic' else 'empty',
+                    'issue': {'code': 'read_bounds'}}]
+    reader.meta.dictionary_stamp.return_value = stamp
+    if mode == 'scope':
+        verify.side_effect = [None, scope_changed()]
+        with pytest.raises(SceneReadIssue):
+            reader._empty_vtable_rescan_proof(trace, STREAM, OWNER, verify)
+    else:
+        assert reader._empty_vtable_rescan_proof(trace, STREAM, OWNER, verify) == (mode == 'stable')
+    assert (trace.context['recovery_decision'] == 'rescan_verified_stream') == (mode == 'stable')

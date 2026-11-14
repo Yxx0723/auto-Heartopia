@@ -391,6 +391,18 @@ COORD_SCENE_MIN_IDLE_SECONDS = .05
 COORD_SCENE_COLLECTION_ATTEMPTS = 2
 COORD_SCENE_READ_EXTRA_ATTEMPTS = 8
 COORD_SCENE_READ_EXTRA_SECONDS = .1
+# Bounded parent-transform recheck, resolved in two levels. Level one settles a
+# whole batch per collision stream: a collider whose collision left a verified
+# stream was unloaded, so it is neither an obstacle nor an unknown. That batch
+# can be as large as a streaming unload, hence the wide collection cap; the
+# per-object proof below it stays small because each proof also re-reads the
+# registry. Neither level may publish an unproven collider: whatever stays a
+# member without a proven parent keeps the snapshot ineligible.
+COORD_SCENE_PARENT_RECHECK_CANDIDATES = 1024
+COORD_SCENE_PARENT_PROOF_CANDIDATES = 4
+# Engineering read allowance for the recheck: one bounded re-sampling per
+# stream, not per candidate.
+COORD_SCENE_PARENT_RECHECK_SECONDS = .05
 # Same-scope transient recovery only; engineering backoff/log budgets.
 COORD_SCENE_TRANSIENT_RETRY_SECONDS = .1
 COORD_SCENE_DIAGNOSTIC_SECONDS = 5.
@@ -545,6 +557,8 @@ COORD_REFERENCE_COST_CACHE_LIMIT = 4096
 
 # Guidance IPC engineering limits, not measured game abilities or a TTL extension.
 COORD_NAV_PROCESS_TIMEOUT_SECONDS = 8.
+# A recovered scan must finish within the original request and freshness clocks.
+COORD_NAV_RECOVERY_DEADLINE_SECONDS = 6.
 COORD_NAV_PROCESS_POLL_SECONDS = .02
 COORD_NAV_PROCESS_CLOSE_SECONDS = .3
 COORD_NAV_PROCESS_MAX_BYTES = 64 * 1024 * 1024

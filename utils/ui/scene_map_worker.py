@@ -27,6 +27,8 @@ class SceneMapWorker:
         self.retry_delay = policy.COORD_MONITOR_RETRY_SECONDS
         self.diagnostics = PlaybackDiagnostics(diagnostics_path) if diagnostics_path is not None else None
         self.last_diagnostic_at = None
+        self.last_scan_finished = None
+        self.last_scan_delay = None
         self.supply = SnapshotSupply()
 
     def start(self):
@@ -50,6 +52,7 @@ class SceneMapWorker:
             self.latest_scene, self.latest_at = None, None
             self.history = SceneDisplayCache()
             self.supply = SnapshotSupply()
+            self.last_scan_finished = self.last_scan_delay = None
             self.take_latest()
             self.wake.set()
             return True
@@ -115,6 +118,8 @@ class SceneMapWorker:
         if pid is None:
             return False
         started, read_stats, transient, fresh_retry = self.clock(), {}, False, False
+        idle_seconds = None if self.last_scan_finished is None else max(0., started-self.last_scan_finished)
+        reader_discarded = False
         try:
             if self.reader is None:
                 self.reader = self.factory(pid, self.profile)
@@ -137,6 +142,7 @@ class SceneMapWorker:
             if isinstance(self.reader, MemorySceneMap):
                 read_stats = self.reader.last_read_stats
             if not transient and not (fresh_retry and getattr(self.reader,'fresh_reader_discarded',False) is True):
+                reader_discarded = self.reader is not None
                 self.close_reader()
             result = {'state': 'error', 'objects': [], 'colliders': [],
                       'message': '场景正在更新，稍后自动重试', 'diagnostic': str(exc), 'issue': issue}
@@ -169,13 +175,24 @@ class SceneMapWorker:
                 policy.COORD_SCENE_TRANSIENT_RETRY_SECONDS * 2**min(recovery_failures-1, 5))
                 if transient or fresh_retry else policy.COORD_MONITOR_RETRY_SECONDS)
             self.latest_scene, self.latest_at = result, now
+            previous_expiry = self.supply.deadline
+            previous_snapshot = self.supply.scan_count if previous_expiry is not None else None
             self.supply.publish(result, now, max(0., now-started))
+            scan_id = f'{generation}:{self.supply.scan_count}'
+            expiry = self.supply.deadline
             supply_metrics = self.supply.metrics(now)
             navigation_usable = self.supply.deadline is not None
             self.take_latest()
             # A clear request during this read must not republish old history.
             self.results.put_nowait(display if self.history is history else result)
-        if self.diagnostics and (result.get('issue') or not navigation_usable or self.last_diagnostic_at is None
+        parent_recheck_logged = (read_stats.get('managed_parent_recheck') is not None
+                                 or 'managed_parent_rescan' in read_stats
+                                 or 'parent_membership_rescan' in read_stats
+                                 or 'stale_owner_rescan' in read_stats
+                                 or (read_stats.get('process') or {}).get('reader_open_seconds') is not None)
+        expired_before_publish = previous_expiry is not None and previous_expiry < now
+        if self.diagnostics and (parent_recheck_logged or result.get('issue') or expired_before_publish
+                or not navigation_usable or self.last_diagnostic_at is None
                 or now-self.last_diagnostic_at >= policy.COORD_SCENE_DIAGNOSTIC_SECONDS):
             self.last_diagnostic_at = now
             quality = result.get('quality')
@@ -183,6 +200,15 @@ class SceneMapWorker:
             parts = parts if isinstance(parts, dict) else {}
             self.diagnostics.write({'state': result.get('state'), 'message': json.dumps({
                 'duration_seconds': max(0., now-started), 'recovery': read_stats,
+                'scan_id': scan_id,
+                'snapshot_id': scan_id if expiry is not None else None,
+                'snapshot_expires_at_monotonic': expiry,
+                'previous_snapshot_id': None if previous_snapshot is None else f'{generation}:{previous_snapshot}',
+                'previous_snapshot_expires_at_monotonic': previous_expiry,
+                'expired_before_publish': expired_before_publish,
+                'previous_scheduled_delay_seconds': self.last_scan_delay,
+                'actual_idle_seconds': idle_seconds,
+                'reader_discarded': reader_discarded or (read_stats.get('process') or {}).get('reader_discarded', False),
                 'scan_started_at_monotonic': started,
                 'scan_finished_at_monotonic': read_finished,
                 'published_at_monotonic': now,
@@ -212,6 +238,15 @@ class SceneMapWorker:
                 elapsed = max(0., self.clock()-started)
                 delay = max(policy.COORD_SCENE_MIN_IDLE_SECONDS,
                             policy.COORD_SCENE_REFRESH_SECONDS-elapsed) if ready else self.retry_delay
+                finished = self.clock()
+                with self.lock:
+                    expiry = self.supply.deadline
+                    # When a slow guidance scan is likely to use all remaining
+                    # freshness, do not add a fixed idle delay before its successor.
+                    if ready and self.supply.active and (self.latest_scene or {}).get('navigation_only') is True \
+                            and expiry is not None and expiry-finished <= elapsed+delay:
+                        delay = 0.
+                self.last_scan_finished, self.last_scan_delay = finished, delay
                 self.wake.wait(delay)
         finally:
             self.close_reader()

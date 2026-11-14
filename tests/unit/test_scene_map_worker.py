@@ -92,3 +92,23 @@ def test_navigation_waits_for_native_world_reload_instead_of_using_partial_obsta
     worker.poll_once()
     assert worker.navigation_snapshot(77) is reader.snapshot.return_value
     worker.close()
+
+def test_parent_recovery_diagnostics_bypass_success_throttle():
+    from utils.drivers.mono_scene import MemorySceneMap
+
+    reader = Mock(spec=MemorySceneMap)
+    reader.snapshot.return_value = {'state': 'ready', 'objects': [], 'colliders': []}
+    worker = SceneMapWorker('profile', factory=lambda *args: reader, clock=lambda: 10.)
+    worker.diagnostics = Mock()
+    worker.set_pid(77)
+    reader.last_read_stats = {'managed_parent_recheck': None}
+    worker.poll_once()
+    worker.poll_once()
+    assert worker.diagnostics.write.call_count == 1
+    reader.last_read_stats = {'managed_parent_recheck': {'removed': 2}}
+    worker.poll_once()
+    assert worker.diagnostics.write.call_count == 2
+    reader.last_read_stats = {'managed_parent_recheck': None, 'managed_parent_rescan': {}}
+    worker.poll_once()
+    assert worker.diagnostics.write.call_count == 3
+    worker.close()
