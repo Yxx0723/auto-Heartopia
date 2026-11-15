@@ -36,6 +36,7 @@ class MapView:
     verified: bool
     map_rect: tuple
     blocked_rects: tuple = ()
+    map_center: tuple = (0., 0., 0.)
 
     def validate(self, now, max_age):
         if not _numbers((now,max_age,self.captured_at),3) or max_age<=0 \
@@ -57,7 +58,8 @@ class MapView:
 
     def signature(self):
         return (self.scene,self.identity,self.client_size,self.canvas_size,self.pan,
-                self.scale,self.ratio,self.map_rect,self.blocked_rects,self.opened,self.verified)
+                self.scale,self.ratio,self.map_rect,self.blocked_rects,self.opened,self.verified,
+                self.map_center)
 
     def world_to_client(self, point):
         if not valid_position(point):
@@ -100,7 +102,7 @@ def plan_map_click(target, first, second, now, *, max_age, margin):
     return MapClickPlan(tuple(target),pixel,second.scene,second.signature(),now)
 
 
-def plan_map_pan(target,view,now,*,max_age,margin):
+def plan_map_pan(target,view,now,*,max_age,margin,center=None):
     """A bounded screen-space drag towards the target; not a guessed new aim.
 
     Both endpoints stay inside the current ROI. The .45 span is an engineering
@@ -112,12 +114,18 @@ def plan_map_pan(target,view,now,*,max_age,margin):
     l,t,r,b=view.map_rect;w,h=r-l-2*margin,b-t-2*margin
     if min(w,h)<=4:
         raise ValueError('地图拖动区域过小')
-    center=((l+r)/2,(t+b)/2);pixel=view.world_to_client(target)
+    if center is None:
+        center=((l+r)/2,(t+b)/2)
+    if not _numbers(center,2) or not l+margin<center[0]<r-margin or not t+margin<center[1]<b-margin:
+        raise ValueError('目标显示中心不在地图拖动区域')
+    pixel=view.world_to_client(target)
     dx=max(-w*.45,min(w*.45,center[0]-pixel[0]))
     dy=max(-h*.45,min(h*.45,center[1]-pixel[1]))
     if math.hypot(dx,dy)<1.:
         raise ValueError('当前目标无需平移或被控件遮挡')
-    start=(center[0]-dx/2,center[1]-dy/2);end=(center[0]+dx/2,center[1]+dy/2)
+    drag_center=((l+r)/2,(t+b)/2)
+    start=(drag_center[0]-dx/2,drag_center[1]-dy/2)
+    end=(drag_center[0]+dx/2,drag_center[1]+dy/2)
     # Conservative bounding-box rejection also covers crossing a control.
     x1,x2=sorted((start[0],end[0]));y1,y2=sorted((start[1],end[1]))
     if any(x1<=br+margin and x2>=bl-margin and y1<=bb+margin and y2>=bt-margin

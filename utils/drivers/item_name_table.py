@@ -1,8 +1,11 @@
 """Read active TableData names through typed references, never heap scanning."""
 import struct
 from utils.drivers.global_minerals import GlobalMineralReader
+from utils.drivers.mono_large_class import TABLE_FIELD_LIMIT, read_large_class_fields
 
-TABLE_FIELD_LIMIT = 2048  # TableData observed 1004 fields; local metadata bound.
+# TABLE_FIELD_LIMIT is re-exported from the shared large-class reader: the
+# generated TableData class exceeds SceneMetadata's ordinary 512-field bound,
+# so its field table is parsed by that reader instead of by cls()/field().
 TABLE_ITEM_LIMIT = 65536
 
 
@@ -16,26 +19,23 @@ class ItemNameTable:
 
     def _fields(self, check):
         # This generated class alone exceeds SceneMetadata's ordinary 512-field
-        # bound. Read only our three fields, without relaxing other class limits.
+        # bound. Read only our three fields through the shared large-class
+        # reader, without relaxing any other class limit.
         m=self.meta;k=self.klass
         count=m.integer(k+0x100);table=m.pointer(k+0xa0)
-        if not 0<count<=TABLE_FIELD_LIMIT:
-            raise ValueError('物品名称配置字段数量无效')
+        read=read_large_class_fields(
+            m,k,('LevelTableBagitems','CurLevelId','languageId'),
+            limit=TABLE_FIELD_LIMIT,count=count,table=table,check=check)
         found={}
-        for i in range(count):
-            check()
-            typ,name,owner,offset=struct.unpack('<QQQi',m.data(table+i*32,28))
-            name=m.text(name)
-            if name not in ('LevelTableBagitems','CurLevelId','languageId'):
-                continue
-            details=m.data(typ,16);code=details[10];flags=struct.unpack_from('<H',details,8)[0]
-            if owner!=k or not flags&16 or code!=(21 if name=='LevelTableBagitems' else 8) \
-                    or not 0<=offset<65536 or name in found:
+        for name,info in read.fields.items():
+            code=21 if name=='LevelTableBagitems' else 8
+            if not info['flags']&16 or info['code']!=code or not 0<=info['offset']<65536:
                 raise ValueError('物品名称配置字段类型不符')
-            found[name]=offset
+            found[name]=info['offset']
         if len(found)!=3:
             raise ValueError('物品名称配置缺少当前层或语言入口')
-        if m.integer(k+0x100)!=count or m.pointer(k+0xa0)!=table:
+        if m.integer(k+0x100)!=read.count or m.pointer(k+0xa0)!=read.table \
+                or not read.unchanged(m):
             raise ValueError('物品名称配置元数据正在变化')
         return found
 

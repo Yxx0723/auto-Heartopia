@@ -24,12 +24,27 @@ def validate_points(data):
     if not isinstance(data, dict) or data.get('schema') != 'coordinate-points-v1' \
             or not isinstance(data.get('points'), list):
         raise ValueError('点位文件格式不支持，请保留原文件并检查内容。')
+    recorded = data.get('recorded_walk', False)
+    if type(recorded) is not bool:
+        raise ValueError('录制路线标志无效')
+    if recorded and (not 2 <= len(data['points']) <= 10000 or
+                     any(key in data for key in ('special_patrol', 'reordered_route'))):
+        raise ValueError('录制路线点位数量或类型无效')
+    previous = None
+    marked = False
     for number, point in enumerate(data['points'], 1):
         if not isinstance(point, dict) or type(point.get('id')) is not int \
                 or point['id'] != number or not isinstance(point.get('name'), str) \
                 or not point['name'].strip() or not valid_position(point.get('position')) \
                 or not valid_stamp(point.get('sample_at')) or not valid_stamp(point.get('saved_at')):
             raise ValueError(f'第 {number} 条点位数据无效，原文件未修改。')
+        if recorded:
+            if type(point.get('collect_here')) is not bool or 'special_resource' in point:
+                raise ValueError(f'录制路线第 {number} 点的采集标记无效')
+            if previous is not None and math.dist(previous, point['position']) > 1.5:
+                raise ValueError(f'录制路线第 {number} 点前存在坐标断点')
+            previous = point['position']
+            marked |= point['collect_here']
         if 'collect_count' in point:
             count = point['collect_count']
             if type(count) is not int or not 1 <= count <= 100:
@@ -44,6 +59,8 @@ def validate_points(data):
             count = target.get('press_count', 10)
             if type(count) is not int or not 1 <= count <= 100:
                 raise ValueError('动态采集连按次数应为1～100次。')
+    if recorded and not marked:
+        raise ValueError('请至少保留一个 F 采集点')
     from utils.core.reordered_route import isolation_id
     isolation_id(data)
     return data
@@ -95,6 +112,7 @@ def ordered_waypoints(data):
         raise ValueError('请先保存至少一个点位。')
     return [{'id': point['id'], 'name': point['name'],
              'position': list(point['position']), 'wait': 0.,
+             **({'collect_here': point['collect_here']} if data.get('recorded_walk') else {}),
              **({'special_resource': dict(point['special_resource'])} if 'special_resource' in point else {}),
              **({'collect_count': point['collect_count']} if 'collect_count' in point else {}),
              **({'collect_wait': point['collect_wait']} if 'collect_wait' in point else {})}

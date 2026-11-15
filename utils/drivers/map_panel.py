@@ -6,14 +6,118 @@ layout supplies projection; UI actions still require target and route readback.
 import hashlib
 import json
 import math
+import os
+from contextvars import ContextVar
+from datetime import datetime
+from functools import wraps
+from itertools import count
+from pathlib import Path
 import struct
+import sys
+import threading
 import time
+from uuid import uuid4
 
 from utils.drivers.global_minerals import GlobalMineralReader
+from utils.drivers.mono_large_class import read_large_class_fields
 from utils.drivers.mono_scene import SceneMetadata
 from utils.drivers.native_guidance import NativeGuidanceReader
 from utils.core.map_targeting import MapView,MapLayoutUpdating
 from utils.core.ui_projection import rect_to_client
+
+
+_geometry_trace = ContextVar('map_geometry_trace', default=None)
+_geometry_successes = count()
+_geometry_log_lock = threading.Lock()
+_owner_fields = ('service_dict', 'ui_manager', 'view_dict', 'map_panel', 'map_panel_auto')
+_scope_fields = ('state', 'scene_context', 'view_identity', 'other_region_view')
+
+
+def _geometry_stage(trace, stage):
+    if trace is not None:
+        trace['stage'] = stage
+        trace['timeline'].append({'stage': stage, 'at_monotonic': time.monotonic()})
+
+
+def _geometry_diff(trace):
+    before, after = (trace['samples'].get(key, {}) for key in ('before', 'after'))
+    changes, equal = {}, {}
+    for prefix, keys in (
+            ('snapshot_owner', _owner_fields), ('owner', _owner_fields),
+            ('snapshot', _scope_fields), ('hash_inputs', ('game_assembly_sha256', 'pid', 'domain',
+                                                           'level', 'map_system')),
+            ('region_flags', ('view_context', 'other_region_view'))):
+        old, new = before.get(prefix, {}), after.get(prefix, {})
+        for name in keys:
+            if name in old and name in new and old[name] != new[name]:
+                changes[f'{prefix}.{name}'] = {'before': old[name], 'after': new[name]}
+    for name, key, field in (
+            ('owner_tuple_equal', 'owner_tuple', None), ('map_state_equal', 'snapshot', 'state'),
+            ('scene_hash_equal', 'snapshot', 'scene_context'),
+            ('view_hash_equal', 'snapshot', 'view_identity'),
+            ('region_flags_equal', 'snapshot', 'other_region_view')):
+        old, new = before.get(key), after.get(key)
+        if field is None:
+            equal[name] = old == new if key in before and key in after else None
+            if equal[name] is False:
+                changes[key] = {'before': old, 'after': new}
+        else:
+            equal[name] = old[field] == new[field] if old is not None and new is not None \
+                and field in old and field in new else None
+    return {**equal, 'changed_fields': list(changes), 'values': changes}
+
+
+def _write_geometry_trace(trace, exc=None):
+    try:
+        if exc is None and next(_geometry_successes) % 64:
+            return
+        failure_stage = trace['stage']
+        trace['diff'] = _geometry_diff(trace)
+        if exc is None:
+            trace.pop('samples')
+            trace.pop('timeline')
+        else:
+            trace['failure_stage'] = failure_stage
+            trace['exception'] = {'type': type(exc).__name__, 'message': str(exc)}
+            if failure_stage.endswith('_read'):
+                trace['read_failures'] = [{'stage': failure_stage, 'operation': trace.get('operation'),
+                                           'side': trace.get('side'), **trace['exception']}]
+            _geometry_stage(trace, 'exception')
+        root = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) \
+            else Path(__file__).resolve().parents[2]
+        path = Path(os.environ.get('HEARTOPIA_MAP_IDENTITY_LOG') or
+                    root / 'logs' / 'map-layout-identity.jsonl')
+        line = json.dumps(trace, ensure_ascii=False, allow_nan=False) + '\n'
+        with _geometry_log_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open('a', encoding='utf-8') as stream:
+                stream.write(line)
+    except Exception:
+        # Diagnostic IO and serialization must not shadow game-read failures.
+        pass
+
+
+def _trace_geometry(method):
+    @wraps(method)
+    def wrapped(self, client_size):
+        trace = {'event': 'geometry_identity_diag', 'call_id': 'geom-' + uuid4().hex,
+                 'at': datetime.now().astimezone().isoformat(timespec='milliseconds'),
+                 'thread': threading.current_thread().name, 'process_id': os.getpid(),
+                 'timeline': [], 'samples': {}, 'read_failures': []}
+        token = _geometry_trace.set((self, trace))
+        try:
+            _geometry_stage(trace, 'entry_read')
+            result = method(self, client_size)
+            _geometry_stage(trace, 'post_recheck')
+        except Exception as exc:
+            _write_geometry_trace(trace, exc)
+            raise
+        else:
+            _write_geometry_trace(trace)
+            return result
+        finally:
+            _geometry_trace.reset(token)
+    return wrapped
 
 
 class MapPanelReader:
@@ -25,6 +129,9 @@ class MapPanelReader:
         self.base=memory.base
         self.guidance=NativeGuidanceReader(memory,clock)
         self.classes={}
+        # Field count actually observed on the last TableData read, reported in
+        # the event log so a live run can prove the large class was parsed.
+        self.last_table_field_count=None
 
     def find_class(self, assembly, name, namespace):
         key=(assembly,name,namespace)
@@ -166,18 +273,39 @@ class MapPanelReader:
         return result
 
     def snapshot(self):
+        active = _geometry_trace.get()
+        trace = active[1] if active is not None and active[0] is self else None
+        sample = trace['samples'][trace['side']] if trace is not None else None
+        if sample is not None:
+            inputs = sample['hash_inputs'] = {}
+            read_stage = trace['stage']
+            _geometry_stage(trace, 'hash_input_read')
+            trace['operation'] = 'domain'
         m=self.meta
         domain=m.pointer(self.base+0x4d3878)
+        if sample is not None:
+            inputs['domain'] = domain
+            trace['operation'] = 'current_level'
         if domain!=m.domain:
             raise ValueError('游戏运行域已改变')
         world=self.guidance._owner()
+        if sample is not None:
+            trace['operation'] = 'snapshot_owner'
         owner=self.owner()
+        if sample is not None:
+            sample['snapshot_owner_tuple'] = owner
+            sample['snapshot_owner'] = dict(zip(_owner_fields, owner or ()))
+            trace['operation'] = 'map_system'
         if owner is None:
             return {'state':'closed','projection_verified':False,'read_only':True,
                     'input_sent':False,'captured_at':self.clock()}
         panel=owner[3]
         klass=self.find_class('XDTGameSystem','MapSystem','XDTGameSystem.GameplaySystem.MapSpots')
         module=self.static_instance(klass)
+        if sample is not None:
+            inputs['map_system'] = module
+            _geometry_stage(trace, read_stage)
+            trace['operation'] = 'map_observation'
         self.expected(module,'MapSystem','XDTGameSystem.GameplaySystem.MapSpots')
         ratio_field=m.field(klass,'MapRatio')
         if ratio_field['code']!=12 or not ratio_field['flags']&16:
@@ -196,6 +324,8 @@ class MapPanelReader:
                     m.data(storage+ratio_field['offset'],4),self.region_context(panel))
 
         first=observe()
+        if sample is not None:
+            sample['region_flags'] = dict(zip(('view_context', 'other_region_view'), first[5]))
         if first[0]!=b'\x01':
             raise ValueError('地图尚未初始化')
         scale,ratio=struct.unpack('<f',first[3])[0],struct.unpack('<f',first[4])[0]
@@ -203,16 +333,37 @@ class MapPanelReader:
             raise ValueError('地图画布或缩放参数无效')
         if observe()!=first or self.owner()!=owner or self.guidance._owner()!=world \
                 or self.static_instance(klass)!=module or m.pointer(self.base+0x4d3878)!=domain:
+            _geometry_stage(trace, 'compare')
+            if trace is not None:
+                trace['operation'] = 'snapshot_consistency'
             raise ValueError('地图视图或场景正在变化')
-        scene=hashlib.sha256(json.dumps([self.memory.profile['game_assembly_sha256'],
-            self.memory.pid,domain,world[0]]).encode()).hexdigest()
-        identity=hashlib.sha256(json.dumps([scene,owner,module]).encode()).hexdigest()
+        if sample is not None:
+            _geometry_stage(trace, 'hash_input_read')
+            trace['operation'] = 'game_assembly_sha256_and_pid'
+        scene_input = [self.memory.profile['game_assembly_sha256'], self.memory.pid, domain, world[0]]
+        if sample is not None:
+            inputs.update(game_assembly_sha256=scene_input[0], pid=scene_input[1], level=scene_input[3])
+            sample['scene_input'] = scene_input
+            _geometry_stage(trace, 'hash_compute')
+            trace['operation'] = 'scene_hash'
+        scene=hashlib.sha256(json.dumps(scene_input).encode()).hexdigest()
+        view_input = [scene, owner, module]
+        if sample is not None:
+            sample['scene_hash'] = scene
+            sample['view_input'] = view_input
+            trace['operation'] = 'view_hash'
+        identity=hashlib.sha256(json.dumps(view_input).encode()).hexdigest()
+        if sample is not None:
+            sample['view_hash'] = identity
+            sample['snapshot_read_ok'] = True
+            _geometry_stage(trace, read_stage)
         return {'state':'projection_unverified','read_only':True,'input_sent':False,
                 'projection_verified':False,'scene_context':scene,'view_identity':identity,
                 'canvas_half_size':first[1],'current_spot_xz':first[2],
                 'map_scale':scale,'map_ratio':ratio,'other_region_view':first[5][1],
                 'captured_at':self.clock()}
 
+    @_trace_geometry
     def geometry(self,client_size):
         """Source-verified affine layout; a subsequent UI target still needs readback.
 
@@ -221,17 +372,39 @@ class MapPanelReader:
         report that an automatic UI action or native route has succeeded.
         """
         from utils.drivers.native_ui_layout import NativeUiLayout
-        first=self.snapshot();owner=self.owner()
+        trace = _geometry_trace.get()[1]
+        trace['side'] = 'before'
+        before = trace['samples']['before'] = {}
+        trace['operation'] = 'snapshot'
+        first=self.snapshot()
+        before['snapshot'] = first
+        before['snapshot_read_ok'] = True
+        trace['operation'] = 'owner'
+        owner=self.owner()
+        before['owner_tuple'] = owner
+        before['owner'] = dict(zip(_owner_fields, owner or ()))
+        before['owner_read_ok'] = True
+        _geometry_stage(trace, 'layout_read')
         if first['state']!='projection_unverified' or owner is None or first['other_region_view']:
             raise ValueError('需要打开当前所在区域的大地图')
         if not isinstance(client_size,(tuple,list)) or len(client_size)!=2 \
                 or any(type(x) is not int or not 64<=x<=16384 for x in client_size):
             raise ValueError('游戏客户区尺寸无效')
         layout=NativeUiLayout(self.memory,self.meta)
+        trace['operation'] = 'canvas_reference'
         canvas_obj=self.meta.ref(owner[1],'<CanvasRect>k__BackingField')
+        before['canvas_reference'] = canvas_obj
+        trace['operation'] = 'sketch_reference'
         sketch_obj=self.meta.ref(owner[4],'sketch_t')
-        canvas=layout.rect(canvas_obj);sketch=layout.rect(sketch_obj)
+        before['sketch_reference'] = sketch_obj
+        trace['operation'] = 'canvas_rect'
+        canvas=layout.rect(canvas_obj)
+        trace['operation'] = 'sketch_rect'
+        sketch=layout.rect(sketch_obj)
+        trace['operation'] = 'sketch_transforms'
         sketch_chain=layout.transforms(sketch_obj)
+        _geometry_stage(trace, 'attribute_access')
+        trace['operation'] = 'layout_attributes'
         scale=sketch_chain[0][2]
         rotation=sketch_chain[0][1]
         rect=canvas['rect'];cw,ch=rect[2:]
@@ -241,20 +414,38 @@ class MapPanelReader:
                 or not close(scale[0],first['map_scale']) or not close(scale[1],scale[0]) \
                 or any(not close(a,b) for a,b in zip(rotation,(0.,0.,0.,1.))):
             raise ValueError('地图实际画布、缩放或旋转与界面模型不符')
+        _geometry_stage(trace, 'pre_recheck_read')
+        trace['side'] = 'after'
+        after = trace['samples']['after'] = {}
+        trace['operation'] = 'snapshot'
         last=self.snapshot()
-        if self.owner()!=owner or any(first.get(k)!=last.get(k) for k in
+        after['snapshot'] = last
+        after['snapshot_read_ok'] = True
+        _geometry_stage(trace, 'post_recheck_read')
+        trace['operation'] = 'owner'
+        last_owner=self.owner()
+        after['owner_tuple'] = last_owner
+        after['owner'] = dict(zip(_owner_fields, last_owner or ()))
+        after['owner_read_ok'] = True
+        _geometry_stage(trace, 'compare')
+        trace['operation'] = 'scope_comparison'
+        if last_owner!=owner or any(first.get(k)!=last.get(k) for k in
                 ('state','scene_context','view_identity','other_region_view')):
             raise ValueError('地图布局读取期间场景或面板归属已改变')
+        trace['operation'] = 'layout_comparison'
         if {k:v for k,v in first.items() if k!='captured_at'} \
                 !={k:v for k,v in last.items() if k!='captured_at'}:
             raise MapLayoutUpdating('地图布局读取期间视图发生变化',
                                     scope=(first['scene_context'],first['view_identity']))
         w,h=client_size
+        sx,sy,sw,sh=sketch['rect']
+        ratio=first['map_ratio']
+        map_center=((sx+sw/2)/ratio,0.,(sy+sh/2)/ratio)
         # Exclude persistent top/bottom controls and the left zoom strip.
         # This is a conservative interaction ROI, not map/world coverage.
         return MapView(first['scene_context'],first['view_identity'],tuple(client_size),
             (cw,ch),sketch['anchored_position'],scale[0],first['map_ratio'],self.clock(),
-            True,True,(w*.12,h*.16,w*.98,h*.90))
+            True,True,(w*.12,h*.16,w*.98,h*.90),map_center=map_center)
 
     def _button_rect(self,layout,owner,component,client_size,observation=None):
         canvas=self.meta.ref(owner[1],'<CanvasRect>k__BackingField')
@@ -294,7 +485,7 @@ class MapPanelReader:
             raise ValueError('地图缩放滑条正在变化')
         return dict(state='open',kind='map_zoom',fraction=(value-low)/(high-low),
             scene_context=before['scene_context'],view_identity=before['view_identity'],
-            buttons=buttons,captured_at=self.clock())
+            map_scale=before['map_scale'],buttons=buttons,captured_at=self.clock())
 
     def overlays(self,client_size):
         """Recognized map popups and blank candidates avoiding current icons."""
@@ -336,7 +527,7 @@ class MapPanelReader:
     def dialog(self,client_size,kind='add'):
         """Owned visible dialog only. Never treats a pooled widget as visible."""
         from utils.drivers.native_ui_layout import NativeUiLayout
-        if kind not in ('add','spot'):
+        if kind not in ('add','spot','bus'):
             raise ValueError('地图弹窗类型无效')
         before=self.snapshot();owner=self.owner()
         if owner is None or before['state']!='projection_unverified' or before['other_region_view']:
@@ -359,6 +550,17 @@ class MapPanelReader:
         position=self.vector(owner[3],'currentSpotPos')
         buttons={'save':'save_swapbtn','cancel':'cancel_swapbtn'} if kind=='add' \
             else {'track':'track_toggleBtn','delete':'delete_swapbtn'}
+        track_can_start = None
+        if kind == 'bus':
+            if category != 1:
+                raise ValueError('选中的地图对象不是导航点')
+            operations = m.ref(ui, 'operations_go')
+            toggle = m.ref(ui, 'track_toggleBtn')
+            switch = self.payload(toggle, '_isOn', 2, 1)
+            if not layout.active(operations) or switch not in (b'\0', b'\x01'):
+                raise ValueError('公交站追踪按钮状态未确认')
+            track_can_start = switch == b'\x01'
+            buttons = {'track':'track_toggleBtn'} if track_can_start else {}
         rects={key:self._button_rect(layout,owner,m.ref(ui,name),client_size)
                for key,name in buttons.items()}
         if not layout.active(root) or self.owner()!=owner or identity()!=observed \
@@ -366,10 +568,15 @@ class MapPanelReader:
                 or self.vector(owner[3],'currentSpotPos')!=position \
                 or self.snapshot()['scene_context']!=before['scene_context']:
             raise ValueError('地图弹窗或其场景归属正在变化')
+        if kind == 'bus' and (m.ref(ui, 'operations_go') != operations or not layout.active(operations)
+                or m.ref(ui, 'track_toggleBtn') != toggle
+                or self.payload(toggle, '_isOn', 2, 1) != switch):
+            raise ValueError('公交站追踪按钮状态正在变化')
         return {'state':'open','kind':kind,'usage_id':str(usage_id),'category':category,
             'position_xz':position,'buttons':rects,
             'scene_context':before['scene_context'],'view_identity':before['view_identity'],
-            'captured_at':self.clock()}
+            'captured_at':self.clock(),
+            **({'track_can_start': track_can_start} if kind == 'bus' else {})}
 
     def custom_markers(self):
         """Current owned map widgets, including markers added after map startup.
@@ -380,6 +587,52 @@ class MapPanelReader:
         source uses world XZ * MapRatio), bracketed by graph/layout checks. Y=0
         is map-only, not a ground height or a replacement for saved point Y.
         """
+        return self._map_markers(7)
+
+    def _map_element_table_field(self, klass):
+        """Find the one static TableMapElements field in generated TableData.
+
+        TableData declares more fields than SceneMetadata.cls() allows, so the
+        shared large-class reader parses the field table directly. The ordinary
+        512-field reader is never entered; the class identity, field name,
+        owner, type code, static flag and offset are all still verified here.
+        """
+        m = self.meta
+        read = read_large_class_fields(
+            m, klass, ('TableMapElements',),
+            expected_name='TableData', expected_namespace='')
+        info = read.fields['TableMapElements']
+        if info['code'] not in (18, 21) or not info['flags'] & 16 \
+                or not 0 <= info['offset'] < 0x100000:
+            raise ValueError('公交配置 TableData.TableMapElements 静态引用类型不符')
+        if not read.unchanged(m):
+            raise ValueError('公交配置 TableData.TableMapElements 字段未唯一确认')
+        self.last_table_field_count = read.count
+        return info['offset'], info['entry'], info['raw']
+
+    def bus_stations(self):
+        """Apply MapSpotData.CheckIsBusStation to the current map widgets."""
+        m = self.meta
+        table_class = self.find_class('EcsClient', 'TableData', '')
+        offset, entry, raw_field = self._map_element_table_field(table_class)
+        table = m.static_reference_at(table_class, offset)
+        rows, stamp = m.dictionary(table, max_items=4096, with_stamp=True)
+        ids = {}
+        for row in rows:
+            self.expected(row, 'TableMapElement', '')
+            key = struct.unpack('<i', self.payload(row, 'id', 8, 4))[0]
+            station = struct.unpack('<i', self.payload(row, 'busStation', 8, 4))[0]
+            if key in ids:
+                raise ValueError('地图元素表 ID 重复')
+            ids[key] = station
+        result = self._map_markers(1, {key for key, station in ids.items() if station})
+        if m.data(entry, len(raw_field)) != raw_field \
+                or m.static_reference_at(table_class, offset) != table \
+                or m.dictionary(table, max_items=4096, with_stamp=True) != (rows, stamp):
+            raise ValueError('公交站配置表正在变化')
+        return result
+
+    def _map_markers(self, marker_category, station_ids=None):
         from utils.drivers.native_ui_layout import NativeUiLayout
         m=self.meta;before=self.snapshot();owner=self.owner()
         if owner is None or before['state']!='projection_unverified' or before['other_region_view']:
@@ -397,7 +650,7 @@ class MapPanelReader:
         # Bounded owned traversal, not a search of the process heap.
         if not 0<=count<=4096 or bool(head)!=bool(count):
             raise ValueError('地图标记链表范围无效')
-        result={};node=head;seen=set();links=[];widgets=[]
+        result={};node=head;seen=set();links=[];widgets=[];visibility=[]
         for _ in range(count):
             if not node or node in seen:
                 raise ValueError('地图标记链表断开或提前循环')
@@ -411,9 +664,19 @@ class MapPanelReader:
             spot=m.ref(item,'<selfData>k__BackingField')
             self.expected(spot,'MapSpot','XDTGameSystem.GameplaySystem.MapSpots')
             category=struct.unpack('<i',self.payload(spot,'category',17,4))[0]
-            if category==7:
+            if category==marker_category:
                 raw_id=self.payload(spot,'usageId',8,4);usage_id=struct.unpack('<I',raw_id)[0]
+                if station_ids is not None and usage_id not in station_ids:
+                    node=next_node
+                    continue
                 ui=m.ref(item,'ui');self.expected(ui,'MapSpotWidget_Auto','XDTGame.Auto')
+                if station_ids is not None:
+                    icon = m.ref(ui, 'normal_go')
+                    visible = layout.active(icon)
+                    visibility.append((item, spot, raw_id, ui, icon, visible))
+                    if not visible:
+                        node=next_node
+                        continue
                 root=m.ref(ui,'root_t');anchor=layout.rect(root)['anchored_position']
                 if not usage_id or str(usage_id) in result or not all(math.isfinite(v) for v in anchor):
                     raise ValueError('自定义地图标记的身份或位置无效')
@@ -422,6 +685,12 @@ class MapPanelReader:
             node=next_node
         if node!=head or stamp()!=initial or m.ref(owner[3],'_spotWidgets')!=linked:
             raise ValueError('地图标记链表正在变化')
+        if any(m.ref(item, '<selfData>k__BackingField') != spot
+               or self.payload(spot, 'usageId', 8, 4) != raw_id
+               or self.payload(spot, 'category', 17, 4) != struct.pack('<i', marker_category)
+               or m.ref(item, 'ui') != ui or m.ref(ui, 'normal_go') != icon
+               or layout.active(icon) != visible for item, spot, raw_id, ui, icon, visible in visibility):
+            raise ValueError('公交站图标归属或可见性正在变化')
         for node,item,next_node,previous in links:
             if (m.ref(node,'item'),m.ref(node,'next'),m.ref(node,'prev'),m.ref(node,'list')) \
                     !=(item,next_node,previous,linked):
@@ -429,7 +698,7 @@ class MapPanelReader:
         for item,spot,raw_id,ui,root,anchor in widgets:
             if m.ref(item,'<selfData>k__BackingField')!=spot \
                     or self.payload(spot,'usageId',8,4)!=raw_id \
-                    or self.payload(spot,'category',17,4)!=struct.pack('<i',7) \
+                    or self.payload(spot,'category',17,4)!=struct.pack('<i',marker_category) \
                     or m.ref(item,'ui')!=ui or m.ref(ui,'root_t')!=root \
                     or layout.rect(root)['anchored_position']!=anchor:
                 raise ValueError('地图标记目标或其位置正在变化')

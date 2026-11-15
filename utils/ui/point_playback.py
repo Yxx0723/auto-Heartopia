@@ -63,7 +63,8 @@ class PointPlayback:
         self.navigation_path = []
         self.path_memory = None
         self.history = None
-        self.history_root = Path(diagnostics_path).parent.parent/'路线' if diagnostics_path is not None else None
+        self.diagnostics_dir = Path(diagnostics_path).parent if diagnostics_path is not None else None
+        self.history_root = self.diagnostics_dir.parent / '路线' if self.diagnostics_dir is not None else None
         self.diagnostics = PlaybackDiagnostics(diagnostics_path) if diagnostics_path is not None else None
         self.results = queue.Queue(maxsize=1)
         self.result_lock = threading.Lock()
@@ -171,7 +172,7 @@ class PointPlayback:
         if start_mode not in ('first', 'nearest'):
             raise ValueError('起点模式无效。')
         validate_recovery_options(recovery_attempts, jump_on_recovery)
-        if not recovery_attempts:
+        if not recovery_attempts and not data.get('recorded_walk'):
             raise ValueError('每轮脱困次数应为 1～10 次。')
         validate_collect_wait(collect_wait_seconds)
         validate_loop_count(loop_count)
@@ -186,6 +187,10 @@ class PointPlayback:
             raise ValueError('自动吃水果选项无效。')
         if type(remember_paths) is not bool:
             raise ValueError('记忆走法选项无效。')
+        if data.get('recorded_walk') and (
+                not auto_navigate or remember_paths or recovery_attempts or jump_on_recovery
+                or start_mode != 'first' or loop_count != 1 or auto_repair or auto_eat):
+            raise ValueError('录制路线需要独立的原路回放配置')
         if auto_navigate and self.scene_provider is None:
             raise ValueError('场景导航尚未连接，请重新打开新版程序。')
         self.total = len(ordered_waypoints(data))
@@ -203,14 +208,17 @@ class PointPlayback:
         self.patrol_result = None
         self.incomplete_count = 0
         self.navigation_path = []
-        self.history = (PlaybackHistory(self.history_root, deepcopy(data),
+        history_root = self.history_root
+        if history_root is not None and data.get('recorded_walk'):
+            history_root = history_root / 'recorded'
+        self.history = (PlaybackHistory(history_root, deepcopy(data),
                         Path(route_path).stem if route_path is not None else '未命名路线',
                         {'start_mode': start_mode, 'loop_count': loop_count,
                          'auto_navigate': auto_navigate, 'remember_paths': remember_paths,
                          'auto_repair': auto_repair, 'auto_eat': auto_eat, 'food_fallback': food_fallback,
                          'collect_wait_seconds': collect_wait_seconds,
                          'recovery_attempts': recovery_attempts, 'jump_on_recovery': jump_on_recovery})
-                        if self.history_root is not None else None)
+                        if history_root is not None else None)
         if route_path is not None:
             self.record_log('preparation', f'当前路线：{Path(route_path).stem}')
         self.update('playback_wait', f'已就绪：{self.total} 个点 · 循环 {loop_count} 次 · 切回游戏按 F6 开始 · F9 停止')
@@ -230,14 +238,14 @@ class PointPlayback:
             if self.history:
                 self.history.close()
 
-    def start_guidance(self, pid):
+    def start_guidance(self, pid, *, map_opening_only=False, first_target=None, bus_target=None):
         if self.closed or self.active or self.input_busy():
             raise ValueError('已有任务正在运行，请先停止。')
         if type(pid) is not int or pid <= 0:
             raise ValueError('没有可用的游戏进程，请重新连接。')
-        if self.scene_provider is None:
+        if not map_opening_only and self.scene_provider is None:
             raise ValueError('场景碰撞检查尚未连接，不能开始游戏引导跟随。')
-        if not callable(self.guidance_runner):
+        if not map_opening_only and not callable(self.guidance_runner):
             raise ValueError('游戏引导入口未装配，请从新版窗口程序启动。')
         self.stop_event.clear()
         self.path_memory = None
@@ -248,24 +256,27 @@ class PointPlayback:
         self.history = (PlaybackHistory(self.history_root, {'engine': 'native_guidance', 'points': []},
                         '跟随游戏引导', {'manual_start': True, 'no_interaction': True})
                         if self.history_root is not None else None)
-        self.update('playback_wait', '正在缓存完整游戏引导路线 · 准备完成后按 F6 开始 · F9停止',
+        self.update('playback_wait', ('切回游戏按 F6 准备地图并检查首点公交追踪 · F9停止' if bus_target is not None
+                                     else '切回游戏按 F6 开图并标记路线首点 · F9停止' if first_target is not None
+                                     else '切回游戏按 F6 开图、缩小并居中 · F9停止' if map_opening_only
+                                     else '正在缓存完整游戏引导路线 · 准备完成后按 F6 开始 · F9停止'),
                     navigation_mode='native_guidance')
-        self.thread = threading.Thread(target=self._run_guidance, args=(pid,),
+        self.thread = threading.Thread(target=self._run_guidance, args=(pid, map_opening_only, first_target, bus_target),
                                        name='native-guidance-follow', daemon=True)
         self.thread.start()
 
-    def _run_guidance(self, pid):
+    def _run_guidance(self, pid, map_opening_only=False, first_target=None, bus_target=None):
         if self.input_gate is None:
-            return self._execute_guidance(pid)
+            return self._execute_guidance(pid, map_opening_only, first_target, bus_target)
         try:
             with self.input_gate.claim('游戏引导跟随'):
-                return self._execute_guidance(pid)
+                return self._execute_guidance(pid, map_opening_only, first_target, bus_target)
         except ValueError as exc:
             self.update('error', str(exc), navigation_mode='native_guidance')
             if self.history:
                 self.history.close()
 
-    def _execute_guidance(self, pid):
+    def _execute_guidance(self, pid, map_opening_only=False, first_target=None, bus_target=None):
         controls, device = None, None
         navigation_worker = None
         def report(state, message, **extra):
@@ -288,12 +299,49 @@ class PointPlayback:
             device = self.device_factory(window)
             controls = self.controls_factory(window, size, Feedback(), self.stop_event.is_set)
             controls.start()
+            if map_opening_only:
+                from utils.flows.map_targeting import MapTargeter
+
+                while True:
+                    running, stopped = controls.snapshot()
+                    if stopped or self.stop_event.is_set():
+                        report('stopped', '地图准备已停止')
+                        return
+                    if running:
+                        break
+                    self.clock.sleep(.01)
+
+                def check_map_input():
+                    running, stopped = controls.snapshot()
+                    if stopped or not running or self.stop_event.is_set():
+                        raise ValueError('地图准备已停止或暂停')
+
+                reader = self.reader_factory(pid, self.profile, hwnd=window.hwnd)
+                try:
+                    targeter = MapTargeter(reader, device, window, controls,
+                                           self.clock, check_map_input, report)
+                    result = targeter.open_and_zoom_once(first_target, center_map=first_target is None,
+                                                         bus_target=bus_target)
+                    if 'map_bus_id' in result:
+                        message = f'已确认公交站 {result["map_bus_id"]} 追踪，地图保持打开'
+                    elif bus_target is not None:
+                        message = '首点距离不足 50，地图已居中'
+                    elif first_target is None:
+                        message = '已确认地图缩小并居中，地图保持打开'
+                    elif result['map_marker_reused']:
+                        message = '已核对首点现有标记，地图保持打开'
+                    else:
+                        message = '已确认首点标记保存，地图保持打开'
+                    report('finished', message, **result)
+                finally:
+                    reader.close()
+                return
             provider = lambda:self.scene_provider(pid)
             if self.guidance_scene_factory is not None:
                 factory = (NavigationProcessScene if self.guidance_scene_factory is NavigationSceneMap
                            else self.guidance_scene_factory)
                 navigation_worker = SceneMapWorker(self.profile, factory=factory,
-                    diagnostics_path=self.history_root.parent/'日志'/'引导碰撞读取.jsonl' if self.history_root else None)
+                    diagnostics_path=self.diagnostics_dir / '引导碰撞读取.jsonl' if self.diagnostics_dir is not None else None)
                 navigation_worker.set_pid(pid)
                 navigation_worker.start()
                 provider = lambda:navigation_worker.navigation_snapshot(pid)
@@ -338,6 +386,10 @@ class PointPlayback:
             controls.start()
             factory = CollectionNavigator if self.navigator_factory is LocalNavigator else self.navigator_factory
             options = {'native_map_collection': False} if factory is CollectionNavigator else {}
+            recorded = data.get('recorded_walk', False)
+            if recorded:
+                from utils.core.recorded_walk_navigation import RecordedWalkNavigator
+                factory, options = RecordedWalkNavigator, {}
             navigation = ({'navigator': factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic, **options)}
                           if auto_navigate else {})
             if auto_navigate and isinstance(navigation['navigator'],CollectionNavigator) \
@@ -345,7 +397,7 @@ class PointPlayback:
                 factory=(NavigationProcessScene if self.guidance_scene_factory is NavigationSceneMap
                          else self.guidance_scene_factory)
                 navigation_worker=SceneMapWorker(self.profile,factory=factory,
-                    diagnostics_path=self.history_root.parent/'日志'/'采集引导碰撞读取.jsonl' if self.history_root else None)
+                    diagnostics_path=self.diagnostics_dir / '采集引导碰撞读取.jsonl' if self.diagnostics_dir is not None else None)
                 navigation_worker.set_pid(pid);navigation_worker.start()
                 navigation['navigator'].native_scene_provider=lambda:navigation_worker.navigation_snapshot(pid)
                 if navigation['navigator'].hybrid_collection:
@@ -356,7 +408,9 @@ class PointPlayback:
                 navigation['navigator'].path_memory = self.path_memory
                 navigation['navigator'].memory_state = 'learning'
             from utils.vision.axe_pick import LazyToolSelector
-            navigation['tool_selector'] = LazyToolSelector(self.profile.parent/'axe_pick_icon.png', self.tool_factory)
+            if not recorded:
+                navigation['tool_selector'] = LazyToolSelector(
+                    self.profile.parent/'axe_pick_icon.png', self.tool_factory)
             if auto_eat:
                 from utils.vision.first_slot_food import FirstSlotFoodMenu
                 navigation['food_fallback'] = self.food_fallback
@@ -373,7 +427,7 @@ class PointPlayback:
                                      device, window, controls, report, clock=self.clock, start_mode=start_mode,
                                      recovery_attempts=recovery_attempts, jump_on_recovery=jump_on_recovery,
                                      collect_wait_seconds=collect_wait_seconds, loop_count=loop_count,
-                                     continuous_recovery=True, **navigation)
+                                     continuous_recovery=not recorded, **navigation)
             finish_message = (('本次点位回放完成' if loop_count == 1 else f'已完成 {loop_count} 轮回放')
                               if completed else '回放已停止，按键已释放')
             if not completed and self.incomplete_count:

@@ -1363,7 +1363,8 @@ class _Follower:
                         self.resume_from_current=False
                     elif not (self.direction_source=='probe' and basis is not None and self.direction_safe_probe):
                         current=self.read(force=True)
-                        may_probe=self.direction_safe_probe and self.direction_bad_since is not None \
+                        may_probe=not getattr(self, 'recorded_walk', False) and self.direction_safe_probe \
+                            and self.direction_bad_since is not None \
                             and self.clock.monotonic()-self.direction_bad_since>=policy.COORD_DIRECTION_WAIT_SECONDS
                         if not may_probe or not self.safe_direction_probe(current,index):
                             self.wait_direction(index,len(points))
@@ -1373,6 +1374,8 @@ class _Follower:
                         reference=current
                         self.calibration_seconds=policy.COORD_DIRECTION_PROBE_SECONDS
                 if basis is None and self.collection is None and not special_near:
+                    if getattr(self, 'recorded_walk', False):
+                        raise ValueError('录制路线需要已确认的实时方向，已停止回放')
                     # A paused period is outside the coordinate jump/time budget.
                     self.position_at = None
                     if not selected:
@@ -1481,7 +1484,7 @@ class _Follower:
                 if remaining <= policy.COORD_REACH_RADIUS and (
                         'special_resource' not in points[index] or special_near):
                     self.set_keys(set())
-                    if self.navigator and self.collection is None:
+                    if self.navigator and self.collection is None and points[index].get('collect_here', True):
                         # Allow inertia and landing to settle before pressing F.
                         arrival = position
                         self.wait(policy.COORD_SETTLE_SECONDS)
@@ -1493,7 +1496,14 @@ class _Follower:
                             continue
                     if self.navigator and self.navigator.learning_finished is None:
                         self.navigator.learning_finished = self.active_time
-                    if self.waypoints is not None and self.collect_wait_seconds is not None:
+                    collect_here = (self.waypoints is not None and self.collect_wait_seconds is not None
+                                    and points[index].get('collect_here', True))
+                    if collect_here:
+                        if getattr(self, 'recorded_walk', False):
+                            try:
+                                self.navigator.require_scene()
+                            except NavigationWait as exc:
+                                raise ValueError('F 点的场景碰撞未确认，已停止回放') from exc
                         if not self.collect_point(points[index], index, len(points)):
                             continue
                     else:
@@ -1512,10 +1522,10 @@ class _Follower:
                     index += 1
                     if self.navigator:
                         self.navigator.collection_outcome = ('action_completed_unconfirmed_loot'
-                            if self.collect_wait_seconds is not None else 'not_requested')
+                            if collect_here else 'not_requested')
                         self.navigator.arrived(position)
                     if self.waypoints is not None:
-                        text = '已完成采集与等待' if self.collect_wait_seconds is not None else '已到达点位'
+                        text = '已完成采集与等待' if collect_here else '已到达点位'
                         if 'special_resource' in points[index-1]:
                             evidence = (self.special_progress or {}).get('evidence')
                             text = ('已确认采到（背包增量核对）' if evidence and evidence.fields()['resource_confirmed']
@@ -1771,7 +1781,8 @@ class _Follower:
                     navigation = ({'navigation_path': [list(p) for p in self.navigator.path],
                                    'navigation_decision': self.navigator.last_decision,
                                    'approach_attempts': self.approach_attempts} if self.navigator else {})
-                    mode = '自动寻路' if self.navigator else '坐标回放'
+                    mode = ('录制路线回放' if getattr(self, 'recorded_walk', False)
+                            else '自动寻路' if self.navigator else '坐标回放')
                     if self.navigator and self.navigator.last_decision.get('kind') == 'collection_terminal_approach':
                         mode = '近点安全接近'
                     elif self.navigator and self.navigator.memory_state == 'reusing':
@@ -1789,6 +1800,8 @@ class _Follower:
                 self.clock.sleep(.01)
             except _SkipPoint as exc:
                 self.release()
+                if getattr(self, 'recorded_walk', False):
+                    raise ValueError(f'录制路线第 {index + 1} 点无法安全通过：{exc}') from exc
                 self.travelling = False
                 if self.supplements:
                     self.supplements.failed(index)
@@ -1889,6 +1902,13 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
         if food_fallback not in FALLBACK_MODES:
             raise ValueError('无料理时的食物范围无效')
         points = ordered_waypoints(data)
+        recorded = data.get('recorded_walk', False)
+        if recorded:
+            from utils.core.recorded_walk_navigation import RecordedWalkNavigator
+            if not isinstance(navigator, RecordedWalkNavigator) or start_mode != 'first' \
+                    or loop_count != 1 or recovery_attempts or continuous_recovery \
+                    or repair_box is not None or food is not None:
+                raise ValueError('录制路线需要独立的原路回放配置')
         validate_loop_count(loop_count)
         validate_recovery_options(recovery_attempts, jump_on_recovery)
         if type(continuous_recovery) is not bool or continuous_recovery and not recovery_attempts:
@@ -1908,6 +1928,15 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
                 break
             clock.sleep(.01)
         reader = reader_factory()
+        if recorded:
+            position = reader.read_for_playback()
+            if distance(position, points[0]['position']) > policy.COORD_REACH_RADIUS \
+                    or abs(position[1] - points[0]['position'][1]) > policy.COORD_MAX_HEIGHT_ERROR:
+                raise ValueError('请先站到录制路线起点，再按 F6')
+            try:
+                navigator.require_scene()
+            except NavigationWait as exc:
+                raise ValueError('录制路线起点的场景碰撞未确认') from exc
         config = {'duration': 0., 'client_size': list(size)}
         follower_type = _Follower
         if getattr(navigator,'native_map_collection',False) is True:
@@ -1923,6 +1952,7 @@ def drive_points(data, size, reader_factory, device, window, controls, report, c
                          repair_box=repair_box, tool_selector=tool_selector, food=food,
                          scene_refresh=scene_refresh)
         follower.food_fallback = food_fallback
+        follower.recorded_walk = recorded
         follower.heading_cache = heading_cache
         follower.harvest_journal = harvest_journal
         try:

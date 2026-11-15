@@ -10,6 +10,7 @@ from utils.core import thresholds as policy
 from utils.core.map_target_policy import MapTargetPolicy
 from utils.core.map_targeting import plan_map_click,plan_map_pan,confirm_map_target,blank_map_points
 from utils.core.map_targeting import MapLayoutUpdating
+from utils.core.coordinate_route import valid_position
 from utils.drivers.guidance_input_lease import GuidanceInputLease
 from utils.drivers.map_panel import MapPanelReader
 
@@ -25,6 +26,9 @@ class _MapInputRevoked(ValueError):
 
 
 class MapTargeter:
+    # R3 observed a second panel identity after the initial stable layout.
+    zoom_open_settle_seconds = 3.
+
     def __init__(self,reader,device,window,controls,clock,check,report,*,panel=None,options=None):
         self.reader,self.device,self.window,self.controls=reader,device,window,controls
         self.clock,self.check,self.report=clock,check,report
@@ -176,25 +180,249 @@ class MapTargeter:
         if len(pointer)!=3 or not pointer[2] or math.dist(pointer[:2],(x,y))>2.:
             raise ValueError('游戏鼠标未到达地图目标位置，未按下鼠标')
 
-    def click(self,pixel,hold=None):
+    def click(self,pixel,hold=None,*,verify=None):
         self.position_cursor(pixel)
+        if verify is not None:
+            verify()
+            self.guard()
+            x, y = (round(value) for value in pixel)
+            pointer = self.window.pointer()
+            if len(pointer) != 3 or not pointer[2] or math.dist(pointer[:2], (x, y)) > 2.:
+                raise ValueError('按钮复核后鼠标已偏离目标，未按下鼠标')
         with self.lease.lock:
             self.lease.arm(self.clock.monotonic()+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS)
             self.device.execute({'type':'mouse_down','button':'left'})
         try:self.wait(self.options.press_seconds if hold is None else hold)
         finally:self.lease.release('map_click_complete')
 
-    def click_button(self,dialog,name):
-        if self.clock.monotonic()-dialog['captured_at']>self.options.view_max_age:
-            raise ValueError('地图按钮读数已过期')
-        fresh=(self.panel.zoom_state(self.size) if dialog['kind']=='map_zoom' else self.panel.map_control(self.size,dialog['kind'].removeprefix('map_'))
-            if dialog['kind'] in ('map_open','map_close') else self.panel.dialog(self.size,dialog['kind']))
-        fields=('state','kind','usage_id','category','scene_context','view_identity','position_xz','fraction')
-        if any(fresh.get(k)!=dialog.get(k) for k in fields) \
-                or fresh.get('buttons',{}).get(name)!=dialog['buttons'][name]:
-            raise ValueError('地图按钮或其目标在点击前发生变化')
+    def click_button(self,dialog,name,*,verify_after_cursor=False,vertical_fraction=.5):
+        def verify():
+            if self.clock.monotonic()-dialog['captured_at']>self.options.view_max_age:
+                raise ValueError('地图按钮读数已过期')
+            fresh=(self.panel.zoom_state(self.size) if dialog['kind']=='map_zoom' else self.panel.map_control(self.size,dialog['kind'].removeprefix('map_'))
+                if dialog['kind'] in ('map_open','map_close') else self.panel.dialog(self.size,dialog['kind']))
+            fields=('state','kind','usage_id','category','scene_context','view_identity','position_xz','fraction',
+                    'map_scale','track_can_start')
+            if any(fresh.get(k)!=dialog.get(k) for k in fields) \
+                    or fresh.get('buttons',{}).get(name)!=dialog['buttons'][name]:
+                raise ValueError('地图按钮或其目标在点击前发生变化')
+        verify()
         l,t,r,b=dialog['buttons'][name]
-        self.click(((l+r)/2,(t+b)/2))
+        self.click(((l+r)/2,t+(b-t)*vertical_fraction), verify=verify if verify_after_cursor else None)
+
+    def open_and_zoom_once(self, target=None, *, center_map=False, bus_target=None):
+        if any(value is not None and not valid_position(value) for value in (target, bus_target)):
+            raise ValueError('路线首点坐标无效')
+        self.started = self.clock.monotonic()
+        self.map_scope = None
+        self.device.release_all()
+        self.start_lease()
+        try:
+            if self.change_map(True):
+                self.stage('等待刚打开的地图完成界面更新')
+                self.wait(self.zoom_open_settle_seconds)
+            opened = self.panel.snapshot()
+            scope = (opened.get('scene_context'), opened.get('view_identity'))
+            if opened['state'] != 'projection_unverified' or opened.get('other_region_view') \
+                    or not all(isinstance(value, str) and value for value in scope):
+                raise ValueError('地图场景或面板身份未确认')
+            self.map_scope = scope
+            _, view = self.stable_views(scope)
+            self.stage('核对地图左侧减号')
+            before = self.panel.zoom_state(self.size)
+            if scope != (before['scene_context'], before['view_identity']) or before['map_scale'] != view.scale:
+                raise ValueError('地图视图在缩小前已改变')
+            if 'decrease' not in before['buttons']:
+                raise ValueError('地图已在最小缩放，未点击减号')
+            self.guard()
+            # The visible minus is above the projected wrapper's center
+            # in the observed live layout. Aim inside the verified rect.
+            vertical_fraction = .2
+            l, t, r, b = before['buttons']['decrease']
+            self.stage('点击一次地图左侧减号', map_zoom_before=before['map_scale'],
+                       map_button_rect=before['buttons']['decrease'],
+                       map_click_pixel=[round((l+r)/2), round(t+(b-t)*vertical_fraction)],
+                       map_view_before=scope[1], map_scene_before=scope[0])
+            self.click_button(before, 'decrease', verify_after_cursor=True,
+                              vertical_fraction=vertical_fraction)
+            self.stage('确认地图缩小', map_click_dispatched=True)
+            deadline = self.clock.monotonic() + self.options.action_timeout
+            last_scale = before['map_scale']
+            while self.clock.monotonic() < deadline:
+                self.guard()
+                current = self.panel.snapshot()
+                if current['state'] != 'projection_unverified' or current['other_region_view'] \
+                        or scope != (current['scene_context'], current['view_identity']):
+                    self.report('map_targeting', '点击后地图身份变化，缩小未确认',
+                                map_stage=self.phase, map_zoom_before=before['map_scale'],
+                                map_zoom_observed=current.get('map_scale'),
+                                map_view_before=scope[1], map_view_after=current.get('view_identity'),
+                                map_scene_before=scope[0], map_scene_after=current.get('scene_context'),
+                                map_state_after=current['state'])
+                    raise ValueError('点击减号后地图场景或视图已改变')
+                if current['map_scale'] < before['map_scale']:
+                    first, after = self.stable_views(scope)
+                    if self.clock.monotonic() < deadline and after.scale < before['map_scale']:
+                        result = {'map_zoom_before': before['map_scale'], 'map_zoom_after': after.scale}
+                        if center_map:
+                            result.update(self.center_island(after))
+                        if target is not None:
+                            result.update(self.mark_route_start(target, first, after))
+                        if bus_target is not None:
+                            result.update(self.track_bus_for_route_start(bus_target))
+                        return result
+                last_scale = current['map_scale']
+                self.wait(self.options.settle_seconds)
+            self.report('map_targeting', '缩放回读超时', map_stage=self.phase,
+                        map_zoom_before=before['map_scale'], map_zoom_observed=last_scale,
+                        map_click_dispatched=True)
+            raise _MapActionTimeout('点击减号后未确认缩小')
+        finally:
+            if self.lease:
+                self.lease.close()
+            self.lease = None
+
+    def require_map_scope(self):
+        current = self.panel.snapshot()
+        if current['state'] != 'projection_unverified' or current['other_region_view'] \
+                or (current['scene_context'], current['view_identity']) != self.map_scope:
+            raise ValueError('地图场景或视图已改变，未继续设标')
+
+    def track_bus_for_route_start(self, target):
+        self.require_map_scope()
+        player = self.reader.read_for_playback()
+        if not valid_position(player):
+            raise ValueError('无法确认人物当前位置')
+        distance = math.hypot(player[0]-target[0], player[2]-target[2])
+        result = {'route_first_point': list(target), 'route_first_distance_xz': distance}
+        if distance < 50.:
+            return result
+        self.stage('查找路线首点附近公交站', **result)
+        stations = self.panel.bus_stations()
+        # Evidence that the generated large class was really parsed, not skipped:
+        # the field count read from the TableData MonoClass header and the number
+        # of bus-station markers it produced.
+        self.stage('公交站配置表已读取',
+                   table_data_field_count=getattr(self.panel, 'last_table_field_count', None),
+                   map_visible_bus_station_count=len(stations), **result)
+        self.require_map_scope()
+        if not stations:
+            raise ValueError('当前地图未读到可见且身份可确认的公交站')
+        ranked = sorted((math.hypot(pos[0]-target[0], pos[2]-target[2]), key, pos)
+                        for key, pos in stations.items())
+        station_distance, station_id, position = ranked[0]
+        if any(math.hypot(other[0]-position[0], other[2]-position[2]) <= self.options.world_tolerance
+               for _, key, other in ranked[1:]):
+            raise ValueError('所选公交站与另一站的目标坐标过近，无法唯一确认追踪')
+        if self.panel.overlays(self.size)['popups']:
+            raise ValueError('地图有弹窗，未选择公交站')
+        a, b = self.stable_views(self.map_scope)
+        plan = plan_map_click(position, a, b, self.clock.monotonic(),
+                             max_age=self.options.view_max_age, margin=self.options.pixel_margin)
+
+        def verify_station():
+            self.require_map_scope()
+            current = self.panel.geometry(self.size)
+            now = self.clock.monotonic()
+            current.validate(now, self.options.view_max_age)
+            if current.signature() != plan.view_signature or now-plan.prepared_at > self.options.view_max_age:
+                raise ValueError('公交站投影在点击前发生变化')
+
+        self.stage('选择离路线首点最近的公交站', map_bus_id=station_id,
+                   map_bus_distance_to_first=station_distance, map_bus_position=position, **result)
+        self.click(plan.pixel, verify=verify_station)
+        selected = self.poll(lambda: self.panel.dialog(self.size, 'bus'), lambda v: v['state'] == 'open')
+        if selected['usage_id'] != station_id or selected['category'] != 1 \
+                or (selected['scene_context'], selected['view_identity']) != self.map_scope:
+            raise ValueError('地图弹窗读回的不是本次选中的公交站')
+
+        def confirm(requested_at):
+            first = self.reader.guidance()
+            self.wait(self.options.settle_seconds)
+            second = self.reader.guidance()
+            return confirm_map_target(plan, first, second, self.clock.monotonic(),
+                                      requested_at=requested_at, world_tolerance=self.options.world_tolerance)
+
+        requested_at = self.clock.monotonic()
+        if selected['track_can_start']:
+            self.stage('启动公交站追踪', map_bus_id=station_id)
+            self.click_button(selected, 'track', verify_after_cursor=True)
+        tracked = self.poll(lambda: confirm(requested_at), lambda v: bool(v.get('route')))
+        return {**result, 'map_bus_id': station_id, 'map_bus_position': list(position),
+                'map_bus_distance_to_first': station_distance, 'tracking_id': tracked['tracking_id']}
+
+    def center_island(self, view):
+        target = view.map_center
+        signature = view.signature()
+        starting_pan = view.pan
+        center = (view.client_size[0]/2, view.client_size[1]/2)
+        self.stage('将岛屿底图居中', map_center_target=target)
+        for step in range(self.options.max_pan_steps + 1):
+            self.guard()
+            view.validate(self.clock.monotonic(), self.options.view_max_age)
+            if replace(view, pan=starting_pan).signature() != signature:
+                raise ValueError('居中期间地图布局或缩放已改变')
+            pixel = view.world_to_client(target)
+            if math.dist(pixel, center) <= 12.:
+                return {'map_center_pixel': pixel, 'map_center_drags': step}
+            if step == self.options.max_pan_steps:
+                break
+            if self.panel.overlays(self.size)['popups']:
+                raise ValueError('地图有弹窗，未继续拖动')
+            if not self.pan(target, view, center=center):
+                raise ValueError('地图拖动未确认向中央移动')
+            _, view = self.stable_views(self.map_scope)
+        raise ValueError('地图未在拖动次数上限内居中')
+
+    def mark_route_start(self, target, first, second):
+        self.stage('投影路线第一个采集点', target=list(target))
+        plan = plan_map_click(target, first, second, self.clock.monotonic(),
+                             max_age=self.options.view_max_age, margin=self.options.pixel_margin)
+        wanted = (target[0], target[2])
+
+        def confirmed_markers():
+            self.require_map_scope()
+            markers = self.panel.custom_markers()
+            self.require_map_scope()
+            return markers
+
+        def matching(markers):
+            return [key for key, pos in markers.items()
+                    if math.dist((pos[0], pos[2]), wanted) <= self.options.world_tolerance]
+
+        existing = confirmed_markers()
+        nearby = matching(existing)
+        if len(nearby) > 1:
+            raise ValueError('首点附近有多个标记，无法唯一确认')
+        if nearby:
+            return {'map_marker_id': nearby[0], 'map_marker_reused': True, 'target': list(target)}
+        if self.panel.overlays(self.size)['popups']:
+            raise ValueError('地图上已有弹窗，请先关闭后重新开始')
+
+        def verify_long_press():
+            self.require_map_scope()
+            current = self.panel.geometry(self.size)
+            now = self.clock.monotonic()
+            current.validate(now, self.options.view_max_age)
+            if current.signature() != plan.view_signature or now - plan.prepared_at > self.options.view_max_age:
+                raise ValueError('首点投影在长按前已变化，未发送输入')
+
+        self.stage('长按首点添加标记', target=list(target), map_click_pixel=list(plan.pixel))
+        self.click(plan.pixel, self.options.hold_seconds, verify=verify_long_press)
+        dialog = self.poll(lambda: self.panel.dialog(self.size), lambda value: value['state'] == 'open')
+        if dialog['usage_id'] != '0' or (dialog['scene_context'], dialog['view_identity']) != self.map_scope \
+                or math.dist(dialog['position_xz'], wanted) > self.options.world_tolerance:
+            raise ValueError('长按读回位置或地图身份与首点不符，未保存标记')
+        self.require_map_scope()
+        self.stage('保存第一个采集点标记', map_position_xz=dialog['position_xz'])
+        self.click_button(dialog, 'save', verify_after_cursor=True)
+
+        def created(markers):
+            return matching({key: pos for key, pos in markers.items() if key not in existing})
+
+        markers = self.poll(confirmed_markers, lambda value: len(created(value)) == 1)
+        return {'map_marker_id': created(markers)[0], 'map_marker_reused': False,
+                'target': list(target)}
 
     def change_map(self,opened):
         action='open' if opened else 'close'
@@ -209,7 +437,7 @@ class MapTargeter:
             self.tap('m')
             self.poll(self.panel.snapshot,lambda v:v['state']==expected)
             self.wait(self.options.settle_seconds)
-            return
+            return True
         button=self.panel.map_control(self.size,action)
         if button.get('state')!='open':
             if self.panel.snapshot()['state']==expected:return
@@ -274,14 +502,18 @@ class MapTargeter:
         self.report('map_targeting','地图视图变化',map_stage=self.phase,map_view_changes=changes)
         return ','.join(changes)
 
-    def pan(self,target,view):
+    def pan(self,target,view,*,center=None):
         self.stage('平移地图',target=list(target),map_pan=list(view.pan))
         start,end=plan_map_pan(target,view,self.clock.monotonic(),
-            max_age=self.options.view_max_age,margin=self.options.pixel_margin)
+            max_age=self.options.view_max_age,margin=self.options.pixel_margin,center=center)
         current=self.panel.geometry(self.size)
         if current.signature()!=view.signature():
             raise ValueError('拖动前地图视图已经变化')
         self.position_cursor(start)
+        if center is not None:
+            if self.panel.geometry(self.size).signature()!=view.signature():
+                raise ValueError('鼠标到位后地图视图已改变，未拖动')
+            self.guard()
         with self.lease.lock:
             self.lease.arm(self.clock.monotonic()+policy.COORD_GUIDANCE_INPUT_LEASE_SECONDS)
             self.device.execute({'type':'mouse_down','button':'left'})
@@ -292,7 +524,10 @@ class MapTargeter:
                 self.position_cursor(tuple(a+(b-a)*fraction for a,b in zip(start,end)))
                 self.wait(self.options.drag_seconds/self.options.drag_steps)
         finally:self.lease.release('map_drag_complete')
-        self.dismiss_popups()
+        if center is None:
+            self.dismiss_popups()
+        elif self.panel.overlays(self.size)['popups']:
+            raise ValueError('拖动后出现地图弹窗，居中停止')
         self.stage('平移地图后核对',target=list(target))
         try:
             current=self.poll(lambda:self.panel.geometry(self.size),lambda v:v.pan!=view.pan)
@@ -301,7 +536,8 @@ class MapTargeter:
         current.validate(self.clock.monotonic(),self.options.view_max_age)
         if replace(current,pan=view.pan).signature()!=view.signature():
             raise ValueError('地图平移时视图发生变化：'+self.view_changes(view,current))
-        l,t,r,b=view.map_rect;center=((l+r)/2,(t+b)/2)
+        if center is None:
+            l,t,r,b=view.map_rect;center=((l+r)/2,(t+b)/2)
         before=math.dist(view.world_to_client(target),center)
         after=math.dist(current.world_to_client(target),center)
         if after>before+.5:

@@ -178,6 +178,16 @@ class MonitorWorker:
             self.monitor.close()
 
 
+SHOW_RECORDED_ROUTE_CONTROLS = False
+SHOW_PATH_MEMORY_CONTROLS = False
+
+
+def portable_data_directory(root, name, legacy_name):
+    preferred = root / name
+    legacy = root / legacy_name
+    return legacy if not preferred.exists() and legacy.is_dir() else preferred
+
+
 class CoordinateWindow:
     def __init__(self, root, monitor, resources, clock=time.monotonic, point_path=None, wall_clock=None,
                  playback_runner=None, scene_factory=None, cooking_runner=None, guidance_runner=None,
@@ -188,7 +198,8 @@ class CoordinateWindow:
             else Path(__file__).resolve().parents[2]
         self.trail_export_dir = (data_dir / '道路数据' / '实走轨迹' if getattr(sys, 'frozen', False)
                                  else Path(__file__).resolve().parents[4] / 'outputs' / '道路数据' / '实走轨迹')
-        self.routes = PointRoutes(point_path or data_dir / '点位' / '我的点位.json')
+        self.routes = PointRoutes(
+            point_path or portable_data_directory(data_dir, 'routes', '点位') / '我的点位.json')
         self.patrol_route_selected = False
         self.route_name = self.routes.selected_name()
         self.point_store = self.routes.store(self.route_name)
@@ -199,13 +210,15 @@ class CoordinateWindow:
             self.points_error = f'点位文件读取失败：{exc}'
         self.view = MonitorView()
         self.worker = MonitorWorker(monitor)
-        diagnostics_dir = Path(point_path).parent if point_path else data_dir
+        diagnostics_root = Path(point_path).parent if point_path else data_dir
+        diagnostics_dir = portable_data_directory(diagnostics_root, 'logs', '日志')
         self.input_gate = InputTaskGate()
+        self.route_recording = None
         self.playback = PointPlayback(self.resources / 'profile.json', runner=playback_runner,
                                       guidance_runner=guidance_runner,
                                       guidance_scene_factory=NavigationSceneMap if scene_factory is MemorySceneMap else None,
                                       scene_provider=self.navigation_scene, scene_refresh=self.refresh_scene,
-                                      diagnostics_path=diagnostics_dir / '日志' / '点位回放.jsonl', input_gate=self.input_gate)
+                                      diagnostics_path=diagnostics_dir / '点位回放.jsonl', input_gate=self.input_gate)
         self.cooking = CookingSinglePotControl(self.resources/'profile.json', resolve_cooking_record_dir(),
             legacy_entry_root=legacy_cooking_record_dir(),
                                       busy=lambda: self.playback.active, input_gate=self.input_gate,
@@ -220,7 +233,7 @@ class CoordinateWindow:
         self.scene_categories = None
         self.scene_filters_expanded = False
         self.scene_worker = SceneMapWorker(self.resources / 'profile.json', factory=scene_factory,
-                                          diagnostics_path=diagnostics_dir / '日志' / '场景读取.jsonl') if scene_factory else None
+                                          diagnostics_path=diagnostics_dir / '场景读取.jsonl') if scene_factory else None
         self.zoom = 1.
         self.scene_radius = policy.COORD_SCENE_RADIUS
         self.map_view = 'nearby'
@@ -540,6 +553,13 @@ class CoordinateWindow:
         self.label(toolbar, '次', color='muted', font=theme.font(12)).pack(
             side='left', padx=(0, 12))
         waitbar = self.frame(bottom_body)
+        if SHOW_RECORDED_ROUTE_CONTROLS:
+            recording_bar = self.frame(bottom_body)
+            recording_bar.pack(fill='x')
+            self.record_route_button = self.button(recording_bar, '录制路线', self.start_route_recording, small=True)
+            self.record_route_button.pack(side='left')
+            self.button(recording_bar, '回放录制路线', self.start_recorded_walk, small=True).pack(
+                side='left', padx=(5, 0))
         waitbar.pack(fill='x', pady=(px(3), 0))
         self.label(waitbar, '按 F 后等待', color='muted',
                    font=theme.font(12)).pack(side='left')
@@ -577,20 +597,21 @@ class CoordinateWindow:
             activeforeground=COLORS['text'], selectcolor=COLORS['button'],
             font=theme.font(12), bd=0, highlightthickness=0)
         self.navigation_check.pack(side='left', padx=(0, 12))
-        self.path_memory_var = tk.BooleanVar(self.root, value=self.load_path_memory_option())
-        self.path_memory_check = tk.Checkbutton(waitbar, text='使用路线记忆', variable=self.path_memory_var,
-            command=self.save_path_memory_option,
-            bg=COLORS['card'], fg=COLORS['text'], activebackground=COLORS['card'],
-            activeforeground=COLORS['text'], selectcolor=COLORS['button'],
-            font=theme.font(12), bd=0, highlightthickness=0)
-        self.path_memory_check.pack(side='right', padx=(5, 0))
-        self.path_memory_label = self.label(navigationbar, '0 段', color='muted', font=theme.font(11))
-        self.path_memory_label.pack(side='left', padx=(0, 5))
-        self.clear_path_memory_button = self.button(navigationbar, '清除记忆', self.clear_path_memory, small=True)
-        self.clear_path_memory_button.pack(side='left')
-        self.refresh_path_memory_info()
+        if SHOW_PATH_MEMORY_CONTROLS:
+            self.path_memory_var = tk.BooleanVar(self.root, value=self.load_path_memory_option())
+            self.path_memory_check = tk.Checkbutton(waitbar, text='使用路线记忆', variable=self.path_memory_var,
+                command=self.save_path_memory_option,
+                bg=COLORS['card'], fg=COLORS['text'], activebackground=COLORS['card'],
+                activeforeground=COLORS['text'], selectcolor=COLORS['button'],
+                font=theme.font(12), bd=0, highlightthickness=0)
+            self.path_memory_check.pack(side='right', padx=(5, 0))
+            self.path_memory_label = self.label(navigationbar, '0 段', color='muted', font=theme.font(11))
+            self.path_memory_label.pack(side='left', padx=(0, 5))
+            self.clear_path_memory_button = self.button(navigationbar, '清除记忆', self.clear_path_memory, small=True)
+            self.clear_path_memory_button.pack(side='left')
+            self.refresh_path_memory_info()
         # 第 3 行：引导跟随单独成行；主操作按钮留在前两行。
-        self.guidance_button = self.button(bottom_body, '跟随游戏引导 · F6开始 / F9停止',
+        self.guidance_button = self.button(bottom_body, '跟随游戏引导 · 远距公交追踪',
                                            self.start_guidance_follow, small=True)
         self.guidance_button.pack(fill='x', pady=(px(4), 0))
         # Keep existing status-update calls valid without a footer or text widget.
@@ -1321,6 +1342,7 @@ class CoordinateWindow:
                 self.scene_state = scene
         if hasattr(self, 'blueberry_survey'):
             self.blueberry_survey.poll()
+        self.poll_route_recording()
         playback = self.playback.take_latest()
         if playback is not None:
             self.playback_status = playback
@@ -1779,7 +1801,7 @@ class CoordinateWindow:
             if count:
                 if not messagebox.askyesno('清空点位', f'清空路线「{route}」的全部 {count} 个点位？\n'
                                           '路线名称保留，其他路线不变。\n'
-                                          '清空前会备份到「点位/路线回收站」。', parent=self.root):
+                                          f'清空前会备份到「{self.routes.root.name}/路线回收站」。', parent=self.root):
                     return
                 self.require_route_change()
                 if self.route_name != route:
@@ -1885,7 +1907,7 @@ class CoordinateWindow:
                 self.require_saved_route()
             if action == 'delete':
                 if not messagebox.askyesno('删除路线', f'删除路线「{self.route_name}」？\n'
-                                          '文件会移入「点位/路线回收站」，其他路线不受影响。', parent=self.root):
+                                          f'文件会移入「{self.routes.root.name}/路线回收站」，其他路线不受影响。', parent=self.root):
                     return
                 self.routes.archive(self.route_name)
                 name = self.routes.selected_name()
@@ -1933,11 +1955,123 @@ class CoordinateWindow:
 
     def start_guidance_follow(self):
         try:
-            self.playback.start_guidance(self.view.status.get('pid'))
+            first = ordered_waypoints(self.point_store.load())[0]
+            self.playback.start_guidance(self.view.status.get('pid'), map_opening_only=True,
+                                         bus_target=tuple(first['position']))
         except (OSError, ValueError) as exc:
             self.playback.record_log('error', f'无法跟随游戏引导：{exc}')
             messagebox.showerror('无法跟随游戏引导', str(exc), parent=self.root)
 
+
+    def start_route_recording(self):
+        from utils.drivers.collection_route_recording import CollectionRouteRecording
+
+        if self.route_recording is not None:
+            self.route_recording.cancelled.set()
+            return
+        try:
+            self.view.point_snapshot(self.clock())
+            pid = self.view.status.get('pid')
+            if type(pid) is not int or pid <= 0:
+                raise ValueError('没有已连接的游戏进程')
+            if self.playback.active or self.cooking.active:
+                raise ValueError('请先停止正在运行的采集或烹饪任务')
+            self.route_recording = CollectionRouteRecording(
+                self.input_gate, pid, self.resources / 'profile.json', self.navigation_scene)
+            self.route_recording.thread.start()
+            self.record_route_button.configure(text='取消录制')
+        except (OSError, ValueError) as exc:
+            messagebox.showerror('无法录制路线', str(exc), parent=self.root)
+
+    def poll_route_recording(self):
+        recording = getattr(self, 'route_recording', None)
+        if recording is None:
+            return
+        while True:
+            try:
+                kind, value = recording.messages.get_nowait()
+            except queue.Empty:
+                return
+            if kind == 'status':
+                self.playback.record_log('preparation', value)
+                continue
+            self.route_recording = None
+            self.record_route_button.configure(text='录制路线')
+            if not recording.cancelled.is_set():
+                if kind == 'error':
+                    messagebox.showerror('路线录制停止', value, parent=self.root)
+                else:
+                    self.review_recorded_walk(*value)
+            return
+
+    def review_recorded_walk(self, points, marks):
+        dialog = tk.Toplevel(self.root)
+        dialog.title('核对 F 采集点')
+        dialog.transient(self.root)
+        dialog.grab_set()
+        ttk.Label(dialog, text='已选中的 F 点会在回放时执行采集，点击可取消选择。').pack(padx=10, pady=8)
+        frame = ttk.Frame(dialog)
+        frame.pack(fill='both', expand=True, padx=10)
+        choices = tk.Listbox(frame, selectmode='multiple', exportselection=False, width=42, height=10)
+        scroll = ttk.Scrollbar(frame, orient='vertical', command=choices.yview)
+        choices.configure(yscrollcommand=scroll.set)
+        choices.pack(side='left', fill='both', expand=True)
+        scroll.pack(side='right', fill='y')
+        for number, point_id in enumerate(marks, 1):
+            position = ', '.join(f'{part:.3f}' for part in points[point_id - 1]['position'])
+            choices.insert('end', f'F 点 {number} · {position}')
+        choices.selection_set(0, 'end')
+
+        def save():
+            selected = {marks[index] for index in choices.curselection()}
+            if not selected:
+                messagebox.showerror('无法保存', '请至少保留一个 F 采集点。', parent=dialog)
+                return
+            raw_name = simpledialog.askstring('保存录制路线', '路线名称', parent=dialog)
+            if raw_name is None:
+                return
+            try:
+                name = self.recorded_routes().create(raw_name, {
+                    'schema': 'coordinate-points-v1', 'recorded_walk': True,
+                    'points': [dict(point, collect_here=point['id'] in selected) for point in points],
+                })
+            except (OSError, ValueError) as exc:
+                messagebox.showerror('无法保存录制路线', str(exc), parent=dialog)
+                return
+            dialog.destroy()
+            self.playback.record_log('preparation', f'已保存录制路线：{name} · {len(selected)} 个 F 点')
+
+        buttons = ttk.Frame(dialog)
+        buttons.pack(pady=8)
+        ttk.Button(buttons, text='确认并保存', command=save).pack(side='left', padx=4)
+        ttk.Button(buttons, text='取消', command=dialog.destroy).pack(side='left', padx=4)
+
+    def recorded_routes(self):
+        return PointRoutes(self.routes.root / 'recorded' / '录制路线.json')
+
+    def start_recorded_walk(self):
+        try:
+            if self.route_recording is not None:
+                raise ValueError('请先结束路线录制')
+            self.view.point_snapshot(self.clock())
+            routes = self.recorded_routes()
+            filename = filedialog.askopenfilename(
+                parent=self.root, title='选择录制路线', initialdir=str(routes.root),
+                filetypes=[('录制路线', '*.json')])
+            if not filename:
+                return
+            path = Path(filename).resolve()
+            if path.parent != routes.root.resolve() or path.suffix != '.json':
+                raise ValueError('请选择录制路线目录中的 JSON 文件')
+            data = routes.store(path.stem).load()
+            if data.get('recorded_walk') is not True:
+                raise ValueError('所选文件不是录制路线')
+            self.playback.start(data, self.view.status.get('pid'), start_mode='first',
+                                recovery_attempts=0, jump_on_recovery=False, loop_count=1,
+                                auto_navigate=True, collect_wait_seconds=self.collection_wait(),
+                                route_path=path, remember_paths=False)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror('无法回放录制路线', str(exc), parent=self.root)
 
     def start_playback(self):
         if getattr(self, 'patrol_route_selected', False):
@@ -1957,7 +2091,7 @@ class CoordinateWindow:
                                 auto_eat=self.food_auto_var.get() if hasattr(self, 'food_auto_var') else False,
                                 food_fallback=self.food_fallback_mode(),
                                 route_path=self.point_store.path,
-                                remember_paths=self.path_memory_var.get() if hasattr(self, 'path_memory_var') else False)
+                                remember_paths=SHOW_PATH_MEMORY_CONTROLS and self.path_memory_var.get())
         except (OSError, ValueError) as exc:
             self.playback.record_log('error', f'无法开始点位回放：{exc}')
             messagebox.showerror('无法开始点位回放', str(exc), parent=self.root)
@@ -2182,6 +2316,8 @@ class CoordinateWindow:
             window.close()
         if getattr(self, 'cooking', None):
             self.cooking.close()
+        if getattr(self, 'route_recording', None) is not None:
+            self.route_recording.cancelled.set()
         self.playback.close()
         if self.scene_worker:
             self.scene_worker.close()

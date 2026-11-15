@@ -7,10 +7,23 @@ import pytest
 from utils.core.coordinate_monitor_view import MonitorView
 from utils.drivers.coordinate_point_store import PointStore
 from utils.drivers.coordinate_point_routes import PointRoutes
-from utils.ui.native_coordinate_monitor import CoordinateWindow, MonitorWorker, SCENE_CATEGORIES, SCENE_RANKS
+from utils.ui.native_coordinate_monitor import (
+    CoordinateWindow, MonitorWorker, SCENE_CATEGORIES, SCENE_RANKS, portable_data_directory,
+)
 from utils.ui.map_draw_cache import MapDrawCache
 from utils.core.lake_areas import WATER_AREAS
 from utils.core.map_reference_roads import REFERENCE_ROADS
+
+
+@pytest.mark.parametrize('name,legacy', [('routes', '点位'), ('logs', '日志')])
+def test_portable_data_directory_prefers_english_and_supports_legacy(tmp_path, name, legacy):
+    preferred = tmp_path / name
+    old = tmp_path / legacy
+    assert portable_data_directory(tmp_path, name, legacy) == preferred
+    old.mkdir()
+    assert portable_data_directory(tmp_path, name, legacy) == old
+    preferred.mkdir()
+    assert portable_data_directory(tmp_path, name, legacy) == preferred
 
 
 @pytest.mark.parametrize('raw,expected', [

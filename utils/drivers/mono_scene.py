@@ -255,6 +255,10 @@ class SceneMetadata:
         field = self.field(klass, name)
         if not field['flags'] & 16:
             raise ValueError('场景静态入口类型不符')
+        return self.static_reference_at(klass, field['offset'])
+
+    def static_reference_at(self, klass, offset):
+        """Read a static reference whose field metadata was already validated."""
         vtable = self.pointer(klass + 0xd8)
         if self.pointer(vtable) != klass or self.pointer(vtable + 16) != self.domain:
             raise ValueError('场景静态入口已变化')
@@ -262,7 +266,7 @@ class SceneMetadata:
         if not 0 <= slots < policy.MONO_VTABLE_LIMIT:
             raise ValueError('场景静态入口范围无效')
         storage = self.pointer(vtable + 0x50 + slots * 8)
-        return self.pointer(storage + field['offset'])
+        return self.pointer(storage + offset)
 
     def array(self, address, max_items=policy.COORD_SCENE_MAX_ITEMS, *, trace=None):
         info = self.obj(address) if trace is None else trace.step('array_header', lambda: self.obj(address))
