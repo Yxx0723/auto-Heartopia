@@ -1957,7 +1957,7 @@ class CoordinateWindow:
                                 auto_eat=self.food_auto_var.get() if hasattr(self, 'food_auto_var') else False,
                                 food_fallback=self.food_fallback_mode(),
                                 route_path=self.point_store.path,
-                                remember_paths=self.path_memory_var.get() if hasattr(self, 'path_memory_var') else True)
+                                remember_paths=self.path_memory_var.get() if hasattr(self, 'path_memory_var') else False)
         except (OSError, ValueError) as exc:
             self.playback.record_log('error', f'无法开始点位回放：{exc}')
             messagebox.showerror('无法开始点位回放', str(exc), parent=self.root)
@@ -1976,9 +1976,9 @@ class CoordinateWindow:
         try:
             data=json.loads((self.routes.root/'.采集设置.json').read_text(encoding='utf-8-sig'))
             value=data.get('remember_paths') if isinstance(data,dict) else None
-            return value if type(value) is bool else True
+            return value if type(value) is bool else False
         except (OSError,ValueError):
-            return True
+            return False
 
     def save_path_memory_option(self):
         try:

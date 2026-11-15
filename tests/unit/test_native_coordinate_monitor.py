@@ -660,7 +660,7 @@ def test_nearest_mode_is_passed_to_worker_without_selecting_from_ui_cached_posit
                                                      'recovery_attempts': 3, 'jump_on_recovery': False,
                                                      'collect_wait_seconds': 3., 'loop_count': 1, 'auto_navigate': True,
                                                      'auto_repair': True, 'auto_eat': True, 'food_fallback': 'fruit',
-                                                     'route_path': window.point_store.path, 'remember_paths': True}
+                                                     'route_path': window.point_store.path, 'remember_paths': False}
 
 
 def test_path_memory_switch_is_passed_to_playback_worker(tmp_path):
@@ -671,6 +671,14 @@ def test_path_memory_switch_is_passed_to_playback_worker(tmp_path):
     window.path_memory_var.get.return_value = False
     window.start_playback()
     assert window.playback.start.call_args.kwargs['remember_paths'] is False
+
+
+@pytest.mark.parametrize('contents', [None, '{}', '{"remember_paths": 1}', '{'])
+def test_path_memory_defaults_to_off(tmp_path, contents):
+    window = capture_window(tmp_path)
+    if contents is not None:
+        (window.routes.root / '.采集设置.json').write_text(contents, encoding='utf-8')
+    assert window.load_path_memory_option() is False
 
 
 @pytest.mark.parametrize('enabled',[False,True])
