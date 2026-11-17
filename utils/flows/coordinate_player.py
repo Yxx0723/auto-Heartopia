@@ -1781,6 +1781,18 @@ class _Follower:
                     navigation = ({'navigation_path': [list(p) for p in self.navigator.path],
                                    'navigation_decision': self.navigator.last_decision,
                                    'approach_attempts': self.approach_attempts} if self.navigator else {})
+                    obstacles = getattr(self.navigator, 'obstacles', None)
+                    clearance = getattr(obstacles, 'solid_clearance', None)
+                    if callable(clearance):
+                        at = (position[0], position[2])
+                        endpoint = (target[0], target[2])
+                        point_gap = clearance(at, at)
+                        leg_gap = clearance(at, endpoint)
+                        navigation['nearby_solid_clearance'] = {
+                            'point': point_gap if math.isfinite(point_gap) else None,
+                            'next_leg': leg_gap if math.isfinite(leg_gap) else None,
+                            'next_leg_length': math.dist(at, endpoint),
+                        }
                     mode = ('录制路线回放' if getattr(self, 'recorded_walk', False)
                             else '自动寻路' if self.navigator else '坐标回放')
                     if self.navigator and self.navigator.last_decision.get('kind') == 'collection_terminal_approach':

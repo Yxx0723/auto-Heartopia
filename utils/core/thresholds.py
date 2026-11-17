@@ -350,7 +350,13 @@ COORD_SCENE_MAX_CAPACITY = 262144
 # Local navigation starts with conservative padding; these are initial settings,
 # verified in simulations, not measured character capsule dimensions.
 COORD_NAV_GRID_STEP = .75
-COORD_NAV_CLEARANCE = .6
+# Read-only ActorMovementComponent sample: radius .15.
+# Keep the existing .60 cruise envelope and add one observed body radius
+# as a soft preference. These are world units, pending live route acceptance.
+COORD_NAV_OBSERVED_BODY_RADIUS = .15
+COORD_NAV_MINIMUM_CLEARANCE = .6
+COORD_NAV_PREFERRED_CLEARANCE = COORD_NAV_MINIMUM_CLEARANCE + COORD_NAV_OBSERVED_BODY_RADIUS
+COORD_NAV_CLEARANCE = COORD_NAV_MINIMUM_CLEARANCE
 COORD_NAV_WATER_CLEARANCE = 1.
 COORD_NAV_GROUND_CLEARANCE = .25
 COORD_NAV_BODY_HEIGHT = 1.75

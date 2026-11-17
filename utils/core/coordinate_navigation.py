@@ -101,6 +101,7 @@ class ObstacleMap:
         self.bridge_geometry_keys = {deck['key'] for deck in self.bridge_decks}
         self.water_polygon_ids = {}
         self.approachable, self.terminal_padding, self.goal = set(), {}, None
+        self.solid_indexes = set()
         candidates = []
         for box in scene.get('colliders', []):
             if geometry_key(box) in self.bridge_geometry_keys:
@@ -118,27 +119,30 @@ class ObstacleMap:
                 continue
             segment = len(footprint) == 2
             candidates.append((footprint, policy.COORD_NAV_CLEARANCE,
-                               box.get('category') != 'mountain' and not segment, None, segment))
+                               box.get('category') != 'mountain' and not segment, None, segment, True))
         if respect_water:
-            candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False, water_index, False)
+            candidates.extend((polygon, policy.COORD_NAV_WATER_CLEARANCE, False, water_index, False, False)
                               for water_index, polygon in enumerate(water_areas))
-        candidates.extend((polygon, policy.COORD_PATROL_HOME_MARGIN, False, None, False)
+        candidates.extend((polygon, policy.COORD_PATROL_HOME_MARGIN, False, None, False, False)
                           for polygon in scene.get('navigation_exclusions', ()))
-        candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False, None, False) for polygon in probes)
-        for polygon, clearance, approachable, water_index, segment in candidates:
+        candidates.extend((polygon, policy.COORD_NAV_CLEARANCE / 2, False, None, False, False) for polygon in probes)
+        for polygon, clearance, approachable, water_index, segment, solid in candidates:
             if not isinstance(polygon, (list, tuple)) or len(polygon) < (2 if segment else 3) \
                     or any(not isinstance(p, (list, tuple)) or len(p) != 2
                            or not all(type(v) in (float, int) and math.isfinite(v) for v in p) for p in polygon):
                 continue
             polygon = tuple(tuple(p) for p in polygon)
             xs, zs = zip(*polygon)
-            left, right, low, high = min(xs) - clearance, max(xs) + clearance, min(zs) - clearance, max(zs) + clearance
+            extent = policy.COORD_NAV_PREFERRED_CLEARANCE if solid else clearance
+            left, right, low, high = min(xs) - extent, max(xs) + extent, min(zs) - extent, max(zs) + extent
             radius = self.radius
             if right < position[0] - radius or left > position[0] + radius \
                     or high < position[2] - radius or low > position[2] + radius:
                 continue
             index = len(self.polygons)
             self.polygons.append((polygon, clearance))
+            if solid:
+                self.solid_indexes.add(index)
             if water_index is not None:
                 self.water_polygon_ids[index] = water_index
             if approachable:
@@ -163,14 +167,17 @@ class ObstacleMap:
             if policy.COORD_NAV_APPROACH_MIN_GAP < gap < clearance:
                 self.terminal_padding[index] = max(policy.COORD_NAV_APPROACH_MIN_GAP, gap - .02)
 
-    def clear(self, a, b, escape=False):
-        if any(abs(p[0] - self.origin[0]) > self.radius or abs(p[1] - self.origin[2]) > self.radius for p in (a, b)):
-            return False  # Space outside the indexed map is not proven clear.
+    def _segment_indexes(self, a, b):
         indexes = set()
         for x in range(math.floor(min(a[0], b[0]) / 4), math.floor(max(a[0], b[0]) / 4) + 1):
             for z in range(math.floor(min(a[1], b[1]) / 4), math.floor(max(a[1], b[1]) / 4) + 1):
                 indexes.update(self.bins.get((x, z), ()))
-        for index in indexes:
+        return indexes
+
+    def clear(self, a, b, escape=False):
+        if any(abs(p[0] - self.origin[0]) > self.radius or abs(p[1] - self.origin[2]) > self.radius for p in (a, b)):
+            return False  # Space outside the indexed map is not proven clear.
+        for index in self._segment_indexes(a, b):
             polygon, clearance = self.polygons[index]
             # The recorded player stood here. Reduce only artificial padding
             # during a short final approach, never the physical polygon itself.
@@ -198,12 +205,22 @@ class ObstacleMap:
     def covers_search(self, position, radius):
         return max(abs(position[0] - self.origin[0]), abs(position[2] - self.origin[2])) + radius <= self.radius
 
+    def solid_clearance(self, start, end):
+        return min((polygon_distance(start, end, self.polygons[index][0])
+                   for index in self._segment_indexes(start, end) & self.solid_indexes),
+                  default=math.inf)
+    def clearance_cost(self, start, end):
+        """Soft cost on a complete segment, independent of water and hard exclusions."""
+        width = policy.COORD_NAV_PREFERRED_CLEARANCE - policy.COORD_NAV_MINIMUM_CLEARANCE
+        deficit = max(0., policy.COORD_NAV_PREFERRED_CLEARANCE - self.solid_clearance(start, end))
+        return math.dist(start, end) * min(1., deficit / width)
+
     def risk_cost(self, start, end):
         return (self.risks.cost(start, end, self.height) if self.risks is not None else 0.) \
             + self.reference_risks.cost(start, end)
 
     def travel_cost(self, start, end):
-        return math.dist(start,end) + self.risk_cost(start,end)
+        return math.dist(start,end) + self.risk_cost(start,end) + self.clearance_cost(start,end)
 
 
 class PlannedPath(list):
@@ -215,7 +232,7 @@ class PlannedPath(list):
 
 
 def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None, search_radius=None,
-              max_nodes=None, horizon=None, approach_goal=None, before_search=lambda: None):
+              max_nodes=None, horizon=None, approach_goal=None, before_search=lambda: None, prefer_clearance=True):
     """A bounded A* plan to an exact local endpoint, or a useful far-goal frontier."""
     if not valid_position(position) or not valid_position(target):
         raise ValueError('寻路坐标无效')
@@ -231,7 +248,11 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
     local = goal if remaining <= horizon else tuple(
         a + (b - a) * horizon / remaining for a, b in zip(start, goal))
     check()
-    if obstacles.clear(start, local, escape=True) and obstacles.risk_cost(start,local) == 0:
+    direct_safe = obstacles.clear(start, local, escape=True) and obstacles.risk_cost(start,local) == 0
+    prefer_detour = (prefer_clearance and obstacles.clearance_cost(start, local) > 0
+                     and obstacles.solid_clearance(start, start) >= policy.COORD_NAV_PREFERRED_CLEARANCE
+                     and obstacles.solid_clearance(local, local) >= policy.COORD_NAV_PREFERRED_CLEARANCE)
+    if direct_safe and not prefer_detour:
         raw = [start, local]
     else:
         before_search()
@@ -335,6 +356,10 @@ class LocalNavigator:
         self.waypoint = None
         self.memory_leg = None
         self.learning_time = None
+            if direct_safe:
+                return plan_path(position, target, obstacles, check, grid_step=grid_step,
+                                 search_radius=search_radius, max_nodes=max_nodes, horizon=horizon,
+                                 approach_goal=approach_goal, before_search=before_search, prefer_clearance=False)
         self.learning_started = None
         self.learning_finished = None
         self.memory_path, self.walked_path = [], []
