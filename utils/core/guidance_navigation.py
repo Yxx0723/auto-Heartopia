@@ -135,6 +135,21 @@ class GuidanceNavigator(LocalNavigator):
             self._timings['signature_prepared'] = prepared is not None
         return result, terrain
 
+    def require_current_plan_scene(self):
+        planned, latest = self.scene, self.scene_provider()
+        if not latest or latest.get('state') != 'ready' or latest.get('world_state', 'ready') != 'ready':
+            raise NavigationWait('移动前无法获取有效碰撞快照', reason='scene')
+        if planned is latest:
+            return
+        if not planned or self._plan_scene_token(planned) != self._plan_scene_token(latest):
+            raise NavigationWait('移动前碰撞场景版本已变化，等待重新规划', reason='scene')
+
+    def _plan_scene_token(self, scene):
+        revision = scene.get('navigation_revision')
+        if revision is None:
+            revision = self._geometry_signature(scene)
+        return scene.get('cache_context'), scene.get('terrain_revision'), revision
+
     def _refresh_key(self, position):
         return (id(self.scene), id(self.obstacles), tuple(position), self.risks.revision,
                 self.reference_revision)

@@ -9,6 +9,8 @@ import json
 from utils.core.scene_display_cache import SceneDisplayCache
 from utils.core.navigation_supply import SnapshotSupply
 from utils.core.prepared_navigation import PreparedNavigationScene
+from utils.core.coordinate_navigation import scene_geometry_signature
+from utils.core.terrain_sections import terrain_profile_signature
 from utils.drivers.mono_scene import MemorySceneMap
 
 
@@ -17,6 +19,7 @@ class SceneMapWorker:
         self.profile, self.factory = profile, factory
         self.clock = clock
         self.latest_scene, self.latest_at = None, None
+        self.navigation_revision, self.navigation_signature = 0, None
         self.results, self.lock = queue.Queue(maxsize=1), threading.Lock()
         self.wake, self.stop = threading.Event(), threading.Event()
         self.pid, self.generation, self.reader_pid = None, 0, None
@@ -113,6 +116,7 @@ class SceneMapWorker:
         with self.lock:
             pid, generation = self.pid, self.generation
             history = self.history
+            revision, signature = self.navigation_revision, self.navigation_signature
         if pid != self.reader_pid:
             self.close_reader()
         if pid is None:
@@ -148,11 +152,28 @@ class SceneMapWorker:
                       'message': '场景正在更新，稍后自动重试', 'diagnostic': str(exc), 'issue': issue}
         read_finished = self.clock()
         geometry_preparation_seconds = 0.
-        if result.get('navigation_only') is True and result.get('state') == 'ready' \
-                and navigation_quality_valid(result, read_finished):
+        if (result.get('state') == 'ready' and result.get('world_state', 'ready') == 'ready'
+                and ('quality' in result or result.get('navigation_only') is True)
+                and navigation_quality_valid(result, read_finished)):
             preparation_started = self.clock()
             try:
-                result = PreparedNavigationScene(result)
+                if result.get('navigation_only') is True:
+                    prepared = PreparedNavigationScene(result)
+                    geometry = prepared.prepared_signature()
+                    terrain = prepared.prepared_terrain_signature()
+                else:
+                    geometry = scene_geometry_signature(result)
+                    terrain = terrain_profile_signature(result)
+                current = (generation, result.get('cache_context'), result.get('terrain_revision'),
+                           geometry, terrain)
+                revision += current != signature
+                signature = current
+                if result.get('navigation_only') is True:
+                    # Attach publication metadata before sharing the frozen snapshot.
+                    dict.__setitem__(prepared, 'navigation_revision', revision)
+                    result = prepared
+                else:
+                    result = {**result, 'navigation_revision': revision}
             except (ValueError, TypeError, KeyError, MemoryError):
                 # Discard this entire publication, never reuse old geometry or
                 # move forward with a partially prepared signature.
@@ -174,6 +195,7 @@ class SceneMapWorker:
             self.retry_delay = (min(policy.COORD_MONITOR_RETRY_SECONDS,
                 policy.COORD_SCENE_TRANSIENT_RETRY_SECONDS * 2**min(recovery_failures-1, 5))
                 if transient or fresh_retry else policy.COORD_MONITOR_RETRY_SECONDS)
+            self.navigation_revision, self.navigation_signature = revision, signature
             self.latest_scene, self.latest_at = result, now
             previous_expiry = self.supply.deadline
             previous_snapshot = self.supply.scan_count if previous_expiry is not None else None

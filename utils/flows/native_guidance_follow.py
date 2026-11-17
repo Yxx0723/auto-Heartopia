@@ -442,7 +442,6 @@ class GuidanceFollower(_Follower):
                         if token != self.anchor_rejoin_reported:
                             self.anchor_rejoin_reported = token
                             self.report('guidance_rejoin', '已通过碰撞检查，接入前方引导线', guidance_rejoin=True)
-                    self.waiting.passed('scene')
                     self.read_stats['plan_seconds'] = max(0.,self.clock.monotonic()-started)
                     stage = 'guidance'
                     # A slow plan requires fresh health, not destruction of the
@@ -451,10 +450,13 @@ class GuidanceFollower(_Follower):
                     self.waiting.passed('guidance')
                     if self.cursor.revision != planned_revision:
                         continue
-                    if self.read_stats['plan_seconds'] >= policy.COORD_GUIDANCE_REFRESH_SECONDS:
+                    stage = 'scene'
+                    slow_plan = self.read_stats['plan_seconds'] >= policy.COORD_GUIDANCE_REFRESH_SECONDS
+                    if isinstance(self.navigator, GuidanceNavigator) or slow_plan:
                         current = self.read(force=True)
-                        if math.dist(current,position) > policy.COORD_STUCK_DISTANCE:
-                            continue
+                        if math.dist(current, position) > policy.COORD_STUCK_DISTANCE:
+                            raise NavigationWait('规划期间角色位置已变化，等待重新规划', reason='scene')
+                    if slow_plan:
                         stage = 'direction'
                         basis = self.read_direction()
                         if basis is None:
@@ -463,10 +465,15 @@ class GuidanceFollower(_Follower):
                     self.guard()
                     stage = 'guidance'
                     self.cache.require_healthy(self.clock.monotonic())
+                    stage = 'scene'
+                    if isinstance(self.navigator, GuidanceNavigator):
+                        self.navigator.require_current_plan_scene()
                     self.waiting.ready()
                 except (OSError, ValueError, TypeError, NavigationWait) as exc:
                     self.release('path_unavailable' if isinstance(exc,NavigationWait)
                                  and exc.reason=='no_path' else 'invalid_'+stage)
+                    if stage == 'scene':
+                        self.navigator.invalidate()
                     if isinstance(exc,NavigationWait) and exc.reason != 'scene':
                         stage = 'path'
                         if self.clock.monotonic()-self.last_report>=.5:

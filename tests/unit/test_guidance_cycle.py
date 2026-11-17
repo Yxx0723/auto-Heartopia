@@ -159,3 +159,77 @@ def test_headless_process_probe_checks_real_geometry_preparation_without_input(m
     assert len(result['scans'])==4
     assert all(x['prepared_signature_equal'] for x in result['scans'])
     source.close.assert_called_once()
+
+def test_worker_navigation_revision_tracks_collision_changes_only():
+    raw = ready(0., 0.)
+    reader = Mock()
+    reader.snapshot.side_effect = [
+        deepcopy(raw),
+        deepcopy(raw),
+        {**deepcopy(raw), 'colliders': [box(1, 2, 1, 2)]},
+        deepcopy(raw),
+    ]
+    worker = SceneMapWorker('profile', factory=lambda *args: reader, clock=lambda: 1.)
+    worker.set_pid(7)
+    try:
+        revisions = []
+        for _ in range(4):
+            assert worker.poll_once()
+            revisions.append(worker.navigation_snapshot(7)['navigation_revision'])
+        assert revisions == [1, 1, 2, 3]
+    finally:
+        worker.close()
+
+
+@pytest.mark.parametrize('change', ['added', 'removed', 'same', 'missing', 'position'])
+def test_guidance_checks_scene_and_position_after_plan(change):
+    game = cached_game()
+    game.stop_at = .4
+    empty = scene()
+    wall = {**scene(), 'colliders': [box(20, 21, 20, 21)]}
+    source = wall if change == 'removed' else empty
+    nav = GuidanceNavigator(lambda: source, clock=game.monotonic, water_areas=())
+    original = nav.follow_target
+    calls = []
+
+    def plan(*args, **kwargs):
+        nonlocal source
+        target = original(*args, **kwargs)
+        calls.append(game.time)
+        if len(calls) == 1:
+            if change == 'missing':
+                source = None
+            elif change == 'added':
+                source = wall
+            elif change == 'removed':
+                source = empty
+            elif change == 'same':
+                source = deepcopy(empty)
+        return target
+
+    nav.follow_target = plan
+    if change == 'position':
+        # Shift only the first forced sample taken after a successful plan.
+        real_read = GuidanceFollower.read
+        shifted = False
+
+        def read(follower, force=False):
+            nonlocal shifted
+            pos = real_read(follower, force=force)
+            if force and calls and not shifted:
+                shifted = True
+                return (pos[0] + 2., pos[1], pos[2])
+            return pos
+
+        with patch.object(GuidanceFollower, 'read', read):
+            run(game, navigator=nav)
+        assert shifted
+    else:
+        run(game, navigator=nav)
+    assert calls
+    if change == 'missing':
+        assert not game.events
+    else:
+        assert game.events
+        first_input = game.events[0][0]
+        assert first_input == calls[0] if change == "same" else first_input > calls[0]
