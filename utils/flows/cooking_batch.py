@@ -8,6 +8,12 @@ from utils.drivers.cooking_first_recipe_notice import observe_first_recipe_notic
 from utils.drivers.cooking_single_pot import SinglePotReader
 from utils.drivers.input_task_gate import InputTaskGate
 
+# The cooking inventory is refreshed on a ~3s cadence. A read that lands in
+# that window has no scope (material_status known=False) and must not be
+# mistaken for a genuine shortage. Retry only that unconfirmed case.
+MATERIAL_CONFIRM_ATTEMPTS = 3
+MATERIAL_CONFIRM_SECONDS = 3.0
+
 
 def run_batch(*, target, recipe, memory, window, controls, device, clock,
               report, directory, entry_runner, selection_runner, pot_runner):
@@ -61,7 +67,32 @@ def run_batch(*, target, recipe, memory, window, controls, device, clock,
             if identity is not None:
                 step('bind_previous_confirmed_stove',lambda:native.bind(identity[0]),binding=True)
                 step('confirm_idle_before_entry',lambda:owned(native))
-            if not material_status(recipe,step('read_material_inventory',inventory))['sufficient']:
+            material_view=None
+            for material_attempt in range(1,MATERIAL_CONFIRM_ATTEMPTS+1):
+                material_view=step('read_material_inventory',inventory)
+                status=material_status(recipe,material_view)
+                # material_status always reports 'known'; default it for older
+                # callers/stubs that only supply 'sufficient'.
+                if status.get('known', True):
+                    break
+                # Unconfirmed snapshot (no scope): wait one refresh window and
+                # re-read. A genuinely insufficient but known inventory fails
+                # immediately below; only the unread case is retried.
+                publish('material_unconfirmed',
+                        '背包材料快照未确认，等待刷新后重读（%d/%d）'
+                        % (material_attempt,MATERIAL_CONFIRM_ATTEMPTS),
+                        attempt=material_attempt,max_attempts=MATERIAL_CONFIRM_ATTEMPTS)
+                if material_attempt < MATERIAL_CONFIRM_ATTEMPTS:
+                    # Wait in small steps so F9/focus loss still stops the batch.
+                    waited = 0.0
+                    while waited < MATERIAL_CONFIRM_SECONDS:
+                        guard()
+                        step_sleep = min(.1, MATERIAL_CONFIRM_SECONDS - waited)
+                        clock.sleep(step_sleep)
+                        waited += step_sleep
+            if not status.get('known', True):
+                raise ValueError('背包材料快照连续未确认，批次停止，未开锅')
+            if not status['sufficient']:
                 raise ValueError('当前锅材料不足，批次停止，未开锅')
             result=step('open_recipe_panel',lambda:entry_runner(window=window,controls=controls,device=device,
                 read_menu=native.snapshot,read_recipe=native.recipe.snapshot,inventory=inventory,
