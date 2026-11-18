@@ -177,6 +177,14 @@ def wait_for_variant_start(read_target, *, clock, guard, wait, report, window, r
                samples=samples, deadline_ms=500, failure=error)
 
 
+def start_button_interaction(observation):
+    """Return click eligibility and diagnostic flags independently of Behaviour.enabled."""
+    button = observation.get('unity_button') or {}
+    flags = (button.get('m_Interactable'), button.get('m_GroupsAllowInteraction'))
+    return ('blocked' if any(flag is False for flag in flags)
+            else 'allowed' if all(flag is True for flag in flags) else 'unknown')
+
+
 def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock, report, journal):
     size=tuple(window.size()); events=SinglePotEvents(recipe)
     record={'schema':'cooking-single-pot-v1','pot_id':uuid4().hex,'recipe_id':recipe['recipe_id'],
@@ -191,7 +199,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             json.dumps(value,allow_nan=False)
         except Exception as exc:
             value={'state':'unavailable','reason':type(exc).__name__+': '+str(exc)}
-        if stage=='before_click':start_ui_before=value
+        if stage=='before_click' and start_ui_before is None:start_ui_before=value
         baseline=start_ui_before or {}
         same_button=(value.get('button')==baseline.get('button') and value.get('button') is not None
             and value.get('button_binding_stable') is True
@@ -202,6 +210,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             type(old) in (int,float) and type(new) in (int,float) else {'state':'unavailable'})
         value['timestamp_evidence_scope']='CustomButton handler timestamp only; not proof of CookPanel callback or start acceptance'
         report('start_ui_diagnostic','开始按钮只读诊断',stage=stage,start_diagnostic=value)
+        return value
     def save(state,message,**extra):
         record.update(state=state,message=message,**events.record(),**extra)
         atomic_write_json(journal,record)
@@ -544,22 +553,94 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
         if not slots_match(view['slots'],plan):raise ValueError('开始前材料槽变化，未投料')
         wait(.1)
         if read(reader.materials)!=view:raise ValueError('材料槽尚未稳定，未投料')
+        start_attempts = 0
+        start_deadline = clock.monotonic() + 10.
+        retry_blocked = None
+
+        def start_transition(phase, native=None, observation=None, reason=None):
+            native = native or {}
+            observation = observation or {}
+            button = observation.get('unity_button') or {}
+            hit = observation.get('start_raycast') or {}
+            enabled = observation.get('start_button_enabled') or {}
+            report('start_confirmation', f'开锅确认 {phase}',
+                   start_confirmation={
+                       'state': phase, 'timestamp': now(), 'click_seq': start_attempts,
+                       'path_used': 'P1' if start_attempts > 1 or phase == 'RETRY_READY' else 'P0',
+                       'status': native.get('status'), 'status_started': native.get('status_started'),
+                       'food_id': native.get('food_id'), 'reason': reason,
+                       'interactable': button.get('m_Interactable'),
+                       'groups_allow': button.get('m_GroupsAllowInteraction'),
+                       'hit_target': hit.get('button'), 'hit_state': hit.get('state'),
+                       'enabled_diagnostic': enabled,
+                       'warnings': [name for name, present in (
+                           ('enabled_unknown', enabled.get('state') == 'unknown'),
+                           ('interactable_unknown', bool(observation) and
+                            start_button_interaction(observation) == 'unknown')) if present],
+                   })
+
+        def retry_rejection(observation):
+            baseline = start_ui_before or {}
+            native = observation.get('native_state') or {}
+            old_native = baseline.get('native_state') or {}
+            if (native.get('status'), native.get('food_id')) != (0, 0):
+                return '灶台已变化或无法确认空闲'
+            for key in ('scope', 'stove_identity', 'local_net_id', 'status_started'):
+                if native.get(key) is None or native.get(key) != old_native.get(key):
+                    return '灶台身份或开锅时间已变化'
+            menu = observation.get('menu') or {}
+            if menu.get('open') is not True or menu.get('stove_identity') != native['stove_identity']:
+                return '不能确认原食谱面板仍然打开'
+            selected = observation.get('selected_recipe') or {}
+            old_selected = baseline.get('selected_recipe') or {}
+            if (not selected or selected != old_selected
+                    or selected.get('recipe_id') != recipe['recipe_id']):
+                return '食谱或用料槽无法确认一致'
+            if observation.get('button_handler_timestamp_updated') is not False:
+                return '按钮已响应，或新旧按钮时间戳无法比较'
+            if observation.get('last_click_time') != baseline.get('last_click_time'):
+                return '按钮时间戳变化'
+            raycast = observation.get('start_raycast') or {}
+            button = observation.get('unity_button') or {}
+            interaction = start_button_interaction(observation)
+            if interaction == 'blocked':
+                return '开始按钮明确不可交互'
+            if interaction == 'unknown':
+                record['start_guard_degraded'] = True
+            if (raycast.get('active_in_hierarchy') is not True or raycast.get('canvas_allows_input') is not True
+                    or raycast.get('state') != 'hit' or raycast.get('button') != button.get('object')
+                    or raycast.get('point') != observation.get('center')):
+                return '开始按钮的实际 UI 命中或遮挡状态未确认'
+            return None
+
         def reserve_start():
-            nonlocal start_reserved_at
+            nonlocal start_reserved_at, start_attempts
             current=read(reader.state);events.observe(current)
             latest=stock();now_view=read(reader.materials)
             if now_view!=view or not slots_match(now_view['slots'],material_plan(recipe,now_view,latest)):
                 raise ValueError('派发开始前材料或料理变化，未投料')
-            events.reserve('start')
+            if start_attempts:
+                reason = retry_rejection(observe_start('retry_before_dispatch'))
+                if reason or events.cooking_seen or clock.monotonic() >= start_deadline:
+                    raise ValueError(f'开锅补点已停止：{reason or "已开锅或总预算耗尽"}')
+            else:
+                events.reserve('start')
+            start_attempts += 1
             start_reserved_at=now()
+            record['start_attempts'] = start_attempts
+            report('start_attempt', f'开锅尝试 {start_attempts}/3', attempt=start_attempts)
             save('start_reserved','启动单锅操作已登记，等待游戏确认，不重发',
                  inventory_scope=latest['scope'],inventory_before=deepcopy(latest['counts']),material_slots=now_view['slots'],
                  start_reserved_at=start_reserved_at)
-        if recipe['recipe_id']==45160 and recipe.get('base_recipe_id')==45153:
-            def start_target(observation=None):
-                if observation is None:
-                    return reader.menu_target(size,'start')
-                return reader.menu_target(size,'start',start_observation=observation)
+        variant_start = recipe['recipe_id'] == 45160 and recipe.get('base_recipe_id') == 45153
+
+        def start_target(observation=None):
+            if observation is not None or variant_start:
+                return reader.menu_target(size, 'start',
+                                          start_observation={} if observation is None else observation)
+            return reader.menu_target(size, 'start')
+
+        if variant_start:
             click(start_target,reserve_start,start_trace={
                 'base_recipe_id':view['selected']['recipe_id'], 'target_recipe_id':recipe['recipe_id'],
                 'stove_identity':view['stove_identity'],
@@ -568,6 +649,9 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
         else:
             click(lambda:reader.menu_target(size,'start'),reserve_start)
         start_at=clock.monotonic();collect_at=None;last_signature=None;observed_phase=None
+        next_retry_at = start_at + 1.5
+        start_transition("CLICK_DISPATCHED", observation=start_ui_before)
+        start_transition("POLLING", observation=start_ui_before)
         next_start_observation=start_at
         start_transition_observed=False
         while True:
@@ -582,16 +666,45 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                 observe_start('waiting_start')
                 next_start_observation=clock.monotonic()+.5
             elif events.cooking_seen and not start_transition_observed:
-                observe_start('start_native_confirmed')
-                start_transition_observed=True
+                observation = observe_start('start_native_confirmed')
+                if state['status_started'] and state['food_id'] == recipe['product_id']:
+                    start_transition('OPEN_SUCCESS', state, observation)
+                    start_transition_observed = True
             if events.cooking_seen:
                 record['started_pots']=1
             signature=(state['status'],state['status_started'],events.pending)
             if signature!=last_signature:
                 save('cooking','读取实际烹饪状态：'+str(state['status']),native_state=state)
                 last_signature=signature
-            if not events.cooking_seen and clock.monotonic()-start_at>8.:
-                raise ValueError('开始输入未取得实际开锅确认，不重复启动')
+            if not events.cooking_seen:
+                current_time = clock.monotonic()
+                if current_time >= start_deadline:
+                    reason = retry_blocked or '已用完开锅尝试和确认时间'
+                    start_transition('OPEN_FAILED', state, reason=reason)
+                    raise ValueError(f'未取得实际开锅确认，已停止：{reason}')
+                if start_attempts < 3 and retry_blocked is None and current_time >= next_retry_at:
+                    # Refresh the current panel/button witness before evaluating
+                    # replay eligibility. Recheck again immediately before input.
+                    try:
+                        read(start_target)
+                    except (ValueError, OSError) as exc:
+                        retry_blocked = f'开始按钮重新绑定失败：{exc}'
+                    else:
+                        observation = observe_start('retry_rebind')
+                        retry_blocked = retry_rejection(observation)
+                        start_transition('RETRY_READY', state, observation, retry_blocked)
+                    if retry_blocked is not None:
+                        report('start_retry_blocked', '补点条件未通过，继续只读确认本锅',
+                               attempt=start_attempts, reason=retry_blocked)
+                    else:
+                        wait(.5)
+                        if clock.monotonic() + 1.5 < start_deadline:
+                            click(start_target, reserve_start)
+                            start_transition('CLICK_DISPATCHED')
+                            start_transition('POLLING')
+                        else:
+                            retry_blocked = '剩余时间不足以确认补点结果'
+                        next_retry_at = clock.monotonic() + 1.5
             if action:
                 kind,key=action
                 def reserve_action():
@@ -618,7 +731,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                         return deepcopy(record)
                 if clock.monotonic()-collect_at>15.:
                     raise ValueError('收菜后未同时取得灶台复位和指定产物增量，未判成功或重复收菜')
-            wait(.03)
+            wait(.03 if events.cooking_seen else .05)
     except Exception as exc:
         save('unconfirmed','单锅停止：'+type(exc).__name__+': '+str(exc),
              hud_diagnostics=getattr(exc,'diagnostics',None) or getattr(reader,'hud_diagnostics',None))

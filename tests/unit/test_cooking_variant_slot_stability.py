@@ -393,6 +393,8 @@ class StartReadbackKitchen(LayoutKitchen):
         super().__init__('enabled_unknown')
         self.preparing = preparing
         self.phases = []
+        self.confirmation = []
+        self.product_id = next(r for r in load_catalog()["recipes"] if r["recipe_id"] == 45160)["product_id"]
         self.started_at = None
 
     def state(self):
@@ -402,7 +404,7 @@ class StartReadbackKitchen(LayoutKitchen):
             raise BeforeStart
         if self.preparing and self.time > self.started_at:
             return dict(status=1, status_started=2, previous_status=0, stove_identity=[1, 2, 3],
-                        owner_net_id=5, local_net_id=5)
+                        owner_net_id=5, local_net_id=5, food_id=self.product_id)
         return dict(status=0, status_started=1, previous_status=0, stove_identity=[1, 2, 3])
 
     def execute(self, event):
@@ -414,6 +416,8 @@ class StartReadbackKitchen(LayoutKitchen):
         super().report(state, message, **data)
         if state == 'native_observation':
             self.phases.append(data['native_state']['status'])
+        elif state == 'start_confirmation':
+            self.confirmation.append(data['start_confirmation'])
 
 
 @pytest.mark.parametrize('preparing', [True, False])
@@ -429,5 +433,21 @@ def test_unknown_enabled_still_requires_native_start_confirmation(run, preparing
     assert len(kitchen.reserved) == 1
     assert kitchen.clicks.count(('start', None)) == 1
     assert kitchen.phases == ([0, 1] if preparing else [0])
+    phases = [item['state'] for item in kitchen.confirmation]
+    assert phases[:2] == ['CLICK_DISPATCHED', 'POLLING']
+    assert phases[-1] == ('OPEN_SUCCESS' if preparing else 'OPEN_FAILED')
+    assert all(item['click_seq'] == 1 for item in kitchen.confirmation)
     if not preparing:
-        assert 8 <= kitchen.time - kitchen.started_at < 8.1
+        assert 9.5 <= kitchen.time - kitchen.started_at <= 10.1
+
+@pytest.mark.parametrize('flags,expected', [
+    ((True, True), 'allowed'), ((True, None), 'unknown'), ((None, None), 'unknown'),
+    ((False, None), 'blocked'), ((None, False), 'blocked'),
+])
+def test_start_button_missing_enabled_does_not_override_interaction(flags, expected):
+    from utils.flows.cooking_single_pot import start_button_interaction
+    observation = {
+        'start_button_enabled': {'state': 'unknown'},
+        'unity_button': dict(zip(('m_Interactable', 'm_GroupsAllowInteraction'), flags)),
+    }
+    assert start_button_interaction(observation) == expected

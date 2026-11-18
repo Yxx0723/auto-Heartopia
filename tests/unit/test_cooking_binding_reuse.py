@@ -70,7 +70,7 @@ def test_stable_ten_pot_binding_does_not_reenumerate():
     scene = Scene()
     reader = scene.reader()
     assert reader.bind(STOVE) == {'status': 0}
-    assert reader.binding_metrics[0]['mode'] == 'full'
+    assert reader.binding_metrics[0]['mode'] == 'global_once'
     for _ in range(28):
         assert reader.bind(STOVE) == {'status': 0}
         assert [m['mode'] for m in reader.binding_metrics] == ['quick']
@@ -79,21 +79,20 @@ def test_stable_ten_pot_binding_does_not_reenumerate():
     assert reader.state.call_count == 29
 
 
-@pytest.mark.parametrize('changed', [40, 70])
-def test_stable_collection_change_falls_back_once(changed):
+def test_stable_global_collection_change_falls_back_once():
     scene = Scene()
     reader = scene.reader()
     reader.bind(STOVE)
-    scene.generation[changed] += 1
+    scene.generation[40] += 1
     reader.bind(STOVE)
-    assert scene.enumerations == [40, 70, 40, 70]
+    assert scene.enumerations == [40, 70, 40]
     assert [(x['mode'], x['outcome']) for x in reader.binding_metrics] == [
-        ('quick', 'collection_changed'), ('full', 'verified')]
+        ('quick', 'verified')]
     reader.bind(STOVE)
-    assert scene.enumerations == [40, 70, 40, 70]
+    assert scene.enumerations == [40, 70, 40]
 
 
-@pytest.mark.parametrize('change', ['scene', 'stove', 'owner', 'mid_read', 'state_error', 'duplicate'])
+@pytest.mark.parametrize('change', ['scene', 'stove', 'owner', 'state_error', 'duplicate'])
 def test_unsafe_revalidation_invalidates_binding(change):
     scene = Scene()
     reader = scene.reader()
@@ -105,11 +104,6 @@ def test_unsafe_revalidation_invalidates_binding(change):
         stove = (11, 22, 34)
     elif change == 'owner':
         scene.refs[50, '_hierarchyObject'] = 999
-    elif change == 'mid_read':
-        def mutate():
-            scene.generation[40] += 1
-            return {'status': 0}
-        reader.state.side_effect = mutate
     elif change == 'state_error':
         reader.state.side_effect = OSError('read failed')
     else:
@@ -119,10 +113,10 @@ def test_unsafe_revalidation_invalidates_binding(change):
         reader.bind(stove)
     assert reader.bound is reader.binding_witness is None
     assert reader.binding_metrics[-1]['outcome'] == 'failed'
-    assert scene.enumerations == ([40, 70, 40, 70, 70] if change == 'duplicate' else [40, 70])
+    assert scene.enumerations == ([40, 70, 40] if change == 'duplicate' else [40, 70])
 
 
-@pytest.mark.parametrize('address,name', [(40, 'ActiveHierarchies'), (70, '_components')])
+@pytest.mark.parametrize('address,name', [(70, '_components')])
 @pytest.mark.parametrize('index,field', tuple(enumerate(('_version', '_count', '_freeCount', '_entries'))))
 def test_full_binding_diagnoses_each_collection_field(address, name, index, field):
     scene = Scene()
@@ -219,3 +213,69 @@ def test_full_binding_stable_snapshots_and_identity_are_serializable():
         assert collection['initial']['elapsed_seconds'] >= 0
         assert collection['final']['elapsed_seconds'] >= 0
     assert reader.binding_witness is not None
+
+def test_unrelated_free_count_change_relocates_unique_stove():
+    scene = Scene()
+    reader = scene.reader()
+    original = scene.dictionary_stamp
+    calls = 0
+
+    def mutate_once():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            def changed(address, max_items=None):
+                version, count, unused, entries = original(address, max_items)
+                return version, count, int(address == 40), entries
+            scene.dictionary_stamp = changed
+        return {'status': 0}
+
+    reader.state.side_effect = mutate_once
+    assert reader.bind(STOVE) == {'status': 0}
+    assert [m['outcome'] for m in reader.binding_metrics] == ['verified']
+    assert scene.enumerations == [40, 70, 40]
+
+
+@pytest.mark.parametrize('change', ['destroyed', 'address_reused', 'components_changed', 'repeated_churn'])
+def test_global_rescan_fails_closed_on_target_drift_or_persistent_mutation(change):
+    scene = Scene()
+    reader = scene.reader()
+    original = scene.data
+
+    def mutate():
+        scene.generation[40] += 1
+        if change == 'destroyed':
+            scene.collections[40].clear()
+        elif change == 'address_reused':
+            scene.data = lambda address, size: bytes([9])*size if address == 80 else original(address, size)
+        elif change == 'components_changed':
+            scene.generation[70] += 1
+        return {'status': 0}
+
+    reader.state.side_effect = mutate
+    with pytest.raises(ValueError):
+        reader.bind(STOVE)
+    assert reader.bound is reader.binding_witness is None
+    if change == 'repeated_churn':
+        recovery = reader.binding_metrics[0]['collection_diagnostic']['registry_recovery']
+        assert sum(step['stage'] == 'target_delta' for step in recovery) == 3
+        assert scene.enumerations.count(70) == 1
+
+@pytest.mark.parametrize('mutation', ['entries', 'capacity_and_members'])
+def test_fresh_registry_storage_is_used_without_rescanning_existing_components(mutation):
+    scene = Scene()
+    reader = scene.reader()
+    storage = scene.dictionary_stamp
+    reader.bind(STOVE)
+
+    def changed(address, max_items=None):
+        version, count, free, entries = storage(address, max_items)
+        return (version + 1, count, free, entries + 1000) if address == 40 else (version, count, free, entries)
+
+    if mutation == 'capacity_and_members':
+        scene.collections[40].append(51)
+        scene.refs[51, '_hierarchyObject'] = 52
+    scene.dictionary_stamp = changed
+    assert reader.bind(STOVE) == {'status': 0}
+    assert scene.enumerations == [40, 70, 40]
+    assert reader.binding_witness[-1][0][-1] == 1041

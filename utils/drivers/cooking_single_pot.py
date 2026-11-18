@@ -1,9 +1,11 @@
 """Owned cooking component and native UI observations. Never writes memory."""
+from collections import Counter
 import struct
 import hashlib
 from time import perf_counter
 
 from utils.core.cooking_single_pot import STATUSES
+from utils.core.scene_read import SceneReadIssue
 from utils.core.ui_projection import rect_to_client
 from utils.drivers.cooking_selection import CookingSelectionReader
 from utils.drivers.mono_scene import MemorySceneMap
@@ -147,16 +149,16 @@ class SinglePotReader(CookingSelectionReader):
         stove = tuple(stove)
         self.binding_metrics = []
         previous = self.bound
+        deadline = perf_counter() + 10.
         try:
             if previous is not None:
-                state = self._time_binding('quick', lambda _record, _started: self._revalidate(stove))
-                if state is not None:
-                    return state
+                state = self._time_binding('quick', lambda record, _started: self._revalidate(stove, deadline, record))
+                return state
             self.bound = self.binding_witness = None
-            return self._time_binding(
-                'full', lambda record, started: self._bind_full(stove, previous, record, started))
+            return self._time_binding('global_once', lambda record, started:
+                self._bind_full(stove, record, started, deadline))
         except Exception:
-            self.bound = self.binding_witness = None
+            self.bound = self.binding_witness = self._verified_stove_target = None
             raise
 
     def _time_binding(self, mode, read):
@@ -173,7 +175,7 @@ class SinglePotReader(CookingSelectionReader):
             record['seconds'] = perf_counter() - started
             self.binding_metrics.append(record)
 
-    def _revalidate(self, stove):
+    def _revalidate(self, stove, deadline, record):
         source, path, stamp = self.binding_witness
         if stove != self.bound[1] or self._binding_source() != source:
             raise ValueError('场景、人物、灶台或活动层级入口已变化')
@@ -188,37 +190,44 @@ class SinglePotReader(CookingSelectionReader):
                 or data['code'] != 17 or (typ['name'], typ['namespace']) !=
                 ('CookingComponentData', 'XDTDataAndProtocol.ComponentsData')):
             raise ValueError('已绑定灶台组件类型已变化')
+        target = self._target_witness(path, self.bound[4:])
+        if (source, target, before[1]) != self._verified_stove_target:
+            raise ValueError('灶台对象头或实例身份已变化')
         state = self.state()
         after = self._binding_stamp(source, path)
-        if before != after:
-            raise ValueError('灶台绑定复核期间集合正在变化')
-        return state if after == stamp else None
+        if before[1] != after[1] or self._target_witness(path, self.bound[4:]) != target:
+            raise ValueError('灶台绑定复核期间目标组件发生变化')
+        if self._binding_source() != source:
+            raise ValueError('灶台绑定复核期间场景或人物身份变化')
+        if before[0] != stamp[0] or after[0] != stamp[0]:
+            recovery = record['registry_recovery'] = []
+            current_stamp, membership, state = self._refresh_registry_target(
+                source, path, self.bound[4:], target, before[1], stove,
+                self._verified_registry_members, after[0], deadline, recovery)
+            self.binding_witness = (source, path, (current_stamp, before[1]))
+            self._verified_registry_members = membership
+        return state
 
-    def _bind_full(self, stove, previous, record, binding_started):
+    def _target_witness(self, path, binding):
         m = self.ui.meta
-        diagnostic = {
-            'phase': 'initial_source',
-            'stove': dict(zip(('static_id', 'entity_net_id', 'level_object_net_id'), stove)),
-            'match_count': None,
-            'collections': {
-                name: {'initial': None, 'final': None, 'changed_fields': None}
-                for name in ('ActiveHierarchies', '_components')
-            },
-            'ownership_checks': [],
-        }
-        record['collection_diagnostic'] = diagnostic
-        source = self._binding_source()
-        context, local, registry, role = source
-        diagnostic['scene'] = dict(zip(('level_node', 'level', 'cooking_system'), context))
-        diagnostic['player'] = {'entity': role, 'hierarchy': local}
-        diagnostic['phase'] = 'initial_ActiveHierarchies'
-        started = perf_counter()
-        hierarchies, registry_stamp = m.dictionary(registry, with_stamp=True)
-        diagnostic['collections']['ActiveHierarchies']['initial'] = _binding_snapshot(
-            registry, registry_stamp, diagnostic['phase'], started, perf_counter(), binding_started)
-        diagnostic['phase'] = 'scan_components'
+        # Validate each managed object before reading its immutable vtable word.
+        witness = []
+        for address in dict.fromkeys((*path, *binding)):
+            info = m.obj(address)
+            header = m.data(address, 8)
+            witness.append((address, info['name'], info['namespace'], header.hex()))
+        return tuple(witness)
+
+    @staticmethod
+    def _check_bind_budget(deadline):
+        if perf_counter() >= deadline:
+            raise ValueError('灶台绑定超过总时限')
+
+    def _scan_stove_members(self, hierarchies, stove, deadline):
+        m = self.ui.meta
         matches = []
         for hierarchy in hierarchies:
+            self._check_bind_budget(deadline)
             try:
                 owner = m.ref(hierarchy, '_hierarchyObject')
                 if not owner or m.obj(owner)['name'] not in ('StaticLevelObjectWrap', 'LevelEntityComponent'):
@@ -244,16 +253,104 @@ class SinglePotReader(CookingSelectionReader):
                         continue
                     if self.integer(component, '_cookerStaticId') != stove[0]:
                         continue
-                    matches.append(((component, entity, parent, parent_entity),
-                                    (hierarchy, owner, entity, components), component_stamp,
-                                    component_started, component_finished))
+                    binding = (component, entity, parent, parent_entity)
+                    path = (hierarchy, owner, entity, components)
+                    matches.append((binding, path, component_stamp, component_started,
+                                    component_finished, self._target_witness(path, binding)))
             except (ValueError, OSError):
                 continue  # Unrelated streaming objects never authorize a pot.
+        return matches
+
+    def _registry_snapshot(self, source, deadline, recovery, *, attempts=3):
+        m = self.ui.meta
+        for attempt in range(attempts):
+            self._check_bind_budget(deadline)
+            if self._binding_source() != source:
+                raise ValueError('重新定位期间场景、人物或活动层级入口变化')
+            started = perf_counter()
+            try:
+                members, stamp = m.dictionary(source[2], with_stamp=True)
+            except SceneReadIssue as exc:
+                if exc.kind != 'mutation' or not exc.retryable or attempt + 1 == attempts:
+                    raise
+                recovery.append({'stage': 'registry_copy', 'outcome': 'mutation',
+                                 'seconds': perf_counter() - started})
+                continue
+            recovery.append({'stage': 'registry_copy', 'outcome': 'verified',
+                             'seconds': perf_counter() - started})
+            return members, stamp
+
+    def _refresh_registry_target(self, source, path, binding, witness, component_stamp,
+                                 stove, members, observed_stamp, deadline, recovery):
+        # Copy the current registry storage, then inspect only entries that
+        # were not in the last verified membership. Never rescan all old owners.
+        for attempt in range(3):
+            try:
+                latest, copied_stamp = self._registry_snapshot(source, deadline, recovery, attempts=1)
+            except SceneReadIssue as exc:
+                if exc.kind != 'mutation' or not exc.retryable or attempt == 2:
+                    raise
+                recovery.append({'stage': 'target_delta', 'attempt': attempt + 1, 'outcome': 'mutation'})
+                continue
+            latest_members = Counter(latest)
+            if latest_members[path[0]] != 1:
+                raise ValueError('目标灶台已离开当前活动层级或层级不唯一')
+            added = list((latest_members - members).elements())
+            started = perf_counter()
+            duplicates = self._scan_stove_members(added, stove, deadline)
+            recovery.append({'stage': 'target_delta', 'attempt': attempt + 1,
+                             'added_hierarchies': len(added), 'previous_stamp': observed_stamp,
+                             'copied_stamp': copied_stamp, 'seconds': perf_counter() - started})
+            if duplicates:
+                raise ValueError('重新定位时发现多个匹配灶台')
+            if self._binding_source() != source or self._target_witness(path, binding) != witness:
+                raise ValueError('重新定位期间灶台对象或场景身份变化')
+            state = self.state()
+            final_stamp, final_components = self._binding_stamp(source, path)
+            if final_components != component_stamp or self._target_witness(path, binding) != witness:
+                raise ValueError('重新定位期间目标灶台组件变化')
+            self._check_bind_budget(deadline)
+            if final_stamp == copied_stamp:
+                return final_stamp, latest_members, state
+            members, observed_stamp = latest_members, final_stamp
+        raise ValueError('目标灶台复核期间活动层级持续变化，已停止')
+
+    def _bind_full(self, stove, record, binding_started, deadline):
+        def check_budget():
+            if perf_counter() >= deadline:
+                raise ValueError('灶台绑定超过总时限')
+
+        check_budget()
+        m = self.ui.meta
+        diagnostic = {
+            'phase': 'initial_source',
+            'stove': dict(zip(('static_id', 'entity_net_id', 'level_object_net_id'), stove)),
+            'match_count': None,
+            'collections': {
+                name: {'initial': None, 'final': None, 'changed_fields': None}
+                for name in ('ActiveHierarchies', '_components')
+            },
+            'ownership_checks': [],
+        }
+        record['collection_diagnostic'] = diagnostic
+        source = self._binding_source()
+        context, local, registry, role = source
+        diagnostic['scene'] = dict(zip(('level_node', 'level', 'cooking_system'), context))
+        diagnostic['player'] = {'entity': role, 'hierarchy': local}
+        diagnostic['phase'] = 'initial_ActiveHierarchies'
+        started = perf_counter()
+        recovery = diagnostic['registry_recovery'] = []
+        hierarchies, registry_stamp = self._registry_snapshot(source, deadline, recovery)
+        members = Counter(hierarchies)
+        diagnostic['collections']['ActiveHierarchies']['initial'] = _binding_snapshot(
+            registry, registry_stamp, diagnostic['phase'], started, perf_counter(), binding_started)
+        diagnostic['phase'] = 'scan_components'
+        matches = self._scan_stove_members(hierarchies, stove, deadline)
         diagnostic['match_count'] = len(matches)
         diagnostic['phase'] = 'unique_match'
         if len(matches) != 1:
             raise ValueError('当前灶台的烹饪组件尚未唯一对应')
-        binding, path, component_stamp, component_started, component_finished = matches[0]
+        binding, path, component_stamp, component_started, component_finished, target = matches[0]
         diagnostic['matched_stove'] = dict(zip(
             ('component', 'entity', 'parent_component', 'parent_entity'), binding))
         diagnostic['collections']['_components']['initial'] = _binding_snapshot(
@@ -270,15 +367,27 @@ class SinglePotReader(CookingSelectionReader):
         diagnostic['phase'] = 'read_player_network_id'
         self.bound = (context, stove, role, self.entity_net(role), *binding)
         diagnostic['player']['net_id'] = self.bound[3]
-        diagnostic['phase'] = 'compare_previous_binding'
-        if previous is not None and previous != self.bound:
-            raise ValueError('重新绑定发现灶台组件或人物身份变化')
         diagnostic['phase'] = 'read_stove_state'
+        diagnostic['target_witness_before'] = target
         state = self.state()
         final_stamp = self._binding_stamp(source, path, diagnostic, binding_started)
         diagnostic['phase'] = 'compare_collection_stamps'
-        if final_stamp != stamp:
+        final_target = self._target_witness(path, binding)
+        diagnostic['target_witness_after'] = final_target
+        if final_stamp[1] != component_stamp:
             raise ValueError('完整绑定期间活动层级或组件集合发生变化')
+        if target != final_target:
+            raise ValueError('完整绑定期间灶台对象头或实例身份变化')
+        if self._binding_source() != source:
+            raise ValueError('完整绑定期间场景、人物或活动层级入口已变化')
+        check_budget()
+        if final_stamp[0] != registry_stamp:
+            verified_stamp, members, state = self._refresh_registry_target(
+                source, path, binding, target, component_stamp, stove, members,
+                final_stamp[0], deadline, recovery)
+            stamp = (verified_stamp, component_stamp)
+        self._verified_stove_target = (source, target, component_stamp)
+        self._verified_registry_members = members
         self.binding_witness = (source, path, stamp)
         diagnostic['phase'] = 'verified'
         return state
@@ -627,6 +736,24 @@ class SinglePotReader(CookingSelectionReader):
                                 'stage':'rescan_binding','new_target':cell,'new_method':callback_method,
                                 'method_owner':callback,'allow_dispatch':False})
                         raise ValueError('回调重新验证期间控件身份、位置或回调再次变化，未点击')
+                def live_icon_method():
+                    # The icon can replace its delegate after the earlier
+                    # _clickHandler comparison and before reading its method.
+                    def require_current_callback():
+                        live = m.ref(icon, '_clickHandler')
+                        if live != callback:
+                            raise CallbackChanged(binding, live)
+                    require_current_callback()
+                    try:
+                        value = self._hud_callback_method(callback, cell,
+                            ('CookDangerTrackCellModel','XDTGUI.Module.Track.Cells'),'TriggerOnClickByView')
+                    except SceneReadIssue as exc:
+                        if exc.kind == 'invalid_reference':
+                            require_current_callback()
+                        raise
+                    require_current_callback()
+                    return value
+
                 checks=[
                     ('bar_widget.ui',ui,lambda:m.ref(bar_widget,'ui')),
                     ('ui.'+name,group,lambda:m.ref(ui,name)),
@@ -641,8 +768,7 @@ class SinglePotReader(CookingSelectionReader):
                     ('gameObject.active',True,lambda:self.layout.active(go)),
                     ('ui.root_visible_go',visible,lambda:m.ref(iui,'root_visible_go')),
                     ('root_visible_go.active',True,lambda:self.layout.active(visible)),
-                    ('icon_callback.method',callback_method,lambda:self._hud_callback_method(callback,cell,
-                        ('CookDangerTrackCellModel','XDTGUI.Module.Track.Cells'),'TriggerOnClickByView')),
+                    ('icon_callback.method',callback_method,live_icon_method),
                     ('button_callback.method',button_method,lambda:self._hud_callback_method(button_callback,icon,
                         ('CommonIcon','XDTGame.UI.Widget'),'OnIconClicked')),
                     ('button.rect',rect,lambda:self._rect(button,stack,panel,nodes,size)),
@@ -835,6 +961,11 @@ class SinglePotReader(CookingSelectionReader):
             return {'object':obj,**{key:attempt(lambda key=key:flag(key))
                 for key in ('m_Enabled','m_Interactable','m_GroupsAllowInteraction')}}
         result['unity_button']=attempt(native_button)
+        resolved = result['unity_button'].get('object')
+        if resolved:
+            result['start_button_enabled'] = attempt(lambda: self.start_button_enabled(
+                m.ref(button, 'unityComponent'), resolved))
+        result['start_raycast'] = unavailable('no verified read-only UI hit result')
         return result
 
     def observe_start_owner(self, observation, state, stack, panel, nodes, opened):
