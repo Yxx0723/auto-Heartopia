@@ -15,6 +15,7 @@ COLORS = theme.COLORS
 
 STATUS_COLORS = (
     ('进行中', COLORS['muted']), ('已派发', COLORS['accent']),
+    ('等待', COLORS['muted']),
     ('已确认', COLORS['green']), ('已完成', COLORS['green']),
     ('失败', COLORS['red']), ('未确认', COLORS['amber']),
 )

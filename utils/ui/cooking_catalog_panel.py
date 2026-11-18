@@ -6,6 +6,8 @@ from tkinter import ttk, messagebox
 from utils.core.cooking_catalog import load_catalog, material_status
 from utils.ui import theme
 from utils.ui.cooking_event_view import event_view
+from utils.ui.cooking_log_text import (batch_status_text, human_reason, log_line,
+                                       step_summary, step_text)
 from utils.ui.log_window import append_log_lines
 
 
@@ -61,7 +63,7 @@ class CookingCatalogPanel:
         self.runtime_error=tk.StringVar()
         self.runtime_error_label=owner.label(self.runtime_page,'',textvariable=self.runtime_error,
                     color='red',wraplength=390,justify='left',font=theme.font(11),
-                    height=2,anchor='nw')
+                    height=3,anchor='nw')
         log_area=owner.frame(self.runtime_page,card=True,border=False);log_area.pack(fill='both',expand=True)
         self.runtime_log=tk.Text(log_area,height=3,width=42,wrap='word',state='disabled',
                                  font=theme.font(11),bg=theme.COLORS['card'],
@@ -69,6 +71,7 @@ class CookingCatalogPanel:
                                  highlightthickness=0,padx=theme.px(6),pady=theme.px(3))
         # 错误 / 警告 / 正常三档用主题色区分，避免高饱和深色与浅色卡片冲突。
         for status,color in (('进行中',theme.COLORS['muted']),('已派发',theme.COLORS['accent']),
+                             ('等待',theme.COLORS['muted']),
                              ('已确认',theme.COLORS['green']),('已完成',theme.COLORS['green']),
                              ('失败',theme.COLORS['red']),('未确认',theme.COLORS['amber'])):
             self.runtime_log.tag_configure(status,foreground=color)
@@ -83,6 +86,7 @@ class CookingCatalogPanel:
             except Exception:pass
         self.runtime_error.trace_add('write',show_error)
         self.last_success='尚无确认操作';self.last_batch={}
+        self.last_log_line=''
         # Same records feed the inline pane and the detached full-log window;
         # keeping them in memory means the window needs no file IO and no timer.
         self.log_buffer=deque(maxlen=2000)
@@ -141,10 +145,9 @@ class CookingCatalogPanel:
             self.last_batch=b
             self.batch_progress.set(f"目标 {b['target_pots']} · 当前 {b['current_pot']} · 已完成 {b['completed_pots']} · 成品 +{b['total_products']}")
             self.progress.configure(maximum=max(1,b['target_pots']),value=b['completed_pots'])
-            batch_state='已完成' if b.get('state')=='batch_finished' else '失败 / 已停止' if b.get('state')=='batch_stopped' else '待开始' if result.get('state')=='batch_wait' else '进行中'
-            self.runtime_status.set('批次状态：'+batch_state+' · 当前阶段：'
-                +str((b.get('diagnostic_context') or {}).get('current_step') or result.get('state','—'))
-                +' / '+str(result.get('state','—')))
+            batch_state=batch_status_text(b,result.get('state'))
+            phase=step_summary(b,result.get('state'))
+            self.runtime_status.set('批次状态：'+batch_state+' · 当前阶段：'+(phase or '—'))
             if result.get('state')=='batch_wait':
                 self.runtime_error.set('');self.last_success='尚无确认操作'
         if 'inventory' in result:
@@ -160,15 +163,18 @@ class CookingCatalogPanel:
                     self.runtime_error.set('');self.last_success='尚无确认操作'
                 if row['pot']=='—':row['pot']=batch.get('current_pot','—')
                 if row['status'] in ('已确认','已完成'):
-                    self.last_success=row['event']+'：'+row['result']
+                    self.last_success=row['event']
                 if row['status'] in ('失败','未确认') and event.get('state') in ('batch_stopped','error','unconfirmed','stopped','STOPPED'):
                     failure=batch.get('failure_diagnostic') or {}
                     context=batch.get('diagnostic_context') or {}
-                    phase=failure.get('current_step') or context.get('current_step') or row['stage']
-                    last=failure.get('last_successful_step') or context.get('last_successful_step') or self.last_success
-                    self.runtime_error.set(f"第 {batch.get('current_pot',row['pot'])} 锅 · 出错阶段：{phase}\n错误：{row['result']}\n最后成功：{last}\n停止原因：{batch.get('message',row['result'])}")
-                line=f"● {row['time']} | 第 {row['pot']} 锅 | {row['stage']} | {row['event']} | {row['status']} | {row['result']}\n"
-                lines.append((line,row['status']))
+                    phase=step_text(failure.get('current_step') or context.get('current_step') or '') or row.get('stage_label') or '—'
+                    last=step_text(failure.get('last_successful_step') or context.get('last_successful_step') or '') or self.last_success
+                    self.runtime_error.set(f"第 {batch.get('current_pot',row['pot'])} 锅 · 出错阶段：{phase}\n原因：{human_reason(batch.get('message') or row['result'])}\n最后成功：{last}")
+                text=log_line(row)
+                if text == self.last_log_line:
+                    continue  # 同一秒内重复上报同一条，界面上只说一次
+                self.last_log_line=text
+                lines.append((text,row['status']))
             except Exception:
                 # Tk or formatting errors must not propagate into the task or
                 # stop the main tick. Full original events remain in the file.
