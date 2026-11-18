@@ -869,12 +869,14 @@ class CoordinateWindow:
             page.pack_forget()
         else:
             page.pack(fill='both', expand=True, padx=px(8), pady=px(3))
+        self.apply_log_pane_height()
         window = getattr(self, 'full_log_window', None)
         if window is not None and window.alive():
             window.set_source(source, name)
 
     def refresh_nav_highlight(self):
         self.sync_log_module()
+        self.apply_log_pane_height()
         for index, button in enumerate(getattr(self, 'nav_buttons', ())):
             active = index == self.active_module
             try:
@@ -982,14 +984,24 @@ class CoordinateWindow:
         self.log_collapsed = mode == 'collapsed'
         if hasattr(self, 'collection_log'):
             self.show_log_source()
+        self.apply_log_pane_height()
+        self.root.update_idletasks()
+
+    def apply_log_pane_height(self):
+        """按当前模块给日志分栏定高。"""
+        mode = getattr(self, 'log_view', 'standard')
         heights = {'standard': px(108), 'full': px(300), 'collapsed': px(34)}
         minsizes = {'standard': px(92), 'full': px(110), 'collapsed': px(34)}
+        if mode not in heights:
+            mode = 'standard'
+        if mode == 'standard' and getattr(self, 'active_module', 0) == 1:
+            # 自动烹饪的日志上面还有批次状态与出错说明；矮了就会把日志挤成一条缝。
+            heights['standard'] = px(186)
         try:
             self.main_panes.paneconfigure(self.global_log_host,
                                           minsize=minsizes[mode], height=heights[mode])
         except Exception:
             pass
-        self.root.update_idletasks()
 
     def toggle_log(self):
         """Collapse or restore the log without discarding any log content."""

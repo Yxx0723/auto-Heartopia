@@ -6,8 +6,8 @@ from tkinter import ttk, messagebox
 from utils.core.cooking_catalog import load_catalog, material_status
 from utils.ui import theme
 from utils.ui.cooking_event_view import event_view
-from utils.ui.cooking_log_text import (batch_status_text, human_reason, log_line,
-                                       step_summary, step_text)
+from utils.ui.cooking_log_text import (batch_status_text, log_line, step_summary,
+                                       step_text)
 from utils.ui.log_window import append_log_lines
 
 
@@ -54,17 +54,15 @@ class CookingCatalogPanel:
                                       card=True,border=False)
         self.runtime_page.pack(fill='both',expand=True,padx=8,pady=3)
         self.runtime_status=tk.StringVar(value='批次状态：空闲 · 当前阶段：—')
-        owner.label(self.runtime_page,'',textvariable=self.runtime_status,wraplength=390,
-                    justify='left',anchor='w').pack(fill='x')
+        self.runtime_status_label=owner.label(self.runtime_page,'',textvariable=self.runtime_status,
+                    wraplength=390,justify='left',anchor='w')
+        self.runtime_status_label.pack(fill='x')
         self.batch_progress=tk.StringVar(value='目标 — · 当前 — · 已完成 0 · 成品 +0')
-        owner.label(self.runtime_page,'',textvariable=self.batch_progress,anchor='w').pack(fill='x')
-        self.progress=ttk.Progressbar(self.runtime_page,mode='determinate',maximum=1,value=0)
-        self.progress.pack(fill='x',pady=(1,2))
-        self.runtime_error=tk.StringVar()
-        self.runtime_error_label=owner.label(self.runtime_page,'',textvariable=self.runtime_error,
-                    color='red',wraplength=390,justify='left',font=theme.font(11),
-                    height=3,anchor='nw')
-        log_area=owner.frame(self.runtime_page,card=True,border=False);log_area.pack(fill='both',expand=True)
+        self.batch_progress_label=owner.label(self.runtime_page,'',textvariable=self.batch_progress,anchor='w')
+        self.batch_progress_label.pack(fill='x')
+        # 日志区优先分高度：状态行再多，也不把日志挤成一条缝。
+        log_area=owner.frame(self.runtime_page,card=True,border=False)
+        log_area.pack(side='bottom',fill='both',expand=True,before=self.runtime_status_label)
         self.runtime_log=tk.Text(log_area,height=3,width=42,wrap='word',state='disabled',
                                  font=theme.font(11),bg=theme.COLORS['card'],
                                  fg=theme.COLORS['text'],relief='flat',bd=0,
@@ -78,15 +76,8 @@ class CookingCatalogPanel:
         self.runtime_log.pack(side='left',fill='both',expand=True)
         log_scroll=ttk.Scrollbar(log_area,orient='vertical',command=self.runtime_log.yview)
         log_scroll.pack(side='right',fill='y');self.runtime_log.configure(yscrollcommand=log_scroll.set)
-        def show_error(*_):
-            try:
-                if self.runtime_error.get():
-                    self.runtime_error_label.pack(fill='x',pady=(2,3),before=log_area)
-                else:self.runtime_error_label.pack_forget()
-            except Exception:pass
-        self.runtime_error.trace_add('write',show_error)
         self.last_success='尚无确认操作';self.last_batch={}
-        self.last_log_line=''
+        self.last_log_line='';self.last_error_note=''
         # Same records feed the inline pane and the detached full-log window;
         # keeping them in memory means the window needs no file IO and no timer.
         self.log_buffer=deque(maxlen=2000)
@@ -144,12 +135,11 @@ class CookingCatalogPanel:
             b=result['batch']
             self.last_batch=b
             self.batch_progress.set(f"目标 {b['target_pots']} · 当前 {b['current_pot']} · 已完成 {b['completed_pots']} · 成品 +{b['total_products']}")
-            self.progress.configure(maximum=max(1,b['target_pots']),value=b['completed_pots'])
             batch_state=batch_status_text(b,result.get('state'))
             phase=step_summary(b,result.get('state'))
             self.runtime_status.set('批次状态：'+batch_state+' · 当前阶段：'+(phase or '—'))
             if result.get('state')=='batch_wait':
-                self.runtime_error.set('');self.last_success='尚无确认操作'
+                self.last_success='尚无确认操作'
         if 'inventory' in result:
             self.inventory=result['inventory'];self.show_detail()
 
@@ -160,21 +150,24 @@ class CookingCatalogPanel:
             try:
                 row=event_view(event);batch=event.get('batch') or self.last_batch
                 if event.get('state')=='batch_wait':
-                    self.runtime_error.set('');self.last_success='尚无确认操作'
+                    self.last_success='尚无确认操作'
                 if row['pot']=='—':row['pot']=batch.get('current_pot','—')
                 if row['status'] in ('已确认','已完成'):
                     self.last_success=row['event']
-                if row['status'] in ('失败','未确认') and event.get('state') in ('batch_stopped','error','unconfirmed','stopped','STOPPED'):
+                if row['status'] in ('失败','未确认') and event.get('state') in ('batch_stopped','error','ERROR','stopped','STOPPED'):
                     failure=batch.get('failure_diagnostic') or {}
                     context=batch.get('diagnostic_context') or {}
-                    phase=step_text(failure.get('current_step') or context.get('current_step') or '') or row.get('stage_label') or '—'
                     last=step_text(failure.get('last_successful_step') or context.get('last_successful_step') or '') or self.last_success
-                    self.runtime_error.set(f"第 {batch.get('current_pot',row['pot'])} 锅 · 出错阶段：{phase}\n原因：{human_reason(batch.get('message') or row['result'])}\n最后成功：{last}")
+                    pot=batch.get('current_pot',row['pot'])
+                    note=f"{row['time']} [停止]" + (f' 第 {pot} 锅' if pot not in ('—',0,'') else '') + f' · 最后成功的一步：{last}\n'
+                    note = None if note == self.last_error_note else note
                 text=log_line(row)
                 if text == self.last_log_line:
                     continue  # 同一秒内重复上报同一条，界面上只说一次
                 self.last_log_line=text
                 lines.append((text,row['status']))
+                if note:  # 「最后成功的一步」跟在出事那条后面
+                    self.last_error_note=note; lines.append((note,'失败'))
             except Exception:
                 # Tk or formatting errors must not propagate into the task or
                 # stop the main tick. Full original events remain in the file.
