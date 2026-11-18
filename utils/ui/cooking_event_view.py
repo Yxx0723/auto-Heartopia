@@ -1,10 +1,13 @@
 """Presentation of existing cooking events; never infers a game action."""
 from datetime import datetime
 
-from utils.ui.cooking_log_text import (CONFIRM_TEXT, detail_text, stage_label,
-                                       state_text, step_text)
+from utils.ui.cooking_log_text import (CONFIRM_TEXT, detail_text, phase_text,
+                                       stage_label, state_text, step_text)
 
 NATIVE={0:'空闲',1:'准备',2:'烹饪中',3:'需要翻锅',4:'已翻锅',5:'成功',6:'失败'}
+
+# 这几条是批次级汇报，方括号写它自己的说法，不沿用上一锅的阶段。
+SUMMARY_STATES=('batch_preparing','batch_wait','batch_pot_finished','batch_finished','batch_stopped')
 
 
 def event_view(event):
@@ -67,6 +70,11 @@ def event_view(event):
     try:stamp=datetime.fromisoformat(stamp).strftime('%H:%M:%S')
     except (ValueError,TypeError):stamp=str(stamp or '时间未提供')
     result=str(result).replace('\n',' / ')
+    detail=detail_text(state,result)
+    if state=='batch_step':
+        # 步骤已经在方括号里，这里只补一句做完了没有。
+        detail='已完成' if event.get('step_phase')=='complete' else ''
+    phase=phase_text(None if state in SUMMARY_STATES else stage,state)
     return {'time':stamp,'pot':batch.get('current_pot','—'),'state':state,'stage':stage,
-            'stage_label':stage_label(stage,state),'event':name,'result':result,
-            'detail':detail_text(state,result),'status':status}
+            'phase':phase,'stage_label':stage_label(stage,state),'event':name,'result':result,
+            'detail':detail,'status':status}

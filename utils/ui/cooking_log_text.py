@@ -91,6 +91,40 @@ STATE_TEXT = {
     'ENTRY_DISPATCHED': '已派发按键',
 }
 
+# 日志行左侧方括号里的短标签；与采集日志的 [准备] [寻路] [采集] 保持同一读法。
+PHASE_TEXT = {
+    'create_pot_reader': '读取灶台',
+    'bind_previous_confirmed_stove': '核对灶台',
+    'confirm_idle_before_entry': '确认空闲',
+    'read_material_inventory': '读取材料',
+    'open_recipe_panel': '打开食谱',
+    'reread_recipe_panel': '复读食谱',
+    'bind_open_panel_stove': '核对灶台',
+    'confirm_idle_after_panel': '确认空闲',
+    'p1_select_recipe': '选择料理',
+    'revalidate_stove_and_scene': '复核灶台',
+    'read_inventory_before_p2': '记录成品',
+    'enter_p2': '进入开锅',
+    'p2_single_pot': '自动开锅',
+    'check_first_recipe_notice': '首次提示',
+    'idle': '空闲',
+    'batch_wait': '等待',
+    'single_pot_wait': '等待',
+    'selection_wait': '等待',
+    'playback_wait': '等待',
+    'playing': '运行',
+    'batch_preparing': '准备',
+    'batch_step': '步骤',
+    'batch_pot_finished': '本锅完成',
+    'batch_finished': '全部完成',
+    'batch_stopped': '停止',
+    'batch_first_recipe_notice': '首次提示',
+    'finished': '完成',
+    'stopped': '停止',
+    'error': '失败',
+    'paused': '暂停',
+}
+
 # 这些提示只是把事件名再说一遍，界面上不再重复显示。
 DETAIL_ECHO = (
     '烹饪原始状态观测',
@@ -132,6 +166,18 @@ def stage_label(code, state):
     if text == str(state):
         return ''  # 没有更具体的步骤，事件名本身已经说明
     return STEP_TEXT.get(text) or STATE_TEXT.get(text) or text
+
+
+def phase_text(code, state):
+    """方括号里的短标签：优先当前步骤，其次事件本身；都没有时写「状态」。
+
+    没收录的步骤代号原样返回，新步骤不会在日志里变成笼统的「步骤」。
+    """
+    text = str(code or '')
+    if text and text != str(state or ''):
+        return PHASE_TEXT.get(text) or step_text(text)
+    text = text or str(state or '')
+    return PHASE_TEXT.get(text) or step_text(code) or state_text(state) or '状态'
 
 
 def batch_status_text(batch, result_state):
@@ -190,24 +236,22 @@ def detail_text(state, result):
 
 
 def log_line(row):
-    """一行日志：● 时间 · 第 N 锅 · 阶段 · 事件 [状态] 详情。"""
+    """一行日志：时:分:秒 [阶段] 第 N 锅 · 事件：原因。
+
+    与采集日志同一读法：时间在前、方括号写阶段、后面是一句人话。
+    状态本身不再念一遍（颜色已经区分），只在原因里把话说清楚。
+    """
     try:
         pot = int(row.get('pot'))
     except (TypeError, ValueError):
         pot = 0
-    stage = row.get('stage_label', '')
-    event = row.get('event', '')
-    # 批次级的几条汇报只用事件名，避免沿用上一锅的阶段显得答非所问。
-    if str(row.get('state', '')).startswith('batch_') or stage == event:
-        stage = ''
-    head = ' · '.join(part for part in (
-        '● ' + str(row.get('time', '') or '时间未提供'),
-        f'第 {pot} 锅' if pot > 0 else '',
-        stage,
-        event,
-    ) if part)
-    status = str(row.get('status', '') or '')
-    if status and status != event:
-        head += ' [' + status + ']'
-    detail = row.get('detail', '')
-    return head + (' ' + detail if detail else '') + '\n'
+    stamp = str(row.get('time') or '').strip() or '时间未提供'
+    phase = str(row.get('phase') or row.get('stage_label') or '').strip() \
+        or phase_text(row.get('stage'), row.get('state'))
+    event = str(row.get('event') or '').strip()
+    if str(row.get('state') or '') == 'batch_step':
+        event = ''  # 阶段名就是这一步，不必说两遍
+    body = ' · '.join(part for part in (f'第 {pot} 锅' if pot > 0 else '', event) if part)
+    line = f'{stamp} [{phase}]' + (' ' + body if body else '')
+    detail = str(row.get('detail') or '').strip()
+    return line + ('：' + detail if detail else '') + '\n'
