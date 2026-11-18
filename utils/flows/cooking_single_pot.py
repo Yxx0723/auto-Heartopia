@@ -185,6 +185,25 @@ def start_button_interaction(observation):
             else 'allowed' if all(flag is True for flag in flags) else 'unknown')
 
 
+def start_raycast_rejection(observation):
+    """Gate replay on a *real* UI hit result; an unavailable probe is degraded, not blocking.
+
+    The reader currently publishes a fixed `unavailable` placeholder because no
+    verified read-only hit probe exists. Treat that as a degraded diagnostic so a
+    genuine first-click miss can still be retried. Any real hit result must still
+    satisfy every strict ownership/hit condition (fail-closed).
+    """
+    raycast = observation.get('start_raycast') or {}
+    if raycast.get('state') == 'unavailable':
+        return 'degraded'
+    button = observation.get('unity_button') or {}
+    if (raycast.get('active_in_hierarchy') is not True or raycast.get('canvas_allows_input') is not True
+            or raycast.get('state') != 'hit' or raycast.get('button') != button.get('object')
+            or raycast.get('point') != observation.get('center')):
+        return '开始按钮的实际 UI 命中或遮挡状态未确认'
+    return None
+
+
 def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock, report, journal):
     size=tuple(window.size()); events=SinglePotEvents(recipe)
     record={'schema':'cooking-single-pot-v1','pot_id':uuid4().hex,'recipe_id':recipe['recipe_id'],
@@ -576,7 +595,8 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                        'warnings': [name for name, present in (
                            ('enabled_unknown', enabled.get('state') == 'unknown'),
                            ('interactable_unknown', bool(observation) and
-                            start_button_interaction(observation) == 'unknown')) if present],
+                            start_button_interaction(observation) == 'unknown'),
+                           ('raycast_unavailable', hit.get('state') == 'unavailable')) if present],
                    })
 
         def retry_rejection(observation):
@@ -600,17 +620,16 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                 return '按钮已响应，或新旧按钮时间戳无法比较'
             if observation.get('last_click_time') != baseline.get('last_click_time'):
                 return '按钮时间戳变化'
-            raycast = observation.get('start_raycast') or {}
-            button = observation.get('unity_button') or {}
             interaction = start_button_interaction(observation)
             if interaction == 'blocked':
                 return '开始按钮明确不可交互'
             if interaction == 'unknown':
                 record['start_guard_degraded'] = True
-            if (raycast.get('active_in_hierarchy') is not True or raycast.get('canvas_allows_input') is not True
-                    or raycast.get('state') != 'hit' or raycast.get('button') != button.get('object')
-                    or raycast.get('point') != observation.get('center')):
-                return '开始按钮的实际 UI 命中或遮挡状态未确认'
+            raycast_reason = start_raycast_rejection(observation)
+            if raycast_reason == 'degraded':
+                record['start_raycast_degraded'] = True
+            elif raycast_reason is not None:
+                return raycast_reason
             return None
 
         def reserve_start():
