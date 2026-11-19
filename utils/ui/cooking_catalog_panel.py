@@ -96,6 +96,18 @@ class CookingCatalogPanel:
         selected=self.list.selection()
         self.recipe=next((r for r in self.recipes if selected and str(r['recipe_id'])==selected[0]),None)
         self.show_detail()
+        self.auto_read_inventory()
+
+    def auto_read_inventory(self):
+        """选料理后自动读一次背包；已有数据、任务中、未连接时不重复读。"""
+        if self.inventory is not None or self.active:
+            return
+        raw=self.owner.view.status.get('pid')
+        try:pid=int(raw)
+        except (TypeError,ValueError):return
+        if pid<=0:return
+        if self.owner.cooking.read_inventory(pid):
+            self.stock_button.configure(text='正在读取背包材料…')
 
     def show_detail(self):
         recipe=self.recipe
@@ -116,7 +128,9 @@ class CookingCatalogPanel:
 
     def refresh_inventory(self):
         pid=self.owner.view.status.get('pid')
-        if not pid:
+        try:pid=int(pid)
+        except (TypeError,ValueError):pid=0
+        if pid<=0:
             messagebox.showerror('背包未读取','请先连接游戏',parent=self.owner.root);return
         if self.owner.cooking.read_inventory(pid):
             self.stock_button.configure(text='正在读取背包材料…')
