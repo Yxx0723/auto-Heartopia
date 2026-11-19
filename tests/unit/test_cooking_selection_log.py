@@ -69,6 +69,7 @@ def test_selection_logs_chosen_recipe_only():
     assert '[已选料理]' in written
     assert '蓝莓果酱' in written
     assert '背包已读取' not in written
+    assert written.endswith('\n')  # 与业务日志一样自带换行，不会和下一行粘连
     assert panel.owner.cooking.calls == [(12345, True)]
     assert list(panel.log_buffer)[0][0] in written
 

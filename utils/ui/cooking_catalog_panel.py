@@ -121,7 +121,7 @@ class CookingCatalogPanel:
         if self.recipe is None:
             return
         stamp = datetime.now().strftime('%H:%M:%S')
-        text = f"{stamp} [已选料理]：{self.recipe['name']}"
+        text = f"{stamp} [已选料理]：{self.recipe['name']}\n"
         line = (text, '已确认')
         try:
             append_log_lines(self.runtime_log, [line], 500)
