@@ -1,6 +1,7 @@
 """Read recipe IDs and live native card rectangles; no screen recognition."""
 import struct
 
+from utils.core.scene_read import SceneReadIssue
 from utils.core.ui_projection import rect_to_client
 from utils.drivers.cooking_menu_state import CookingMenuStateReader
 from utils.drivers.item_name_table import ItemNameTable
@@ -51,33 +52,41 @@ class CookingSelectionReader(CookingMenuStateReader):
             self.layout.native_transforms(viewport), canvas_rect, canvas_chain, client_size)
         cards = []
         card_addresses = {}
-        for card in m.dictionary(m.ref(scroll, '_rootToComponent'), max_items=256):
-            if (m.obj(card)['name'], m.obj(card)['namespace']) != ('NewCardWidget', 'XDTGame.UI.Widget'):
-                continue
-            if m.ref(card, '_scrollSystem') != scroll:
-                raise ValueError('料理卡片归属未确认')
-            handle = m.integer(card+m.field(m.obj(card)['address'], '_handle')['offset'])
-            data = handles.get(handle)
-            if not data or m.obj(data)['name'] != 'CookRecipeScrollData':
-                continue
-            f = m.field(m.obj(data)['address'], 'data')
-            typ = m.cls(f['type']); identity = m.integer(data+f['offset']+m.field(typ['address'], 'staticId')['offset']-16)
-            if identity not in ids:
-                continue
-            if self.ui.payload(card, '_isLock', 2, 1) != b'\0':
-                continue
-            ui = m.ref(card, 'ui'); root = m.ref(ui, 'root_t'); component = m.ref(ui, 'card_btn')
-            try:
-                rect = self.ui._button_rect(self.layout, (*stack[:3], panel, nodes), component, client_size)
-            except ValueError:
-                continue  # Recycled/off-client cards are never click targets.
-            l,t,r,b = rect; vl,vt,vr,vb = viewport_rect
-            if vl <= l < r <= vr and vt <= t < b <= vb:
-                cards.append({'recipe_id': identity, 'rect': rect, 'handle': handle})
-                card_addresses[handle] = {'card_address': card, 'button_address': component}
-            if m.ref(card, 'ui') != ui or m.ref(ui, 'root_t') != root \
-                    or m.ref(ui, 'card_btn') != component or m.integer(card+m.field(m.obj(card)['address'], '_handle')['offset']) != handle:
-                raise ValueError('料理卡片正在回收或更新')
+        try:
+            for card in m.dictionary(m.ref(scroll, '_rootToComponent'), max_items=256):
+                if (m.obj(card)['name'], m.obj(card)['namespace']) != ('NewCardWidget', 'XDTGame.UI.Widget'):
+                    continue
+                if m.ref(card, '_scrollSystem') != scroll:
+                    raise ValueError('料理卡片归属未确认')
+                handle = m.integer(card+m.field(m.obj(card)['address'], '_handle')['offset'])
+                data = handles.get(handle)
+                if not data or m.obj(data)['name'] != 'CookRecipeScrollData':
+                    continue
+                f = m.field(m.obj(data)['address'], 'data')
+                typ = m.cls(f['type']); identity = m.integer(data+f['offset']+m.field(typ['address'], 'staticId')['offset']-16)
+                if identity not in ids:
+                    continue
+                if self.ui.payload(card, '_isLock', 2, 1) != b'\0':
+                    continue
+                ui = m.ref(card, 'ui'); root = m.ref(ui, 'root_t'); component = m.ref(ui, 'card_btn')
+                try:
+                    rect = self.ui._button_rect(self.layout, (*stack[:3], panel, nodes), component, client_size)
+                except ValueError:
+                    continue  # Recycled/off-client cards are never click targets.
+                l,t,r,b = rect; vl,vt,vr,vb = viewport_rect
+                if vl <= l < r <= vr and vt <= t < b <= vb:
+                    cards.append({'recipe_id': identity, 'rect': rect, 'handle': handle})
+                    card_addresses[handle] = {'card_address': card, 'button_address': component}
+                if m.ref(card, 'ui') != ui or m.ref(ui, 'root_t') != root \
+                        or m.ref(ui, 'card_btn') != component or m.integer(card+m.field(m.obj(card)['address'], '_handle')['offset']) != handle:
+                    raise ValueError('料理卡片正在回收或更新')
+        except ValueError as exc:
+            if str(exc) not in ('场景对象归属已变化', '料理卡片正在回收或更新'):
+                raise
+            # 列表正在回收卡片时对象头可能已被复用，读到的是别的数据。
+            # 整份读取作废并交给上层只读重扫，绝不用半份结果去点击。
+            raise SceneReadIssue('料理卡片正在回收或更新', kind='invalid_reference',
+                                 stage='card_scan') from exc
         selected = self.recipe.snapshot()
         after = self.snapshot()
         if not stable() or self.ui.ui_views() != stack or self._available(panel) != ids \
