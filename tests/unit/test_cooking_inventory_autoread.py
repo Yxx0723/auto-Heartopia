@@ -51,8 +51,8 @@ class Cooking:
     def __init__(self):
         self.calls = []
 
-    def read_inventory(self, pid):
-        self.calls.append(pid)
+    def read_inventory(self, pid, *, silent=False):
+        self.calls.append((pid, silent))
         return True
 
 
@@ -64,8 +64,8 @@ def test_selection_reads_inventory_with_string_pid():
 
     panel.changed()
 
-    assert panel.owner.cooking.calls == [12345]
-    assert panel.stock_button.text == '正在读取背包材料…'
+    assert panel.owner.cooking.calls == [(12345, True)]
+    assert getattr(panel.stock_button, 'text', None) is None  # 静默刷新不改按钮文案
 
 
 def test_every_selection_rereads_even_with_inventory_present():
@@ -77,7 +77,7 @@ def test_every_selection_rereads_even_with_inventory_present():
     panel.auto_read_inventory()
     panel.auto_read_inventory()
 
-    assert panel.owner.cooking.calls == [12345, 12345]
+    assert panel.owner.cooking.calls == [(12345, False), (12345, False)]
 
 
 def test_active_task_does_not_read():

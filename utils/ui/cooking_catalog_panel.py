@@ -1,5 +1,6 @@
 """Compact offline catalogue inside the existing cooking tab."""
 from collections import deque
+from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -111,7 +112,24 @@ class CookingCatalogPanel:
         selected=self.list.selection()
         self.recipe=next((r for r in self.recipes if selected and str(r['recipe_id'])==selected[0]),None)
         self.show_detail()
-        self.auto_read_inventory()
+        # 切料理只刷新数量，不再把「背包已读取」写进运行日志。
+        self.auto_read_inventory(silent=True)
+        self._log_selection()
+
+    def _log_selection(self):
+        """切料理时只记一句选了哪个料理，和烹饪日志同样的时间戳格式。"""
+        if self.recipe is None:
+            return
+        stamp = datetime.now().strftime('%H:%M:%S')
+        text = f"{stamp} [已选料理]：{self.recipe['name']}"
+        line = (text, '已确认')
+        try:
+            append_log_lines(self.runtime_log, [line], 500)
+            self.log_buffer.append(line)
+            self.last_log_line = text
+            self._broadcast_log([line])
+        except Exception:
+            pass
 
     def auto_read_inventory(self, *, silent=False):
         """选料理时重读背包；定时同步用 silent，不刷按钮文案和运行日志。"""
