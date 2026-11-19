@@ -183,7 +183,9 @@ def phase_text(code, state):
     if text and text != str(state or ''):
         return PHASE_TEXT.get(text) or step_text(text)
     text = text or str(state or '')
-    return PHASE_TEXT.get(text) or step_text(code) or state_text(state) or '状态'
+    # 代码与状态同名时先查事件状态表；直接走 step_text 会把已知状态
+    # 当成「未收录的步骤代号」原样回显（例如 [inventory_ready]）。
+    return PHASE_TEXT.get(text) or STATE_TEXT.get(text) or step_text(text) or '状态'
 
 
 def batch_status_text(batch, result_state):
@@ -255,8 +257,8 @@ def log_line(row):
     phase = str(row.get('phase') or row.get('stage_label') or '').strip() \
         or phase_text(row.get('stage'), row.get('state'))
     event = str(row.get('event') or '').strip()
-    if str(row.get('state') or '') == 'batch_step':
-        event = ''  # 阶段名就是这一步，不必说两遍
+    if str(row.get('state') or '') == 'batch_step' or event == phase:
+        event = ''  # 阶段名已经把事件说清楚了，不必说两遍
     body = ' · '.join(part for part in (f'第 {pot} 锅' if pot > 0 else '', event) if part)
     line = f'{stamp} [{phase}]' + (' ' + body if body else '')
     detail = str(row.get('detail') or '').strip()

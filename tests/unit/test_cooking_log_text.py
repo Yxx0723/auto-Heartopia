@@ -118,3 +118,17 @@ def test_event_view_marks_step_completion():
                        'diagnostic_context': {'current_step': 'read_material_inventory'},
                        'batch': {'current_pot': 1}})
     assert view['detail'] == ''
+
+
+def test_every_known_state_gets_a_chinese_bracket_label():
+    """已知事件状态不能把代号原样塞进方括号（例如 [inventory_ready]）。"""
+    from utils.ui.cooking_log_text import STATE_TEXT
+    raw = [state for state in STATE_TEXT if phase_text(state, state) == state]
+    assert raw == []
+
+    line = log_line(event_view({'at': '2026-11-19T13:40:00+08:00',
+                                'state': 'inventory_ready',
+                                'message': '已读取当前随身背包材料',
+                                'batch': {'current_pot': 1, 'target_pots': 3}}))
+    # 标签与事件名相同时只说一遍。
+    assert line == '13:40:00 [背包已读取] 第 1 锅：已读取当前随身背包材料\n'
