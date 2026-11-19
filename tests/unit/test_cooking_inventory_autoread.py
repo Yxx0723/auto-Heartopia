@@ -1,4 +1,4 @@
-"""选料理后自动读一次背包；有数据或在任务中不重复读。"""
+"""每次选料理都重读背包；任务进行中或未连接时不读。"""
 from types import SimpleNamespace
 
 from utils.ui.cooking_catalog_panel import CookingCatalogPanel
@@ -68,17 +68,25 @@ def test_selection_reads_inventory_with_string_pid():
     assert panel.stock_button.text == '正在读取背包材料…'
 
 
-def test_existing_inventory_and_active_task_do_not_reread():
+def test_every_selection_rereads_even_with_inventory_present():
     panel = make_panel()
     panel.owner.cooking = Cooking()
     panel.inventory = {'counts': {}, 'selectable_counts': {}}
     panel.show_detail = lambda: None
-    panel.auto_read_inventory()
-    assert panel.owner.cooking.calls == []
 
-    panel.inventory = None
-    panel.active = True
     panel.auto_read_inventory()
+    panel.auto_read_inventory()
+
+    assert panel.owner.cooking.calls == [12345, 12345]
+
+
+def test_active_task_does_not_read():
+    panel = make_panel()
+    panel.owner.cooking = Cooking()
+    panel.active = True
+
+    panel.auto_read_inventory()
+
     assert panel.owner.cooking.calls == []
 
 

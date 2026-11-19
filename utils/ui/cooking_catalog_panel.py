@@ -99,8 +99,8 @@ class CookingCatalogPanel:
         self.auto_read_inventory()
 
     def auto_read_inventory(self):
-        """选料理后自动读一次背包；已有数据、任务中、未连接时不重复读。"""
-        if self.inventory is not None or self.active:
+        """每次选料理都重读一次背包；任务进行中或未连接时不读。"""
+        if self.active:
             return
         raw=self.owner.view.status.get('pid')
         try:pid=int(raw)
