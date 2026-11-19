@@ -230,7 +230,7 @@ class CoordinateWindow:
         self.playback_status = {'state': 'idle', 'message': '按保存顺序回放 · F6开始/暂停 · F9停止'}
         self.scene_state = {'state': 'waiting', 'objects': [], 'colliders': []}
         # None means the explicit "all" mode; an empty set hides every object category.
-        self.scene_categories = None
+        self.scene_categories = set(SCENE_CATEGORIES) - {'other', 'shrub', 'animal', 'bush', 'tree'}
         self.scene_filters_expanded = False
         self.scene_worker = SceneMapWorker(self.resources / 'profile.json', factory=scene_factory,
                                           diagnostics_path=diagnostics_dir / '场景读取.jsonl') if scene_factory else None
@@ -250,6 +250,14 @@ class CoordinateWindow:
         root.configure(bg=COLORS['bg'])
         root.geometry('490x900+50+0')
         root.minsize(460, 860)
+        # 游戏窗口会持续抢前台；启动时就置顶，保证观测台始终可见。
+        try:
+            import ctypes
+            ctypes.windll.user32.SetWindowPos(
+                ctypes.c_void_p(root.winfo_id()), ctypes.c_void_p(-1),
+                0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
+        except Exception:
+            pass
         icon = self.resources / 'monitor.ico'
         if icon.exists():
             root.iconbitmap(str(icon))
@@ -1093,7 +1101,8 @@ class CoordinateWindow:
         for index, (text, variable) in enumerate([
                 ('场景物体', self.scene_objects_var), ('山体与碰撞', self.scene_colliders_var),
                 ('河道与湖泊', self.scene_water_var), ('参考道路', self.scene_roads_var),
-                ('围栏／护栏', self.scene_barriers_var)]):
+                ('围栏／护栏', self.scene_barriers_var),
+                ('附近碰撞轮廓', self.scene_nearby_colliders_var)]):
             tk.Checkbutton(switches, text=text, variable=variable, command=self.scene_layer_changed, bg=COLORS['card'],
                 fg=COLORS['text'], selectcolor=COLORS['button'], activebackground=COLORS['card'],
                 activeforeground=COLORS['text'], bd=0, highlightthickness=0,
@@ -1223,6 +1232,7 @@ class CoordinateWindow:
         self.scene_water_var = tk.BooleanVar(self.root, True)
         self.scene_roads_var = tk.BooleanVar(self.root, True)
         self.scene_barriers_var = tk.BooleanVar(self.root, True)
+        self.scene_nearby_colliders_var = tk.BooleanVar(self.root, False)
         for column in range(4):
             parent.grid_columnconfigure(column, weight=1, uniform='category')
         self.scene_all_button = self.button(parent, '全部分类', lambda: self.set_scene_categories(True), small=True)
@@ -1378,7 +1388,7 @@ class CoordinateWindow:
         self.render()
         # One pending callback only; a slow frame never queues catch-up frames.
         elapsed = max(0., self.clock()-frame_started)
-        delay = max(1, math.ceil((policy.COORD_UI_FRAME_SECONDS-elapsed)*1000))
+        delay = max(8, math.ceil((policy.COORD_UI_FRAME_SECONDS-elapsed)*1000))
         self.timer = self.root.after(delay, self.tick)
 
     def render(self):
@@ -1608,7 +1618,7 @@ class CoordinateWindow:
         nearby_models, nearby_boxes = self.map_cache.geometry.nearby_details(view.position)
         if not self.scene_objects_var.get() or (self.scene_categories is not None and 'other' not in self.scene_categories):
             nearby_models = []
-        if not self.scene_colliders_var.get():
+        if not self.scene_colliders_var.get() or not self.scene_nearby_colliders_var.get():
             nearby_boxes = []
         if not self.scene_objects_var.get():
             scene_objects = []
@@ -1638,7 +1648,7 @@ class CoordinateWindow:
         for key, coords, _ in scene_boxes:
             kind = self.map_cache.geometry.barrier_kinds.get(key)
             if not kind and coords in detail_footprints:
-                continue  # Avoid a solid old outline underneath unknown dashes.
+                continue  # Nearby outlines use the separate detail layer.
             cached = key in self.map_cache.geometry.cached_keys
             if kind == 'mountain':
                 if self.scene_colliders_var.get():
@@ -2237,7 +2247,8 @@ class CoordinateWindow:
                 self.playback_status.get('waypoint'), self.map_view, self.zoom, self.scene_radius,
                 None if self.scene_categories is None else frozenset(self.scene_categories),
                 tuple(v.get() for v in (self.scene_objects_var, self.scene_colliders_var, self.scene_water_var,
-                                        self.scene_roads_var, self.scene_barriers_var)))
+                                        self.scene_roads_var, self.scene_barriers_var,
+                                        self.scene_nearby_colliders_var)))
 
     def draw_if_changed(self):
         if self.draw_job is not None:
