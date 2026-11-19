@@ -988,15 +988,12 @@ class CoordinateWindow:
         self.root.update_idletasks()
 
     def apply_log_pane_height(self):
-        """按当前模块给日志分栏定高。"""
+        """所有模块共用同一日志栏高度（标准档显示 3 行左右），切换页签不再跳动。"""
         mode = getattr(self, 'log_view', 'standard')
         heights = {'standard': px(108), 'full': px(300), 'collapsed': px(34)}
         minsizes = {'standard': px(92), 'full': px(110), 'collapsed': px(34)}
         if mode not in heights:
             mode = 'standard'
-        if mode == 'standard' and getattr(self, 'active_module', 0) == 1:
-            # 自动烹饪的日志上面还有批次状态与出错说明；矮了就会把日志挤成一条缝。
-            heights['standard'] = px(186)
         try:
             self.main_panes.paneconfigure(self.global_log_host,
                                           minsize=minsizes[mode], height=heights[mode])
