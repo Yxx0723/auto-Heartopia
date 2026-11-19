@@ -21,6 +21,8 @@ STEP_TEXT = {
     'enter_p2': '进入自动开锅',
     'p2_single_pot': '自动开锅',
     'check_first_recipe_notice': '检查首次制作提示',
+    'check_album_unlock': '检查图鉴弹窗',
+    'dismiss_album_unlock': '关闭图鉴弹窗',
 }
 
 # 事件状态代号；用于日志每行的「发生了什么」。
@@ -35,6 +37,8 @@ STATE_TEXT = {
     'batch_finished': '全部完成',
     'batch_stopped': '已停止',
     'batch_first_recipe_notice': '首次制作提示',
+    'album_unlock_notice': '图鉴解锁弹窗',
+    'album_unlock_dismissed': '图鉴弹窗已关闭',
     'inventory_ready': '背包已读取',
     'inventory_error': '背包读取失败',
     'cooking_entry_wait': '等待食谱面板',
@@ -107,6 +111,8 @@ PHASE_TEXT = {
     'enter_p2': '进入开锅',
     'p2_single_pot': '自动开锅',
     'check_first_recipe_notice': '首次提示',
+    'check_album_unlock': '图鉴弹窗',
+    'dismiss_album_unlock': '图鉴弹窗',
     'idle': '空闲',
     'batch_wait': '等待',
     'single_pot_wait': '等待',

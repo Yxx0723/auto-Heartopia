@@ -58,7 +58,8 @@ def event_view(event):
     elif state in ('start_reserved','stir_reserved','collect_reserved','ENTRY_DISPATCHED'):
         # Reservation is persisted before input. It is not dispatch evidence.
         status='进行中';result+='；操作登记不等于输入或游戏执行成功'
-    elif state in ('MENU_OPEN','RECIPE_SELECTED','RECIPE_VALIDATED','inventory_ready'):
+    elif state in ('MENU_OPEN','RECIPE_SELECTED','RECIPE_VALIDATED','inventory_ready',
+                 'album_unlock_notice','album_unlock_dismissed'):
         status='已确认'
     elif state in ('finished','batch_pot_finished','batch_finished'):
         status='已完成'

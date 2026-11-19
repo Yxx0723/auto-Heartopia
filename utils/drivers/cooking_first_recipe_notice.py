@@ -1,4 +1,6 @@
-"""Read the first-cook bottom dialog without issuing game input."""
+"""Read bottom dialogs (first-cook notice / album unlock) without guessing."""
+import re
+
 from utils.core.ui_projection import rect_to_client
 
 
@@ -101,3 +103,68 @@ def observe_first_recipe_notice(reader, window, recipe):
         return {**result, 'state': 'confirmed'}
     except Exception as exc:
         return {**result, 'error': type(exc).__name__, 'reason': str(exc)}
+
+
+# 图鉴解锁提示：概率出现，文案随料理变化；弹窗抢焦点，点屏幕上任意位置即可关闭。
+# 只认「好棒！…」这类完整句式，普通底部对话不算图鉴弹窗。
+_ALBUM_PATTERNS = (
+    re.compile(r'^好棒！第一次成功做出了.+！$'),
+    re.compile(r'^好棒！看起来比以前.+更美味！$'),
+)
+ALBUM_DISMISS_ATTEMPTS = 3
+
+
+def _is_album_message(message):
+    if not isinstance(message, str) or not message:
+        return False
+    # 「第一次成功做出了菠萝酱！」在 45164 上由既有首次制作提示锁定，
+    # 那条路径不会走到这里；其余同句式按图鉴解锁处理。
+    return any(pattern.fullmatch(message) for pattern in _ALBUM_PATTERNS)
+
+
+def observe_album_unlock_notice(reader, window):
+    """确认当前底部对话是否为图鉴解锁弹窗；只读，不派发输入。"""
+    result = {'state': 'uncertain', 'message': None}
+    try:
+        first = _dialog_snapshot(reader.ui)
+        if first != _dialog_snapshot(reader.ui):
+            raise ValueError('底部对话在读取期间变化')
+        _, _, dialog = first
+        if dialog is None or dialog[1] is None:
+            return {**result, 'state': 'absent'}
+        message = dialog[4]
+        if not _is_album_message(message):
+            return {**result, 'reason': '底部对话不是图鉴解锁提示'}
+        return {**result, 'state': 'confirmed', 'message': message}
+    except Exception as exc:
+        return {**result, 'error': type(exc).__name__, 'reason': str(exc)}
+
+
+def dismiss_album_unlock_notice(reader, window, device, clock, guard):
+    """点掉图鉴弹窗并重读确认；任一步失败就停下来，不假设点击成功。"""
+    before = observe_album_unlock_notice(reader, window)
+    if before['state'] != 'confirmed':
+        return {'state': before['state'], 'attempts': 0, 'reason': '点击前未确认图鉴弹窗'}
+    size = tuple(window.size())
+    if len(size) != 2 or not all(type(v) is int and 0 < v <= 4096 for v in size):
+        raise ValueError('游戏客户区尺寸无效，未点击图鉴弹窗')
+    # 弹窗是底部横幅且抢了焦点，点客户区上方任意空白处即可收起。
+    point = (size[0] // 2, max(1, size[1] // 4))
+    for attempt in range(1, ALBUM_DISMISS_ATTEMPTS + 1):
+        guard()
+        device.execute({'type': 'cursor_move', 'x': point[0], 'y': point[1]})
+        clock.sleep(.03)
+        pointer = window.pointer()
+        if (not isinstance(pointer, (tuple, list)) or len(pointer) != 3                or not pointer[2]
+                or abs(pointer[0] - point[0]) > 2 or abs(pointer[1] - point[1]) > 2):
+            raise ValueError('鼠标未到达图鉴弹窗点击位置，未点击')
+        device.execute({'type': 'mouse_down', 'button': 'left'})
+        clock.sleep(.04)
+        device.release_all()
+        clock.sleep(.2)
+        guard()
+        after = observe_album_unlock_notice(reader, window)
+        if after['state'] == 'absent':
+            return {'state': 'dismissed', 'attempts': attempt, 'click': point,
+                    'size': list(size)}
+    raise ValueError('图鉴弹窗点击后仍未消失，未开始下一锅')

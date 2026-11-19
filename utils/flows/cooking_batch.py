@@ -4,7 +4,9 @@ import traceback
 
 from utils.core.cooking_catalog import material_status
 from utils.drivers.coordinate_point_store import atomic_write_json
-from utils.drivers.cooking_first_recipe_notice import observe_first_recipe_notice
+from utils.drivers.cooking_first_recipe_notice import (dismiss_album_unlock_notice,
+                                                    observe_album_unlock_notice,
+                                                    observe_first_recipe_notice)
 from utils.drivers.cooking_single_pot import SinglePotReader
 from utils.drivers.input_task_gate import InputTaskGate
 
@@ -141,7 +143,24 @@ def run_batch(*, target, recipe, memory, window, controls, device, clock,
                 if notice['state'] != 'absent':
                     if notice['state'] == 'confirmed':
                         raise ValueError('检测到首次制作提示，请手动关闭后重新开始批次')
-                    raise ValueError('锅间底部对话状态未确认，未开始下一锅')
+                    # 未确认的锅间对话：概率性图鉴解锁弹窗点掉后继续；
+                    # 认不出来仍按原样停批，不拿输入去赌。
+                    album = step('check_album_unlock',
+                                 lambda: observe_album_unlock_notice(native, window))
+                    if album['state'] != 'confirmed':
+                        raise ValueError('锅间底部对话状态未确认，未开始下一锅')
+                    report('album_unlock_notice', '检测到图鉴解锁提示：'+str(album.get('message') or ''),
+                           batch=deepcopy(summary), notice=deepcopy(album))
+                    guard()
+                    dismissed = step('dismiss_album_unlock',
+                                     lambda: dismiss_album_unlock_notice(native, window, device,
+                                                                        clock, guard))
+                    summary['pots'][-1]['album_unlock'] = {**deepcopy(album),
+                                                          'dismissed': deepcopy(dismissed)}
+                    atomic_write_json(directory/'batch.json', summary)
+                    report('album_unlock_dismissed', '图鉴解锁弹窗已关闭，继续下一锅',
+                           batch=deepcopy(summary), dismissed=deepcopy(dismissed))
+                    guard()
         publish('batch_finished','连续制作完成：'+str(target)+' 锅，成品增加 '+str(summary['total_products']))
         return deepcopy(summary)
     except Exception as exc:
