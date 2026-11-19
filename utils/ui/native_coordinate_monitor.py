@@ -250,8 +250,10 @@ class CoordinateWindow:
         root.configure(bg=COLORS['bg'])
         root.geometry('490x900+50+0')
         root.minsize(460, 860)
-        # 系统不接受持续置顶；启动时主动置前一次，避免被其它窗口挡住。
-        root.after(600, self._bring_to_front)
+        # 系统不接受持续置顶；正式 EXE 启动时主动置前一次，避免被其它窗口挡住。
+        # 源码/测试环境不派发真实按键，否则 Tk 测试会卡在 ALT 前台切换上。
+        if getattr(sys, 'frozen', False):
+            root.after(600, self._bring_to_front)
         icon = self.resources / 'monitor.ico'
         if icon.exists():
             root.iconbitmap(str(icon))
