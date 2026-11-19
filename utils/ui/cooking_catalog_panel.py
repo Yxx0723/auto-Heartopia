@@ -54,15 +54,10 @@ class CookingCatalogPanel:
                                       card=True,border=False)
         self.runtime_page.pack(fill='both',expand=True,padx=8,pady=3)
         self.runtime_status=tk.StringVar(value='批次状态：空闲 · 当前阶段：—')
-        self.runtime_status_label=owner.label(self.runtime_page,'',textvariable=self.runtime_status,
-                    wraplength=390,justify='left',anchor='w')
-        self.runtime_status_label.pack(fill='x')
+        # 批次进度与阶段已经写在日志行里，不再常驻占两行。
         self.batch_progress=tk.StringVar(value='目标 — · 当前 — · 已完成 0 · 成品 +0')
-        self.batch_progress_label=owner.label(self.runtime_page,'',textvariable=self.batch_progress,anchor='w')
-        self.batch_progress_label.pack(fill='x')
-        # 日志区优先分高度：状态行再多，也不把日志挤成一条缝。
         log_area=owner.frame(self.runtime_page,card=True,border=False)
-        log_area.pack(side='bottom',fill='both',expand=True,before=self.runtime_status_label)
+        log_area.pack(fill='both',expand=True)
         self.runtime_log=tk.Text(log_area,height=3,width=42,wrap='word',state='disabled',
                                  font=theme.font(11),bg=theme.COLORS['card'],
                                  fg=theme.COLORS['text'],relief='flat',bd=0,
