@@ -131,3 +131,18 @@ def test_select_recipe_retries_the_whole_read_then_succeeds():
     states = [state for state, _, _ in reports]
     assert 'recipe_read_retry' in states
     assert 'recipe_read_recovered' in states
+
+
+def test_layout_torn_read_becomes_retryable_read_issue(monkeypatch):
+    """Unity 正在写布局时，两次读到的变换不一致：整份读取作废并重试。"""
+    reader = make_reader(monkeypatch)
+
+    def torn(obj):
+        raise driver.MapLayoutUpdating('界面变换数值正在更新')
+
+    reader.layout.native_transforms = torn
+    with pytest.raises(SceneReadIssue) as caught:
+        reader.selection((1280, 720))
+    assert caught.value.kind == 'invalid_reference'
+    assert caught.value.stage == 'layout_read'
+    assert str(caught.value) == '界面变换数值正在更新'

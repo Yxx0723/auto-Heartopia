@@ -1,6 +1,7 @@
 """Read recipe IDs and live native card rectangles; no screen recognition."""
 import struct
 
+from utils.core.map_targeting import MapLayoutUpdating
 from utils.core.scene_read import SceneReadIssue
 from utils.core.ui_projection import rect_to_client
 from utils.drivers.cooking_menu_state import CookingMenuStateReader
@@ -29,6 +30,15 @@ class CookingSelectionReader(CookingMenuStateReader):
         return ids
 
     def selection(self, client_size):
+        try:
+            return self._selection(client_size)
+        except MapLayoutUpdating as exc:
+            # 布局链两次读到的数值不一致（Unity 正在写），整份读取作废，
+            # 由选菜流程的只读重试重扫，绝不拿半份矩形去点。
+            raise SceneReadIssue('界面变换数值正在更新', kind='invalid_reference',
+                                 stage='layout_read') from exc
+
+    def _selection(self, client_size):
         state = self.snapshot()
         if not state['open']:
             raise ValueError('请先打开灶台食谱面板')
@@ -71,6 +81,8 @@ class CookingSelectionReader(CookingMenuStateReader):
                 ui = m.ref(card, 'ui'); root = m.ref(ui, 'root_t'); component = m.ref(ui, 'card_btn')
                 try:
                     rect = self.ui._button_rect(self.layout, (*stack[:3], panel, nodes), component, client_size)
+                except MapLayoutUpdating:
+                    raise  # 布局正在更新：整份读取作废，不当作卡片被回收。
                 except ValueError:
                     continue  # Recycled/off-client cards are never click targets.
                 l,t,r,b = rect; vl,vt,vr,vb = viewport_rect
