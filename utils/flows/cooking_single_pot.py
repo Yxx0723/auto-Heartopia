@@ -271,27 +271,48 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
     def click(read_target, before_input=None, *, hold_alt=False, variant_slot=None, start_trace=None):
         nonlocal alt_interaction_active,pending_ack,ack_succeeded
         if not hold_alt:
+            state={'prepared':False,'sent':False}
             if start_trace is not None:
-                return click_body(read_target,before_input,start_trace=start_trace)
-            return click_body(read_target,before_input,variant_slot=variant_slot)
-        pending_ack=None;ack_succeeded=False
-        initial=read(read_target)
-        try:
-            with cooking_alt(device,window,guard,wait,report):
-                alt_interaction_active=True
-                return click_body(read_target,before_input,initial)
-        finally:
-            alt_interaction_active=False
-            if pending_ack is not None:
-                try:
-                    held_buttons=getattr(device,'buttons',None)
-                    held_keys=getattr(device,'keys',None)
-                    inputs_released=(isinstance(held_buttons,(set,frozenset)) and
-                        isinstance(held_keys,(set,frozenset)) and not held_buttons and not held_keys)
-                    report('ack_post_diagnostic','UI 确认事后诊断；原输入清理已执行',
-                        ack_diagnostic=pending_ack.finalize(failed=not ack_succeeded and inputs_released))
-                except Exception:pass
-    def click_body(read_target, before_input=None, expected=None, *, variant_slot=None, start_trace=None):
+                return click_body(read_target,before_input,start_trace=start_trace,dispatch_state=state)
+            return click_body(read_target,before_input,variant_slot=variant_slot,dispatch_state=state)
+        # 按住 ALT 期间读到未就绪，read() 会立刻中断而不是带着 ALT 重试；
+        # 这里在「还没备料、没派发点击」时整段重来（松开 ALT、重新读取、重新按下）。
+        for attempt in range(1,4):
+            dispatch_state={'prepared':False,'sent':False}
+            pending_ack=None;ack_succeeded=False
+            initial=read(read_target)
+            try:
+                with cooking_alt(device,window,guard,wait,report):
+                    alt_interaction_active=True
+                    return click_body(read_target,before_input,initial,
+                                      dispatch_state=dispatch_state)
+            except Exception as exc:
+                # 这几个类型名在函数内导入：既有测试按 AST 单独执行 click/click_body，
+                # 作用域里没有模块级异常名，导入可保证两种执行方式都成立。
+                from utils.core.scene_read import SceneReadIssue as _ReadIssue
+                from utils.core.map_targeting import MapLayoutUpdating as _LayoutUpdating
+                from utils.drivers.cooking_single_pot import CookingObservationUpdating as _ObsUpdating
+                if not isinstance(exc,(_ReadIssue,_LayoutUpdating,_ObsUpdating)):
+                    raise
+                if dispatch_state['prepared'] or dispatch_state['sent'] or attempt==3:
+                    raise
+                if isinstance(exc,_ReadIssue) and exc.kind not in ('invalid_reference','mutation'):
+                    raise
+                report('stir_retry','翻锅读取未就绪，已松开 ALT 并整段重读',
+                       attempt=attempt,last_read_error={'type':type(exc).__name__,'message':str(exc)})
+                wait(.05)
+            finally:
+                alt_interaction_active=False
+                if pending_ack is not None:
+                    try:
+                        held_buttons=getattr(device,'buttons',None)
+                        held_keys=getattr(device,'keys',None)
+                        inputs_released=(isinstance(held_buttons,(set,frozenset)) and
+                            isinstance(held_keys,(set,frozenset)) and not held_buttons and not held_keys)
+                        report('ack_post_diagnostic','UI 确认事后诊断；原输入清理已执行',
+                            ack_diagnostic=pending_ack.finalize(failed=not ack_succeeded and inputs_released))
+                    except Exception:pass
+    def click_body(read_target, before_input=None, expected=None, *, variant_slot=None, start_trace=None, dispatch_state=None):
         nonlocal pending_ack,ack_succeeded
         def target_binding(value):
             return {key: item for key, item in value.items() if key != 'rect'}
@@ -336,6 +357,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             raise ValueError('烹饪控件绑定在派发前改变')
         guard()
         if before_input:before_input()
+        if dispatch_state is not None:dispatch_state['prepared']=True
         guard()
         if expected is not None:
             ui_ack=CookingUiClickAck(reader,target)
@@ -345,6 +367,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
             try:
                 with diagnostic:
                     try:
+                        if dispatch_state is not None:dispatch_state['sent']=True
                         device.execute({'type':'mouse_down','button':'left'});wait(.04)
                         device.execute({'type':'mouse_up','button':'left'})
                         diagnostic.data['mouse_up_returned_at']=now()
@@ -374,6 +397,7 @@ def run_single_pot(*, recipe, reader, window, controls, device, inventory, clock
                         if diagnostic is not None:
                             import win32gui
                             diagnostic.data['foreground_before_down']=attempt(win32gui.GetForegroundWindow)
+                        if dispatch_state is not None:dispatch_state['sent']=True
                         device.execute({'type':'mouse_down','button':'left'});wait(.04)
                     finally:
                         try:release_cooking_inputs(device)

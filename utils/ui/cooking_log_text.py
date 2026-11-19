@@ -72,6 +72,7 @@ STATE_TEXT = {
     'collect_key_dispatched': '已派发收菜键',
     'stir_alt_down': '按住翻锅键',
     'stir_alt_released': '松开翻锅键',
+    'stir_retry': '翻锅重试',
     'mouse_diagnostic': '鼠标到位',
     'ack_post_diagnostic': '点击后复核',
     'start_ui_diagnostic': '开始按钮观察',
