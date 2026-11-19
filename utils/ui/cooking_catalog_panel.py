@@ -80,6 +80,21 @@ class CookingCatalogPanel:
         self.list.bind('<<TreeviewSelect>>',self.changed)
         self.category.trace_add('write',self.filter);self.query.trace_add('write',self.filter)
         self.filter()
+        # 背包数量会随烹饪消耗、采集收获变化；烹饪页可见且空闲时静默重读。
+        self.inventory_auto_ms = 5000
+        self.detail.after(self.inventory_auto_ms, self._auto_inventory_tick)
+
+    def _auto_inventory_tick(self):
+        """定时同步食材数量，不写运行日志；窗口销毁后自动停止。"""
+        try:
+            if self.detail.winfo_ismapped() and not self.active:
+                self.auto_read_inventory(silent=True)
+        except Exception:
+            pass
+        try:
+            self.detail.after(self.inventory_auto_ms, self._auto_inventory_tick)
+        except Exception:
+            pass
 
     def filter(self,*args):
         previous = self.recipe['recipe_id'] if self.recipe else None
@@ -98,14 +113,17 @@ class CookingCatalogPanel:
         self.show_detail()
         self.auto_read_inventory()
 
-    def auto_read_inventory(self):
-        """每次选料理都重读一次背包；任务进行中或未连接时不读。"""
+    def auto_read_inventory(self, *, silent=False):
+        """选料理时重读背包；定时同步用 silent，不刷按钮文案和运行日志。"""
         if self.active:
             return
         raw=self.owner.view.status.get('pid')
         try:pid=int(raw)
         except (TypeError,ValueError):return
         if pid<=0:return
+        if silent:
+            self.owner.cooking.read_inventory(pid, silent=True)
+            return
         if self.owner.cooking.read_inventory(pid):
             self.stock_button.configure(text='正在读取背包材料…')
 
@@ -138,8 +156,14 @@ class CookingCatalogPanel:
     def apply_result(self,result):
         if result.get('state') == 'inventory_ready':
             self.stock_button.configure(text='刷新背包材料')
-        elif result.get('state') == 'inventory_error':
+        elif result.get('state') == 'inventory_error' and not result.get('silent'):
             self.stock_button.configure(text='读取失败 · 点击重试')
+        if result.get('state') in ('batch_finished', 'batch_stopped') and not result.get('silent'):
+            # 批次结束后任务立即失活；稍等一拍再静默读回实际消耗量。
+            try:
+                self.detail.after(400, lambda: self.auto_read_inventory(silent=True))
+            except Exception:
+                pass
         if 'batch' in result:
             b=result['batch']
             self.last_batch=b
@@ -156,6 +180,8 @@ class CookingCatalogPanel:
         """Called only by the existing Tk tick; display failures stay local."""
         lines=[]
         for event in events:
+            if event.get('silent'):
+                continue  # 定时静默同步只更新食材详情，不写运行日志
             try:
                 row=event_view(event);batch=event.get('batch') or self.last_batch
                 if event.get('state')=='batch_wait':
