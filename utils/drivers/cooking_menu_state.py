@@ -2,6 +2,8 @@
 import hashlib
 import struct
 
+from utils.core.map_targeting import MapLayoutUpdating
+from utils.core.scene_read import SceneReadIssue
 from utils.drivers.cooking_recipe import CookingRecipeReader
 from utils.drivers.map_panel import MapPanelReader
 from utils.drivers.native_ui_layout import NativeUiLayout
@@ -24,6 +26,12 @@ class CookingMenuStateChanged(ValueError):
         super().__init__('食谱读取不一致：'+self.classification+'；未使用该快照'
                          + ('；'+diagnostics['stop_reason'] if diagnostics.get('stop_reason') else ''))
 
+
+def _retryable_read_error(error):
+    """瞬时指针/布局读取问题：整份快照可重读，不是「状态变了」。"""
+    if isinstance(error, MapLayoutUpdating):
+        return True
+    return isinstance(error, SceneReadIssue) and error.kind in ('invalid_reference', 'mutation')
 
 def _observe_menu_sources(ui, recipe):
     # Both reads must run, even when the first fails. No game input is sent.
@@ -66,6 +74,8 @@ class CookingMenuStateReader:
         self.memory.locator.snapshot()
         before, before_errors, errors = _observe_menu_sources(self.ui, self.recipe)
         if errors:
+            if all(_retryable_read_error(exc) for exc in errors):
+                raise errors[0]
             raise CookingMenuStateChanged({'classification': 'READ_FAILED',
                 'before': before, 'after': {'ui': None, 'context': None},
                 'before_errors': before_errors, 'after_errors': {},
@@ -141,10 +151,14 @@ class CookingMenuStateReader:
                             'after': diagnostic['stove_identity_after']}
                     diagnostic['recoverable'] = current_panels == [panel] and final_identity == identity
                 except Exception as exc:
+                    if _retryable_read_error(exc):
+                        raise  # 瞬时读失败：整份快照重读，不当作身份已改变
                     diagnostic['identity_read_error'] = {'type': type(exc).__name__, 'message': str(exc)}
                     diagnostic['classification'] = 'READ_FAILED'
                     errors.append(exc)
             if errors:
+                if all(_retryable_read_error(exc) for exc in errors):
+                    raise errors[0]
                 raise CookingMenuStateChanged(diagnostic) from errors[0]
             raise CookingMenuStateChanged(diagnostic)
         self.memory.locator.snapshot()
