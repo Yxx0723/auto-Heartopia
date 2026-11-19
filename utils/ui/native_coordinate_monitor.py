@@ -250,14 +250,8 @@ class CoordinateWindow:
         root.configure(bg=COLORS['bg'])
         root.geometry('490x900+50+0')
         root.minsize(460, 860)
-        # 游戏窗口会持续抢前台；启动时就置顶，保证观测台始终可见。
-        try:
-            import ctypes
-            ctypes.windll.user32.SetWindowPos(
-                ctypes.c_void_p(root.winfo_id()), ctypes.c_void_p(-1),
-                0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
-        except Exception:
-            pass
+        # 系统不接受持续置顶；启动时主动置前一次，避免被其它窗口挡住。
+        root.after(600, self._bring_to_front)
         icon = self.resources / 'monitor.ico'
         if icon.exists():
             root.iconbitmap(str(icon))
@@ -1342,6 +1336,25 @@ class CoordinateWindow:
         """Ask for one immediate read-only poll so a single press can be judged."""
         if self.scene_worker and not self.closed:
             self.scene_worker.refresh()
+
+    def _bring_to_front(self):
+        """启动后置前一次；ALT 解锁 Windows 前台锁，失败时用 SwitchToThisWindow 兜底。"""
+        try:
+            import ctypes
+            import win32api
+            import win32con
+            import win32gui
+            hwnd = self.root.winfo_id()
+            ctypes.windll.user32.AllowSetForegroundWindow(ctypes.c_uint(-1).value)
+            win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                ctypes.windll.user32.SwitchToThisWindow(hwnd, True)
+            finally:
+                win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+        except Exception:
+            pass
 
     def tick(self):
         if self.closed:
