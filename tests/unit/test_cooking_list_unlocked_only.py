@@ -69,16 +69,16 @@ def test_only_unlocked_recipes_are_listed():
     panel = make_panel()
     panel.filter()
     assert panel.list.items == {'45101': ('田园沙拉',)}
-    assert {r['recipe_id'] for r in panel.display_recipes} == {45101, 45420}
+    assert {r['recipe_id'] for r in panel.display_recipes} == {45101}
 
 
-def test_unlocked_recipe_missing_locally_sits_in_other_category():
+def test_past_event_recipe_is_never_listed():
     panel = make_panel()
-    panel.category.set('其它图鉴')
-    panel.filter()
-    assert panel.list.items == {'45420': ('温泉蛋',)}
-    stub = next(r for r in panel.display_recipes if r['recipe_id'] == 45420)
-    assert stub['status'] == 'unconfirmed'
+    for category in ('日常料理', '近幽集'):
+        panel.category.set(category)
+        panel.filter()
+        assert '45420' not in panel.list.items
+        assert all(r['recipe_id'] != 45420 for r in panel.display_recipes)
 
 
 def test_before_unlocked_list_arrives_full_catalog_is_kept():

@@ -26,7 +26,7 @@ class CookingCatalogPanel:
         self.frame.pack(fill='both', expand=True, padx=8, pady=(4,2))
         bar = owner.frame(self.frame, card=True, border=False); bar.pack(fill='x')
         self.category = tk.StringVar(value='日常料理'); self.query = tk.StringVar()
-        ttk.Combobox(bar, textvariable=self.category, values=('日常料理','近幽集','其它图鉴'),
+        ttk.Combobox(bar, textvariable=self.category, values=('日常料理','近幽集'),
                      state='readonly', width=10).pack(side='left')
         ttk.Entry(bar, textvariable=self.query, width=17).pack(side='left', fill='x', expand=True, padx=(5,0))
         owner.label(bar, '搜索名称 / ID', color='muted').pack(side='left', padx=3)
@@ -147,16 +147,10 @@ class CookingCatalogPanel:
         if self.unlocked is None:
             source = self.recipes
         else:
-            source = []
-            for item in self.unlocked:
-                local = self.by_id.get(item['recipe_id'])
-                if local is not None:
-                    source.append(local)
-                else:
-                    # 游戏里已解锁，但本地配方数据尚未收录：只展示，不派发制作。
-                    source.append({'recipe_id': item['recipe_id'], 'name': item['name'],
-                                   'category': '其它图鉴', 'ingredients': [],
-                                   'status': 'unconfirmed'})
+            # 只显示已解锁且本地有配方数据的料理。
+            # 「过往小镇庆典」等过去活动的料理本地没有配方数据，不展示。
+            source = [self.by_id[item['recipe_id']] for item in self.unlocked
+                      if item['recipe_id'] in self.by_id]
         self.display_recipes = source
         for recipe in source:
             if recipe['category']==self.category.get() and (not query or query in recipe['name'].casefold() or query in str(recipe['recipe_id'])):
