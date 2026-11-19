@@ -1,6 +1,7 @@
 """Compact offline catalogue inside the existing cooking tab."""
 from collections import deque
 from datetime import datetime
+import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -17,11 +18,15 @@ class CookingCatalogPanel:
     def __init__(self, owner, parent, *, runtime_parent=None):
         self.owner = owner; self.inventory = None; self.recipe = None; self.active = None
         self.recipes = load_catalog()['recipes']
+        self.by_id = {r['recipe_id']: r for r in self.recipes}
+        # None 表示尚未读到游戏内的已解锁清单；读到之前保留全量列表。
+        self.unlocked = None; self.unlocked_ids = None
+        self.unlocked_thread = None; self.unlocked_result = None
         self.frame = owner.frame(parent, card=True, border=False)
         self.frame.pack(fill='both', expand=True, padx=8, pady=(4,2))
         bar = owner.frame(self.frame, card=True, border=False); bar.pack(fill='x')
         self.category = tk.StringVar(value='日常料理'); self.query = tk.StringVar()
-        ttk.Combobox(bar, textvariable=self.category, values=('日常料理','近幽集'),
+        ttk.Combobox(bar, textvariable=self.category, values=('日常料理','近幽集','其它图鉴'),
                      state='readonly', width=10).pack(side='left')
         ttk.Entry(bar, textvariable=self.query, width=17).pack(side='left', fill='x', expand=True, padx=(5,0))
         owner.label(bar, '搜索名称 / ID', color='muted').pack(side='left', padx=3)
@@ -91,7 +96,18 @@ class CookingCatalogPanel:
     def _auto_inventory_tick(self):
         """定时同步食材数量，不写运行日志；窗口销毁后自动停止。"""
         try:
+            result = self.unlocked_result
+            if result is not None:
+                self.unlocked_result = None
+                self.unlocked = result['recipes']
+                self.unlocked_ids = {r['recipe_id'] for r in result['recipes']}
+                self.filter()
+        except Exception:
+            pass
+        try:
             if self.detail.winfo_ismapped() and not self.active:
+                if self.unlocked is None:
+                    self._load_unlocked_ids()
                 self.auto_read_inventory(silent=True)
         except Exception:
             pass
@@ -100,10 +116,49 @@ class CookingCatalogPanel:
         except Exception:
             pass
 
+    def _load_unlocked_ids(self):
+        """后台只读一次游戏内已解锁清单；读不到就等下个周期重试。"""
+        if self.unlocked_thread and self.unlocked_thread.is_alive():
+            return
+        try:
+            pid = int(self.owner.view.status.get('pid'))
+        except (TypeError, ValueError):
+            return
+        if pid <= 0:
+            return
+        cooking = self.owner.cooking
+
+        def read():
+            try:
+                memory = cooking.reader_factory(pid, cooking.profile)
+                try:
+                    self.unlocked_result = CookingUnlockedRecipes(memory).snapshot()
+                finally:
+                    memory.close()
+            except Exception:
+                self.unlocked_result = None
+
+        self.unlocked_thread = threading.Thread(target=read, name='cooking-unlocked-read', daemon=True)
+        self.unlocked_thread.start()
+
     def filter(self,*args):
         previous = self.recipe['recipe_id'] if self.recipe else None
         self.list.delete(*self.list.get_children()); query=self.query.get().strip().casefold()
-        for recipe in self.recipes:
+        if self.unlocked is None:
+            source = self.recipes
+        else:
+            source = []
+            for item in self.unlocked:
+                local = self.by_id.get(item['recipe_id'])
+                if local is not None:
+                    source.append(local)
+                else:
+                    # 游戏里已解锁，但本地配方数据尚未收录：只展示，不派发制作。
+                    source.append({'recipe_id': item['recipe_id'], 'name': item['name'],
+                                   'category': '其它图鉴', 'ingredients': [],
+                                   'status': 'unconfirmed'})
+        self.display_recipes = source
+        for recipe in source:
             if recipe['category']==self.category.get() and (not query or query in recipe['name'].casefold() or query in str(recipe['recipe_id'])):
                 self.list.insert('', 'end', iid=str(recipe['recipe_id']),values=(recipe['name'],))
         if previous is not None and self.list.exists(str(previous)):
@@ -113,7 +168,8 @@ class CookingCatalogPanel:
 
     def changed(self,event=None):
         selected=self.list.selection()
-        self.recipe=next((r for r in self.recipes if selected and str(r['recipe_id'])==selected[0]),None)
+        self.recipe=next((r for r in getattr(self,'display_recipes',self.recipes)
+                          if selected and str(r['recipe_id'])==selected[0]),None)
         self.show_detail()
         # 切料理只刷新数量，不再把「背包已读取」写进运行日志。
         self.auto_read_inventory(silent=True)
@@ -152,6 +208,12 @@ class CookingCatalogPanel:
         recipe=self.recipe
         text='请选择料理。背包未读取时不会把材料数量当作 0。'
         if recipe:
+            if recipe.get('status') != 'confirmed':
+                text = (f"{recipe['name']}\n\n"
+                        '游戏图鉴已解锁，但本地未收录配方数据，暂不能自动制作。')
+                self.detail.configure(state='normal');self.detail.delete('1.0','end')
+                self.detail.insert('1.0',text);self.detail.configure(state='disabled')
+                return
             status=material_status(recipe,self.inventory)
             text=f"{recipe['name']}\n\n"
             for material in recipe['ingredients']:
@@ -198,6 +260,9 @@ class CookingCatalogPanel:
             return
         finally:
             self.unlocked_button.configure(state='normal')
+        self.unlocked = data['recipes']
+        self.unlocked_ids = {r['recipe_id'] for r in data['recipes']}
+        self.filter()
         self._show_unlocked_window(data)
 
     def _show_unlocked_window(self, data):
