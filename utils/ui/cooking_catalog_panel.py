@@ -45,8 +45,6 @@ class CookingCatalogPanel:
         actions = owner.frame(self.frame,card=True,border=False); actions.pack(fill='x')
         self.stock_button = owner.button(actions,'刷新背包材料',self.refresh_inventory)
         self.stock_button.pack(side='left',fill='x',expand=True,padx=(0,3))
-        self.unlocked_button = owner.button(actions,'已解锁图鉴',self.show_unlocked)
-        self.unlocked_button.pack(side='left',fill='x',expand=True,padx=(3,0))
         batch=owner.frame(self.frame,card=True,border=False);batch.pack(fill='x',pady=(3,0))
         owner.label(batch,'连续锅数（1～99）').pack(side='left')
         self.batch_target=tk.StringVar(value='1')
@@ -229,54 +227,6 @@ class CookingCatalogPanel:
             messagebox.showerror('背包未读取','请先连接游戏',parent=self.owner.root);return
         if self.owner.cooking.read_inventory(pid):
             self.stock_button.configure(text='正在读取背包材料…')
-
-    def show_unlocked(self):
-        """只读读取角色已解锁的料理图鉴，弹窗展示；不改游戏状态。"""
-        raw = self.owner.view.status.get('pid')
-        try:
-            pid = int(raw)
-        except (TypeError, ValueError):
-            pid = 0
-        if pid <= 0:
-            messagebox.showerror('图鉴未读取', '请先连接游戏', parent=self.owner.root)
-            return
-        cooking = self.owner.cooking
-        self.unlocked_button.configure(state='disabled')
-        data = None
-        try:
-            memory = cooking.reader_factory(pid, cooking.profile)
-            try:
-                data = CookingUnlockedRecipes(memory).snapshot()
-            finally:
-                memory.close()
-        except Exception as exc:
-            messagebox.showerror('图鉴读取失败', str(exc), parent=self.owner.root)
-            return
-        finally:
-            self.unlocked_button.configure(state='normal')
-        self.unlocked = data['recipes']
-        self.unlocked_ids = {r['recipe_id'] for r in data['recipes']}
-        self.filter()
-        self._show_unlocked_window(data)
-
-    def _show_unlocked_window(self, data):
-        window = tk.Toplevel(self.owner.root)
-        window.title('已解锁料理图鉴 · %d 道' % data['count'])
-        window.geometry('420x560')
-        window.configure(bg=theme.COLORS['bg'])
-        frame = ttk.Frame(window, padding=8)
-        frame.pack(fill='both', expand=True)
-        tree = ttk.Treeview(frame, columns=('name', 'id', 'new'), show='headings', height=18)
-        tree.heading('name', text='料理'); tree.column('name', width=180, minwidth=120)
-        tree.heading('id', text='ID'); tree.column('id', width=80, minwidth=70)
-        tree.heading('new', text='新'); tree.column('new', width=50, minwidth=40)
-        tree.pack(side='left', fill='both', expand=True)
-        bar = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
-        bar.pack(side='left', fill='y'); tree.configure(yscrollcommand=bar.set)
-        for row in data['recipes']:
-            tree.insert('', 'end', values=(row['name'], row['recipe_id'],
-                                          '新' if row['is_new'] else ''))
-        ttk.Button(window, text='关闭', command=window.destroy).pack(pady=(0, 8))
 
     def apply_result(self,result):
         if result.get('state') == 'inventory_ready':
