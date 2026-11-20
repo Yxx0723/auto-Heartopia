@@ -112,18 +112,9 @@ class SceneMapWorker:
             self.reader.close()
         self.reader, self.reader_pid = None, None
 
-    def poll_once(self):
-        with self.lock:
-            pid, generation = self.pid, self.generation
-            history = self.history
-            revision, signature = self.navigation_revision, self.navigation_signature
-        if pid != self.reader_pid:
-            self.close_reader()
-        if pid is None:
-            return False
-        started, read_stats, transient, fresh_retry = self.clock(), {}, False, False
-        idle_seconds = None if self.last_scan_finished is None else max(0., started-self.last_scan_finished)
-        reader_discarded = False
+    def read_scene(self, pid, generation):
+        """One full reader pass. A failure is reported, never repaired from old data."""
+        transient = fresh_retry = False
         try:
             if self.reader is None:
                 self.reader = self.factory(pid, self.profile)
@@ -134,23 +125,72 @@ class SceneMapWorker:
         except (OSError, ValueError) as exc:
             issue = issue_summary(exc)
             transient = issue['kind'] == 'mutation' and issue['retryable'] and issue['scope_verified']
-            # A known navigation-only reference failure still discards the
-            # reader and its snapshot. Reopen from scratch sooner; this is NOT
-            # permission to retain data or promote the error to a mutation.
+            # A known navigation-only reference failure still ends this read and
+            # its snapshot. The discard now happens after one immediate re-read;
+            # this is NOT permission to retain data or promote the error to a
+            # mutation.
             fresh_retry = (isinstance(self.reader, MemorySceneMap)
                 and getattr(self.reader, 'navigation_only', False) is True
                 and issue['stage'] in ('managed_group_colliders', 'managed_collider_stream',
                     'managed_stream_collisions', 'managed_collision_array', 'managed_shape_data')
                 and (issue['kind'] == 'invalid_reference'
                      or issue.get('code') in ('short_read', 'read_bounds')))
-            if isinstance(self.reader, MemorySceneMap):
-                read_stats = self.reader.last_read_stats
-            if not transient and not (fresh_retry and getattr(self.reader,'fresh_reader_discarded',False) is True):
+            stats = self.reader.last_read_stats if isinstance(self.reader, MemorySceneMap) else {}
+            return ({'state': 'error', 'objects': [], 'colliders': [],
+                     'message': '场景正在更新，稍后自动重试', 'diagnostic': str(exc), 'issue': issue},
+                    stats, transient, fresh_retry,
+                    not transient and not (fresh_retry
+                        and getattr(self.reader, 'fresh_reader_discarded', False) is True))
+        return (result,
+                self.reader.last_read_stats if isinstance(self.reader, MemorySceneMap) else {},
+                transient, fresh_retry, False)
+
+    def retry_navigation_read(self, result, fresh_retry, now, generation):
+        """Re-read at once before a still-fresh navigation supply is revoked.
+
+        The retry runs the reader again from the registry, so it never reuses the
+        failed scene. It happens at most once per poll, only for the navigation
+        reader, and only while the published snapshot still covers `now`: once
+        the supply has lapsed the existing discard-and-restart is strictly
+        better than reading again on the same handle.
+        """
+        if self.stop.is_set() or generation != self.generation:
+            return False
+        if not isinstance(self.reader, MemorySceneMap) \
+                or getattr(self.reader, 'navigation_only', False) is not True:
+            return False
+        if self.supply.deadline is None or self.supply.deadline <= now:
+            return False
+        if fresh_retry:
+            return True  # A reference went invalid: this retry IS the fresh read.
+        # A ready read that cannot feed navigation covers both a partial managed
+        # pass and a missing native world (world_state 'unavailable').
+        return result.get('state') == 'ready' and not navigation_quality_valid(result, now)
+
+    def poll_once(self):
+        with self.lock:
+            pid, generation = self.pid, self.generation
+            history = self.history
+            revision, signature = self.navigation_revision, self.navigation_signature
+        if pid != self.reader_pid:
+            self.close_reader()
+        if pid is None:
+            return False
+        started = self.clock()
+        idle_seconds = None if self.last_scan_finished is None else max(0., started-self.last_scan_finished)
+        read_stats, transient, fresh_retry = {}, False, False
+        reader_discarded, retried = False, False
+        while True:
+            scan_started = self.clock()
+            result, read_stats, transient, fresh_retry, discard = self.read_scene(pid, generation)
+            read_finished = self.clock()
+            if not retried and self.retry_navigation_read(result, fresh_retry, read_finished, generation):
+                retried = True
+                continue
+            if discard:
                 reader_discarded = self.reader is not None
                 self.close_reader()
-            result = {'state': 'error', 'objects': [], 'colliders': [],
-                      'message': '场景正在更新，稍后自动重试', 'diagnostic': str(exc), 'issue': issue}
-        read_finished = self.clock()
+            break
         geometry_preparation_seconds = 0.
         if (result.get('state') == 'ready' and result.get('world_state', 'ready') == 'ready'
                 and ('quality' in result or result.get('navigation_only') is True)
@@ -199,7 +239,7 @@ class SceneMapWorker:
             self.latest_scene, self.latest_at = result, now
             previous_expiry = self.supply.deadline
             previous_snapshot = self.supply.scan_count if previous_expiry is not None else None
-            self.supply.publish(result, now, max(0., now-started))
+            self.supply.publish(result, now, max(0., now-scan_started))
             scan_id = f'{generation}:{self.supply.scan_count}'
             expiry = self.supply.deadline
             supply_metrics = self.supply.metrics(now)
@@ -222,6 +262,7 @@ class SceneMapWorker:
             parts = parts if isinstance(parts, dict) else {}
             self.diagnostics.write({'state': result.get('state'), 'message': json.dumps({
                 'duration_seconds': max(0., now-started), 'recovery': read_stats,
+                'supply_retry': retried,
                 'scan_id': scan_id,
                 'snapshot_id': scan_id if expiry is not None else None,
                 'snapshot_expires_at_monotonic': expiry,
@@ -231,7 +272,7 @@ class SceneMapWorker:
                 'previous_scheduled_delay_seconds': self.last_scan_delay,
                 'actual_idle_seconds': idle_seconds,
                 'reader_discarded': reader_discarded or (read_stats.get('process') or {}).get('reader_discarded', False),
-                'scan_started_at_monotonic': started,
+                'scan_started_at_monotonic': scan_started,
                 'scan_finished_at_monotonic': read_finished,
                 'published_at_monotonic': now,
                 'publication_seconds': max(0., now-read_finished),

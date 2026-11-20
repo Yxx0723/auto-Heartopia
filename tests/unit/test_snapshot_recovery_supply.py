@@ -402,33 +402,113 @@ def test_late_fresh_failure_cannot_change_new_pid_recovery_policy():
         worker.close()
 
 
-def test_faster_fresh_query_shortens_supply_gap_without_using_the_failed_snapshot():
+def test_failed_navigation_read_is_reread_once_before_revoking_a_fresh_snapshot():
+    """A reference failure re-reads at once and publishes only the new scene.
+
+    The failed read never becomes a publication and its geometry is never
+    reused; the retry re-runs the reader from the registry on the same handle,
+    so an unexpired snapshot keeps covering the whole interval.
+    """
     from tests.unit.test_scene_read_recovery import quality_scene
-    def run(legacy_delay):
-        now=[10.]
-        step=[0]
-        def snapshot():
-            step[0]+=1
-            if step[0]==2:
-                now[0]+=.5
-                raise SceneReadIssue('invalid',kind='invalid_reference',stage='managed_collision_array')
-            now[0]+=2.
-            return quality_scene(now[0])
-        sources=[]
-        def factory(*args):
-            source=nav_reader();source.snapshot.side_effect=snapshot;sources.append(source)
-            return source
-        worker=SceneMapWorker('profile',factory=factory,clock=lambda:now[0])
-        try:
-            worker.set_pid(7);worker.poll_once()
-            assert worker.navigation_snapshot(7)
-            worker.poll_once()
-            assert worker.navigation_snapshot(7) is None  # Even its old TTL was not exhausted.
-            sources[0].close.assert_called_once()
-            now[0]+=2. if legacy_delay else worker.retry_delay
-            worker.poll_once()
-            assert worker.navigation_snapshot(7)
-            return worker.navigation_metrics(7)['snapshot_longest_gap_seconds']
-        finally:worker.close()
-    assert run(True)==pytest.approx(4.)
-    assert run(False)==pytest.approx(2.1)
+    now, step, sources = [10.], [0], []
+    def snapshot():
+        step[0]+=1
+        if step[0]==2:
+            now[0]+=.5
+            raise SceneReadIssue('invalid',kind='invalid_reference',stage='managed_collision_array')
+        now[0]+=2.
+        return quality_scene(now[0])
+    def factory(*args):
+        source=nav_reader();source.snapshot.side_effect=snapshot;sources.append(source)
+        return source
+    worker=SceneMapWorker('profile',factory=factory,clock=lambda:now[0])
+    try:
+        worker.set_pid(7);worker.poll_once()
+        assert worker.navigation_snapshot(7)['quality']['root_verified_at']==12.
+        worker.poll_once()
+        assert step[0]==3 and len(sources)==1      # Exactly one re-read, no restart.
+        sources[0].close.assert_not_called()
+        assert worker.navigation_snapshot(7)['quality']['root_verified_at']==14.5
+        metrics=worker.navigation_metrics(7)
+        assert metrics['snapshot_usable_ratio']==pytest.approx(1.)
+        assert metrics['snapshot_longest_gap_seconds']==pytest.approx(0.)
+        assert metrics['snapshot_invalid_publications']=={}
+    finally:worker.close()
+
+
+def test_failed_navigation_read_that_fails_again_revokes_the_snapshot_at_once():
+    from tests.unit.test_scene_read_recovery import quality_scene
+    now, step, sources = [10.], [0], []
+    def snapshot():
+        step[0]+=1
+        if step[0]>=2:
+            now[0]+=.5
+            raise SceneReadIssue('invalid',kind='invalid_reference',stage='managed_collision_array')
+        now[0]+=2.
+        return quality_scene(now[0])
+    def factory(*args):
+        source=nav_reader();source.snapshot.side_effect=snapshot;sources.append(source)
+        return source
+    worker=SceneMapWorker('profile',factory=factory,clock=lambda:now[0])
+    try:
+        worker.set_pid(7);worker.poll_once()
+        assert worker.navigation_snapshot(7)
+        worker.poll_once()
+        assert step[0]==3                            # One re-read, never more.
+        assert worker.navigation_snapshot(7) is None
+        sources[0].close.assert_called_once()
+        assert worker.reader is None and worker.retry_delay==pytest.approx(.1)
+        assert worker.take_latest()['state']=='error'
+        assert worker.navigation_metrics(7)['snapshot_invalid_publications']=={
+            'invalid_reference:managed_collision_array':1}
+    finally:worker.close()
+
+
+def test_lapsed_navigation_supply_is_not_reread_on_the_same_handle():
+    """With nothing left to protect, a failed read still restarts immediately."""
+    now, step, sources = [10.], [0], []
+    def snapshot():
+        step[0]+=1
+        now[0]+=.5
+        raise SceneReadIssue('invalid',kind='invalid_reference',stage='managed_collision_array')
+    def factory(*args):
+        source=nav_reader(SceneReadIssue('invalid',kind='invalid_reference',
+                                        stage='managed_collision_array'))
+        source.snapshot.side_effect=snapshot;sources.append(source)
+        return source
+    worker=SceneMapWorker('profile',factory=factory,clock=lambda:now[0])
+    try:
+        worker.set_pid(7);worker.poll_once()
+        assert step[0]==1 and sources[0].close.call_count==1
+        assert worker.reader is None and worker.retry_delay==pytest.approx(.1)
+        assert worker.navigation_snapshot(7) is None
+    finally:worker.close()
+
+
+def test_unusable_native_publication_is_reread_once_before_it_replaces_a_fresh_snapshot():
+    from tests.unit.test_scene_read_recovery import quality_scene
+    now, step, sources = [10.], [0], []
+    def snapshot():
+        step[0]+=1
+        now[0]+=2.
+        scene=quality_scene(now[0],native='unavailable' if step[0]==2 else 'complete')
+        if step[0]==2:
+            scene['world_state']='unavailable'   # The reader's own native-failure shape.
+        return scene
+    def factory(*args):
+        source=nav_reader();source.snapshot.side_effect=snapshot;sources.append(source)
+        return source
+    worker=SceneMapWorker('profile',factory=factory,clock=lambda:now[0])
+    try:
+        worker.set_pid(7);worker.poll_once()
+        assert worker.navigation_snapshot(7)
+        worker.poll_once()                       # 14.0 unusable, 16.0 usable
+        assert step[0]==3 and len(sources)==1
+        scene=worker.navigation_snapshot(7)
+        assert scene['quality']['parts']['native_collisions']['state']=='complete'
+        assert scene['quality']['root_verified_at']==16.
+        metrics=worker.navigation_metrics(7)
+        assert metrics['snapshot_usable_ratio']==pytest.approx(1.)
+        assert metrics['snapshot_longest_gap_seconds']==pytest.approx(0.)
+    finally:worker.close()
+
