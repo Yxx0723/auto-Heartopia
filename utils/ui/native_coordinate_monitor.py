@@ -614,10 +614,19 @@ class CoordinateWindow:
             self.clear_path_memory_button = self.button(navigationbar, '清除记忆', self.clear_path_memory, small=True)
             self.clear_path_memory_button.pack(side='left')
             self.refresh_path_memory_info()
-        # 第 3 行：引导跟随单独成行；主操作按钮留在前两行。
-        self.guidance_button = self.button(bottom_body, '跟随游戏引导 · 远距公交追踪',
+        # 第 3 行：先走到首点开关 + 引导跟随；主操作按钮留在前两行。
+        guidebar = self.frame(bottom_body)
+        guidebar.pack(fill='x', pady=(px(4), 0))
+        self.walk_to_first_var = tk.BooleanVar(self.root, value=False)
+        self.walk_to_first_check = tk.Checkbutton(guidebar, text='先走到首点',
+            variable=self.walk_to_first_var,
+            bg=COLORS['card'], fg=COLORS['text'], activebackground=COLORS['card'],
+            activeforeground=COLORS['text'], selectcolor=COLORS['button'],
+            font=theme.font(12), bd=0, highlightthickness=0)
+        self.walk_to_first_check.pack(side='left', padx=(0, 6))
+        self.guidance_button = self.button(guidebar, '跟随游戏引导 · 远距公交追踪',
                                            self.start_guidance_follow, small=True)
-        self.guidance_button.pack(fill='x', pady=(px(4), 0))
+        self.guidance_button.pack(side='left', fill='x', expand=True)
         # Keep existing status-update calls valid without a footer or text widget.
         self._hint_state={}
         self.hint=SimpleNamespace(configure=self._hint_state.update)
@@ -1417,6 +1426,9 @@ class CoordinateWindow:
         if hasattr(self, 'guidance_button'):
             configure_changed(self.guidance_button, state='normal' if live and not playing else 'disabled')
         patrol = getattr(self, 'patrol_route_selected', False)
+        if hasattr(self, 'walk_to_first_check'):
+            configure_changed(self.walk_to_first_check,
+                              state='disabled' if playing or patrol or not self.navigation_var.get() else 'normal')
         configure_changed(self.route_menu, state='disabled' if playing else 'readonly')
         for action, button in self.route_buttons.items():
             enabled = not playing and (action not in ('copy', 'rename') or not self.points_error)
@@ -2125,7 +2137,11 @@ class CoordinateWindow:
                                 auto_eat=self.food_auto_var.get() if hasattr(self, 'food_auto_var') else False,
                                 food_fallback=self.food_fallback_mode(),
                                 route_path=self.point_store.path,
-                                remember_paths=SHOW_PATH_MEMORY_CONTROLS and self.path_memory_var.get())
+                                remember_paths=SHOW_PATH_MEMORY_CONTROLS and self.path_memory_var.get(),
+                                # 默认关闭时不传该参数，保持原有启动调用完全不变。
+                                **({'walk_to_first': True}
+                                   if hasattr(self, 'walk_to_first_var')
+                                   and self.walk_to_first_var.get() else {}))
         except (OSError, ValueError) as exc:
             self.playback.record_log('error', f'无法开始点位回放：{exc}')
             messagebox.showerror('无法开始点位回放', str(exc), parent=self.root)

@@ -3,12 +3,14 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from collections import deque
+import math
 import queue
 import threading
 
 from utils.core.coordinate_points import ordered_waypoints, validate_collect_wait, validate_loop_count
+from utils.core.coordinate_route import valid_position
 from utils.core.coordinate_recovery import validate_recovery_options
-from utils.core.coordinate_navigation import LocalNavigator
+from utils.core.coordinate_navigation import LocalNavigator, NavigationWait
 from utils.core.collection_navigation import CollectionNavigator
 from utils.core import special_verdict
 from utils.core.special_patrol import validate_patrol
@@ -37,6 +39,11 @@ SPECIAL_FINISH_TEXT = {
     special_verdict.UNCHANGED: '动态资源连按未见状态变化，请核对背包',
     special_verdict.UNKNOWN: '动态资源状态未能读取，请核对背包',
 }
+
+BUS_GUIDANCE_SOFT_RADIUS = 5.0
+BUS_GUIDANCE_SOFT_REMAINING = 6.0
+BUS_GUIDANCE_SOFT_HEIGHT = 1.5
+BUS_GUIDANCE_MAX_RETRIES = 2
 
 
 class PointPlayback:
@@ -164,7 +171,7 @@ class PointPlayback:
     def start(self, data, pid, start_mode='first', recovery_attempts=policy.COORD_RECOVERY_DEFAULT_ATTEMPTS,
               jump_on_recovery=True, collect_wait_seconds=policy.COORD_COLLECTION_DEFAULT_WAIT,
               loop_count=policy.COORD_PLAYBACK_DEFAULT_LOOPS, auto_navigate=False, auto_repair=False, auto_eat=False,
-              route_path=None, remember_paths=True, food_fallback='fruit'):
+              route_path=None, remember_paths=True, food_fallback='fruit', walk_to_first=False):
         if self.closed or self.active or self.input_busy():
             raise ValueError('已有点位回放正在运行，请先停止。')
         if self.runner is None:
@@ -178,6 +185,10 @@ class PointPlayback:
         validate_loop_count(loop_count)
         if type(auto_navigate) is not bool:
             raise ValueError('自动寻路选项无效。')
+        if type(walk_to_first) is not bool:
+            raise ValueError('先走到首点选项无效。')
+        if walk_to_first and not auto_navigate:
+            raise ValueError('「先走到首点」需要开启自动寻路。')
         if type(auto_repair) is not bool:
             raise ValueError('自动维修选项无效。')
         if food_fallback not in FALLBACK_MODES:
@@ -216,6 +227,7 @@ class PointPlayback:
                         {'start_mode': start_mode, 'loop_count': loop_count,
                          'auto_navigate': auto_navigate, 'remember_paths': remember_paths,
                          'auto_repair': auto_repair, 'auto_eat': auto_eat, 'food_fallback': food_fallback,
+                         'walk_to_first': walk_to_first,
                          'collect_wait_seconds': collect_wait_seconds,
                          'recovery_attempts': recovery_attempts, 'jump_on_recovery': jump_on_recovery})
                         if history_root is not None else None)
@@ -223,7 +235,8 @@ class PointPlayback:
             self.record_log('preparation', f'当前路线：{Path(route_path).stem}')
         self.update('playback_wait', f'已就绪：{self.total} 个点 · 循环 {loop_count} 次 · 切回游戏按 F6 开始 · F9 停止')
         self.thread = threading.Thread(target=self._run, args=(deepcopy(data), pid, start_mode,
-                                                              recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat),
+                                                              recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat,
+                                                              walk_to_first),
                                        name='point-playback', daemon=True)
         self.thread.start()
 
@@ -297,6 +310,8 @@ class PointPlayback:
             window = self.window_factory(pid)
             size = window.size()
             device = self.device_factory(window)
+            if self.history is not None and isinstance(device, TimelineInput):
+                device.input_observer = self.history.input_edge
             controls = self.controls_factory(window, size, Feedback(), self.stop_event.is_set)
             controls.start()
             if map_opening_only:
@@ -370,7 +385,7 @@ class PointPlayback:
             if navigation_worker:
                 navigation_worker.close()
 
-    def _execute(self, data, pid, start_mode, recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat):
+    def _execute(self, data, pid, start_mode, recovery_attempts, jump_on_recovery, collect_wait_seconds, loop_count, auto_navigate, auto_repair, auto_eat, walk_to_first=False):
         controls, device, navigation_worker = None, None, None
         def report(state,message,**extra):
             if navigation_worker is not None:
@@ -382,6 +397,8 @@ class PointPlayback:
             window = self.window_factory(pid)
             size = window.size()
             device = self.device_factory(window)
+            if self.history is not None and isinstance(device, TimelineInput):
+                device.input_observer = self.history.input_edge
             controls = self.controls_factory(window, size, self, self.stop_event.is_set)
             controls.start()
             factory = CollectionNavigator if self.navigator_factory is LocalNavigator else self.navigator_factory
@@ -422,6 +439,170 @@ class PointPlayback:
             if self.path_memory is not None:
                 mode_text += f' · 已记忆 {self.path_memory.count} 段走法'
             self.update('playback_wait', f'{mode_text} · 循环 {loop_count} 次 · 切回游戏按 F6 开始 · F9 停止')
+            if not recorded and 'special_patrol' not in data and self.guidance_runner is not None:
+                # Keep the existing F6 start gate. Once the user actually starts
+                # replay, use native transit guidance only when the first target
+                # is far away; the existing route runner still owns collection.
+                while True:
+                    running, stopped = controls.snapshot()
+                    if stopped or self.stop_event.is_set():
+                        report('stopped', '回放开始前已停止，按键已释放')
+                        return
+                    if running:
+                        break
+                    self.clock.sleep(.01)
+
+                waypoints = ordered_waypoints(data)
+                first_target = tuple(waypoints[0]['position'])
+                position_reader = self.reader_factory(pid, self.profile, hwnd=window.hwnd)
+                try:
+                    player_position = position_reader.read_for_playback()
+                finally:
+                    position_reader.close()
+                if not valid_position(player_position):
+                    raise ValueError('无法读取人物当前位置，未启动远距离公交追踪')
+                distance_to_first = math.hypot(player_position[0]-first_target[0],
+                                               player_position[2]-first_target[2])
+                report('playback_wait', '已检查回放首点距离',
+                       route_first_point=list(first_target),
+                       route_first_distance_xz=distance_to_first,
+                       bus_guidance_threshold=50.)
+                if distance_to_first > 50. and walk_to_first:
+                    # 用户选择先走到首点：不开地图、不追公交，交给本地寻路
+                    # 直接逼近首点，到达后由常规采集流程接管。
+                    report('playback_wait', '已跳过公交追踪，由本地寻路直接走到首点',
+                           route_first_point=list(first_target),
+                           route_first_distance_xz=distance_to_first,
+                           walk_to_first=True)
+                elif distance_to_first > 50.:
+                    from utils.flows.map_targeting import MapTargeter
+
+                    report('map_targeting', '首点距离超过 50，准备追踪最近公交站',
+                           route_first_point=list(first_target),
+                           route_first_distance_xz=distance_to_first)
+
+                    def check_map_input():
+                        running, stopped = controls.snapshot()
+                        if stopped or not running or self.stop_event.is_set():
+                            raise ValueError('远距离公交追踪期间回放已暂停或停止')
+
+                    guidance_provider = (lambda: navigation_worker.navigation_snapshot(pid)) \
+                        if navigation_worker is not None else (lambda: self.scene_provider(pid))
+                    guide_navigator = GuidanceNavigator(guidance_provider,
+                        clock=self.clock.monotonic, respect_water=False)
+
+                    def preflight_first_collection_point():
+                        local_navigator = navigation.get('navigator')
+                        if not auto_navigate or local_navigator is None \
+                                or not callable(getattr(local_navigator, 'next_target', None)):
+                            raise ValueError('首点接管前没有可用的本地寻路器')
+                        fresh_reader = self.reader_factory(pid, self.profile, hwnd=window.hwnd)
+                        try:
+                            current = fresh_reader.read_for_playback()
+                        finally:
+                            fresh_reader.close()
+                        if not valid_position(current):
+                            raise ValueError('首点接管前人物坐标无效')
+                        check_map_input()
+                        # This is a no-input planning preflight. The ordinary route
+                        # runner replans again before moving, with its normal guards.
+                        first_leg = local_navigator.next_target(
+                            tuple(current), first_target, check=check_map_input,
+                            before_plan=device.release_all)
+                        if not valid_position(first_leg):
+                            raise ValueError('本地寻路器未给出有效的首点接近目标')
+                        return tuple(current), tuple(first_leg)
+
+                    guide_result = None
+                    preflight_position = preflight_target = None
+                    guide_attempt_limit = BUS_GUIDANCE_MAX_RETRIES + 1
+                    for guide_attempt in range(1, guide_attempt_limit + 1):
+                        map_reader = self.reader_factory(pid, self.profile, hwnd=window.hwnd)
+                        try:
+                            targeter = MapTargeter(map_reader, device, window, controls,
+                                                   self.clock, check_map_input, report)
+                            map_result = targeter.open_and_zoom_once(
+                                center_map=True, bus_target=first_target, close_after=True)
+                        finally:
+                            map_reader.close()
+
+                        report('navigating', '公交站追踪已启动，开始跟随游戏引导',
+                               bus_guide_attempt=guide_attempt,
+                               bus_guide_attempt_limit=guide_attempt_limit, **map_result)
+                        runner_options = {'clock': self.clock, 'navigator': guide_navigator}
+                        if getattr(self.guidance_runner, 'supports_bus_soft_arrival', False):
+                            runner_options['inactive_soft_arrival'] = {
+                                'radius': BUS_GUIDANCE_SOFT_RADIUS,
+                                'remaining': BUS_GUIDANCE_SOFT_REMAINING,
+                                'height': BUS_GUIDANCE_SOFT_HEIGHT,
+                            }
+                        guide_result = self.guidance_runner(
+                            size, lambda: self._recording_reader(pid, window.hwnd, guidance=True),
+                            device, window, controls, report, **runner_options)
+
+                        if guide_result.get('arrived'):
+                            try:
+                                preflight_position, preflight_target = preflight_first_collection_point()
+                            except (OSError, ValueError, TypeError, RuntimeError, NavigationWait) as exc:
+                                report('stopped', '公交引导结束，但首个采集点未通过本地碰撞路径预检',
+                                       guidance_reason=guide_result.get('reason'),
+                                       first_point_preflight_error=str(exc),
+                                       route_first_point=list(first_target),
+                                       soft_arrival=guide_result.get('soft_arrival', False))
+                                return
+                            break
+
+                        if not guide_result.get('recoverable'):
+                            report('stopped', '公交站引导未完成，未启动后续采集回放',
+                                   guidance_reason=guide_result.get('reason'),
+                                   bus_guide_attempt=guide_attempt,
+                                   route_first_point=list(first_target))
+                            return
+
+                        try:
+                            preflight_position, preflight_target = preflight_first_collection_point()
+                        except (OSError, ValueError, TypeError, RuntimeError, NavigationWait) as exc:
+                            if guide_attempt >= guide_attempt_limit:
+                                report('stopped', '公交引导恢复额度耗尽，首点本地碰撞路径仍不可用',
+                                       guidance_reason=guide_result.get('reason'),
+                                       first_point_preflight_error=str(exc),
+                                       bus_guide_attempt=guide_attempt,
+                                       bus_guide_attempt_limit=guide_attempt_limit,
+                                       route_first_point=list(first_target))
+                                return
+                            report('recovering', '公交追踪已结束且首点暂不可接管，重新开启地图并重追公交站',
+                                   guidance_reason=guide_result.get('reason'),
+                                   first_point_preflight_error=str(exc),
+                                   bus_guide_attempt=guide_attempt,
+                                   bus_guide_attempt_limit=guide_attempt_limit,
+                                   recovery_attempt=guide_attempt,
+                                   recovery_limit=BUS_GUIDANCE_MAX_RETRIES)
+                            guide_navigator.invalidate()
+                            continue
+                        report('navigating', '公交追踪结束后首点通过本地碰撞路径预检，交给采集路线',
+                               guidance_reason=guide_result.get('reason'),
+                               bus_guide_direct_takeover=True,
+                               bus_guide_attempt=guide_attempt,
+                               route_first_point=list(first_target))
+                        break
+
+                    if preflight_position is None or preflight_target is None:
+                        report('stopped', '公交引导恢复后未建立首点接管计划，未启动采集回放',
+                               guidance_reason=(guide_result or {}).get('reason'),
+                               bus_guide_attempt_limit=guide_attempt_limit,
+                               route_first_point=list(first_target))
+                        return
+                    first_distance = math.hypot(preflight_position[0]-first_target[0],
+                                                preflight_position[2]-first_target[2])
+                    report('navigating', '已确认首点本地路径可规划，继续原采集路线',
+                           guidance_target_distance=(guide_result or {}).get('target_distance'),
+                           guidance_soft_arrival=(guide_result or {}).get('soft_arrival', False),
+                           guidance_remaining_route=(guide_result or {}).get('remaining_route'),
+                           guidance_height_difference=(guide_result or {}).get('height_difference'),
+                           route_first_point=list(first_target),
+                           route_first_distance_xz=first_distance,
+                           first_leg_target=list(preflight_target),
+                           first_point_height_difference=abs(preflight_position[1]-first_target[1]))
             completed = self.runner(data, size,
                                      lambda: self._recording_reader(pid, window.hwnd),
                                      device, window, controls, report, clock=self.clock, start_mode=start_mode,
