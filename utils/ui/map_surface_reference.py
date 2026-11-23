@@ -8,13 +8,6 @@ WOODEN_PLATFORM_FOOTPRINTS = ((-55.568, -148.961, -55.567, -148.962, -52.509, -1
 def draw_wooden_platforms(cache, scale):
     for index, coords in enumerate(WOODEN_PLATFORM_FOOTPRINTS):
         key = ('wooden-platform-reference', index)
-        cache.geometry.valid_keys.update((key, ('wooden-platform-label', index)))
+        cache.geometry.valid_keys.add(key)
         cache.polygon(key, coords, -0.5, fill='#B88752', outline='#68452C',
                       width=1.5, tags='wooden-platform')
-        if scale >= 2.5:
-            n = len(coords)//2
-            center = (sum(coords[::2])/n, sum(coords[1::2])/n)
-            cache.symbol(('wooden-platform-label', index), center, 0,
-                         lambda painter, x, z: painter.create_text(
-                             x, z, text='木板', fill='#392719',
-                             font=('Microsoft YaHei UI', 9, 'bold'), tags='wooden-platform-label'))

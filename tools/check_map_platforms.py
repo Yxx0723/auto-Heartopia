@@ -12,6 +12,6 @@ for scale in (3.,1.,4.,4.):
  cache.begin(Viewport(800,600,61.,-191.,scale))
  draw_wooden_platforms(cache,scale);cache.finish()
  assert len(c.find_withtag('wooden-platform'))==10
- assert len([i for i in c.find_withtag('wooden-platform-label') if c.itemcget(i,'state')!='hidden'])==(10 if scale>=2.5 else 0)
+ assert len([i for i in c.find_withtag('wooden-platform-label') if c.itemcget(i,'state')!='hidden'])==0
 assert c.itemcget(c.find_withtag('wooden-platform')[0],'fill')=='#B88752'
-r.destroy();print('PASS: standing point covered; 10 footprints persist across redraw/zoom; labels hide at low zoom')
+r.destroy();print('PASS: standing point covered; 10 footprints persist across redraw/zoom; no labels at any zoom')
