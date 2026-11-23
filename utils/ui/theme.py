@@ -71,7 +71,7 @@ COLORS = {
 # Cartographic palette. Symbols keep their own darker fills so they stay
 # legible on the lighter ground, while grid / chrome recede into the background.
 MAP_STYLE = {
-    'ground': SAGE_50,
+    'ground': '#D8D8D8',
     'grid': '#D3E2CC',
     'grid_major': '#BED3B6',
     'edge': '#C2D5BB',
