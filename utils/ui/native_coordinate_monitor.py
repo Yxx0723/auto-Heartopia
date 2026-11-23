@@ -425,7 +425,7 @@ class CoordinateWindow:
         plotcard.grid_columnconfigure(0, weight=1)
         plotcard.grid_rowconfigure(2, weight=1)
         self.build_map_toolbar(plotcard)
-        self.canvas = tk.Canvas(plotcard, bg=COLORS['plot'], bd=0, highlightthickness=0, height=270)
+        self.canvas = tk.Canvas(plotcard, bg=MAP_STYLE['ground'], bd=0, highlightthickness=0, height=270)
         self.map_cache = MapDrawCache(self.canvas, MAP_WATER_AREAS, SCENE_RANKS, roads=REFERENCE_ROADS,
                                      water_islands=MAP_WATER_ISLANDS)
         self.map_hover, self.map_hover_job = MapHover(self.canvas), None
