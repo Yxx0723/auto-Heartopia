@@ -1141,7 +1141,7 @@ class CoordinateWindow:
         switches.grid(row=13, column=0, columnspan=2, sticky='ew')
         for index, (text, variable) in enumerate([
                 ('场景物体', self.scene_objects_var), ('山体与碰撞', self.scene_colliders_var),
-                ('河道与湖泊', self.scene_water_var), ('参考道路', self.scene_roads_var),
+                ('海洋、河流与湖泊', self.scene_water_var), ('参考道路', self.scene_roads_var),
                 ('围栏／护栏', self.scene_barriers_var),
                 ('附近碰撞轮廓', self.scene_nearby_colliders_var)]):
             tk.Checkbutton(switches, text=text, variable=variable, command=self.scene_layer_changed, bg=COLORS['card'],

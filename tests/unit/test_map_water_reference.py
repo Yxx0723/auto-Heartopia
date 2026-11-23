@@ -23,8 +23,8 @@ def test_river_sections_cross_old_roi_edges_without_disappearing(pixel):
     assert wet(pixel)
 
 
-@pytest.mark.parametrize('pixel', [(477,400),(287,362),(257,597),(50,450),(840,553)])
-def test_town_house_pointer_glow_ocean_and_dry_island_are_not_water(pixel):
+@pytest.mark.parametrize('pixel', [(477,400),(287,362),(257,597),(840,553)])
+def test_town_house_pointer_glow_and_dry_island_are_not_water(pixel):
     assert not wet(pixel)
 
 
@@ -50,3 +50,12 @@ def test_water_and_island_items_survive_zoom_and_visibility_changes_in_cache():
         assert canvas.created==2
         assert all(item['state']==('normal' if visible else 'hidden') for item in canvas.items.values())
     assert ('water-island',0) in cache.geometry.reference_keys
+
+@pytest.mark.parametrize('pixel', [(50,450),(980,450),(600,770),(50,150),(770,110)])
+def test_coastal_sea_is_present_across_map(pixel):
+    assert wet(pixel)
+
+
+@pytest.mark.parametrize('pixel', [(120,170),(195,230),(920,365),(925,615),(740,750)])
+def test_offshore_islands_remain_land(pixel):
+    assert not wet(pixel)
