@@ -368,6 +368,9 @@ def test_insect_configuration_changes_cannot_produce_a_stale_butterfly(change):
 
 
 @pytest.mark.parametrize('name,namespace,expected', [
+    ('FishComponent', 'XDTLevelAndEntity.Gameplay.Component.Fish', 'fish'),
+    ('FishComponent', 'WrongNamespace', 'other'),
+    ('PlayerFishingShipComponent', 'XDTLevelAndEntity.Gameplay.Component.Fish', 'other'),
     ('BirdComponent', 'ScriptsRefactory.LevelAndEntity.Entity.Components', 'bird'),
     ('AnimalMovementComponent', 'XDTLevelAndEntity.Gameplay.Component.Animal', 'animal'),
     ('BirdScannableComponent', 'ScriptsRefactory.LevelAndEntity.Entity.Components', 'other'),

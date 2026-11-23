@@ -53,7 +53,8 @@ PLANT_STYLES = {'blueberry': (COLORS['blueberry'], COLORS['blueberry_outline']),
                 'tree': ('#5F8A55', '#3E6B4A'),
                 'shrub': ('#8A8C5C', '#5E6A3C')}
 
-FAUNA_STYLES = {'butterfly': ('#6D5A8E', '#4A3B66'),
+FAUNA_STYLES = {'fish': ('#3B9CAB', '#205B70'),
+                'butterfly': ('#6D5A8E', '#4A3B66'),
                 'insect': ('#8A7638', '#5F5222'),
                 'bird': ('#3E808C', '#27616B'),
                 'animal': ('#8A6240', '#5F4128')}
@@ -74,7 +75,8 @@ MODULES = (('自动采集', 0, '采集设定'),
            ('自动钓鱼', 4, '钓鱼'))
 NAV_WIDE_THRESHOLD = 900
 
-SCENE_CATEGORIES = {'blueberry': ('蓝莓', '#4E72A8'),
+SCENE_CATEGORIES = {'fish': ('鱼', '#3B9CAB'),
+                    'blueberry': ('蓝莓', '#4E72A8'),
                     'raspberry': ('树莓', '#A85C7E'),
                     'bush': ('普通灌木', '#5F8A55'),
                     'tree': ('树木', '#3E6B4A'),
@@ -1594,7 +1596,13 @@ class CoordinateWindow:
         elif category in FAUNA_STYLES:
             fill, outline = FAUNA_STYLES[category]
             tag = 'scene-' + category
-            if category == 'butterfly':
+            if category == 'fish':
+                canvas.create_polygon(x-3, z, x-9, z-5, x-9, z+5,
+                                      fill=fill, outline=outline, width=1, tags=tag)
+                canvas.create_oval(x-5, z-4, x+7, z+4, fill=fill, outline=outline,
+                                   width=1, tags=tag)
+                canvas.create_oval(x+3, z-1, x+5, z+1, fill=outline, outline='', tags=tag)
+            elif category == 'butterfly':
                 canvas.create_polygon(x, z, x-5, z-5, x-6, z-1, x-4, z+3,
                                       x-1, z+2, x, z, x+5, z-5, x+6, z-1,
                                       x+4, z+3, x+1, z+2, fill=fill, outline=outline,

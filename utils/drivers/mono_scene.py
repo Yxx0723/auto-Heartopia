@@ -31,6 +31,7 @@ STONE_ITEM_TYPES = {301: 'rock', 302: 'ore'}
 TREE_COMPONENTS = {('CollectableTreeComponent', 'XDTLevelAndEntity.Gameplay.Component.Gather'),
                    ('CollectableAdvancedTreeComponent', 'XDTLevelAndEntity.Gameplay.Component.Gather')}
 FAUNA_COMPONENTS = {
+    ('FishComponent', 'XDTLevelAndEntity.Gameplay.Component.Fish'): 'fish',
     ('InsectComponent', 'XDTLevelAndEntity.Gameplay.Component.Insect'): 'insect',
     ('BirdComponent', 'ScriptsRefactory.LevelAndEntity.Entity.Components'): 'bird',
     ('AnimalMovementComponent', 'XDTLevelAndEntity.Gameplay.Component.Animal'): 'animal',
@@ -634,7 +635,7 @@ class MemorySceneMap:
                 return 'other'
             if len(categories) == 1:
                 return categories.pop()
-            if categories & {'tree', 'rock', 'ore', 'fluorite', 'roaming_oak', 'insect', 'butterfly', 'bird', 'animal', 'other'}:
+            if categories & {'tree', 'rock', 'ore', 'fluorite', 'roaming_oak', 'insect', 'butterfly', 'bird', 'animal', 'fish', 'other'}:
                 return 'other'
             return 'shrub' if categories else 'other'
         except ValueError:
@@ -848,7 +849,7 @@ class MemorySceneMap:
             check()
             if hierarchy not in active:
                 continue
-            if item['category'] in ('insect', 'butterfly', 'bird', 'animal', 'fluorite', 'roaming_oak'):
+            if item['category'] in ('insect', 'butterfly', 'bird', 'animal', 'fish', 'fluorite', 'roaming_oak'):
                 try:
                     if meta.ref(hierarchy, '_hierarchyObject') != owner:
                         continue
