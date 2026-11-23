@@ -25,9 +25,10 @@ from utils.drivers.input_task_gate import InputTaskGate
 from utils.ui.coordinate_monitor import CoordinateMonitor
 from utils.ui.point_playback import PointPlayback
 from utils.ui.cooking_single_pot_control import CookingSinglePotControl
+from utils.ui.fishing_control import FishingControl
 from utils.drivers.cooking_record_paths import legacy_cooking_record_dir, resolve_cooking_record_dir
 from utils.ui.cooking_catalog_panel import CookingCatalogPanel
-from utils.ui.log_window import CollectionLog, FullLogWindow
+from utils.ui.log_window import CollectionLog, FishingLog, FullLogWindow
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.ui.point_wait_editor import PointWaitEditor
 from utils.ui.blueberry_survey_panel import BlueberrySurveyPanel
@@ -65,11 +66,12 @@ SCENE_RANGE_OPTIONS = (80, 150, 200, 300, 400)
 SCENE_RANKS = {**dict.fromkeys(PLANT_STYLES, 1), **dict.fromkeys(MINERAL_STYLES, 1),
                **dict.fromkeys(FAUNA_STYLES, 2), 'roaming_oak': 3}
 
-# Left navigation -> existing Notebook page index. All four pages stay alive;
+# Left navigation -> Notebook page index. All pages stay alive;
 # switching never destroys a page or interrupts a running task.
 MODULES = (('自动采集', 0, '采集设定'),
            ('自动烹饪', 3, '烹饪'),
-           ('地图与设置', 2, '地图与设置'))
+           ('地图与设置', 2, '地图与设置'),
+           ('自动钓鱼', 4, '钓鱼'))
 NAV_WIDE_THRESHOLD = 900
 
 SCENE_CATEGORIES = {'blueberry': ('蓝莓', '#4E72A8'),
@@ -224,6 +226,8 @@ class CoordinateWindow:
                                       busy=lambda: self.playback.active, input_gate=self.input_gate,
                                       runner=cooking_entry_runner, selection_runner=cooking_selection_runner,
                                       single_pot_runner=single_pot_runner)
+        self.fishing = FishingControl(self.resources / 'profile.json',
+                                      resolve_cooking_record_dir().parent / '钓鱼记录', self.input_gate)
         self.cooking_status = {'state':'idle','message':'选择料理并刷新背包；确认后到灶台旁按 F6，仅选菜不制作'}
         self.playback.input_busy = lambda: self.cooking.active
         self.cooking_dialog = None
@@ -447,7 +451,7 @@ class CoordinateWindow:
                                     highlightbackground=COLORS['line'], highlightthickness=1,
                                     padx=px(4), pady=px(3))
         lower_panel.grid(row=2, column=0, sticky='ew', pady=(8, 0))
-        # All four pages stay alive with their original tab text. The native tab
+        # All pages stay alive with their original tab text. The native tab
         # strip is replaced by the left navigation (wide) / segmented navigation
         # (narrow); select() semantics and page state are untouched.
         style = ttk.Style(self.root)
@@ -459,8 +463,9 @@ class CoordinateWindow:
         parameter_page = self.frame(self.control_tabs, card=True, border=False)
         map_page = self.frame(self.control_tabs, card=True, border=False)
         cooking_page = self.frame(self.control_tabs, card=True, border=False)
+        fishing_page = self.frame(self.control_tabs, card=True, border=False)
         for page, title in ((route_page, '采集设定'), (parameter_page, '参数设定'),
-                            (map_page, '地图连接'), (cooking_page, '烹饪')):
+                            (map_page, '地图连接'), (cooking_page, '烹饪'), (fishing_page, '钓鱼')):
             self.control_tabs.add(page, text=title)
         cookhead = self.frame(cooking_page, card=True, border=False)
         cookhead.pack(fill='x', padx=px(8), pady=(px(5), px(2)))
@@ -468,8 +473,10 @@ class CoordinateWindow:
                    font=theme.font(12, bold=True)).pack(side='left')
         self.label(cookhead, '单锅 / 连续制作 · 先确认料理再按 F6', color='muted',
                    font=theme.font(10)).pack(side='right')
+        self.build_fishing_page(fishing_page)
         self.cooking_catalog=CookingCatalogPanel(self,cooking_page,runtime_parent=self.global_log_host)
         self.collection_log = CollectionLog(self, self.global_log_host, self.collection_log_status)
+        self.fishing_log = FishingLog(self, self.global_log_host, None)
         self.log_module = None
         self.sync_log_module()
         route_page.grid_columnconfigure(0, weight=1)
@@ -646,6 +653,29 @@ class CoordinateWindow:
     # module switching only calls Notebook.select(), so a running collection
     # or cooking batch keeps running while the user changes pages.
     # ------------------------------------------------------------------
+    def build_fishing_page(self, parent):
+        content = self.frame(parent, card=True, border=False)
+        content.pack(fill='x', padx=px(12), pady=px(12))
+        self.label(content, '自动钓鱼', color='green',
+                   font=theme.font(12, bold=True)).pack(anchor='w')
+        self.label(content, '站在钓点并拿出鱼竿。点击开始后切回游戏，按 F6 开始，F9 停止。',
+                   color='muted', wraplength=px(340), justify='left').pack(anchor='w', pady=px(8))
+        row = self.frame(content, card=True, border=False)
+        row.pack(fill='x')
+        self.fishing_start = self.button(row, '开始钓鱼', self.fishing.start, primary=True)
+        self.fishing_start.pack(side='left', padx=(0, px(8)))
+        self.fishing_stop = self.button(row, '停止', self.fishing.stop)
+        self.fishing_stop.pack(side='left')
+        self.fishing_status = self.label(content, wraplength=px(340), justify='left')
+        self.fishing_status.pack(anchor='w', fill='x', pady=px(10))
+        self.update_fishing_page()
+
+    def update_fishing_page(self):
+        active = self.fishing.active
+        configure_changed(self.fishing_start, state='disabled' if active else 'normal')
+        configure_changed(self.fishing_stop, state='normal' if active else 'disabled')
+        configure_changed(self.fishing_status, text=self.fishing.message)
+
     def build_status_bar(self):
         panel = RoundedPanel(self.root, radius=px(14), height=px(58))
         panel.pack(side='top', fill='x', padx=px(10), pady=(px(8), px(2)))
@@ -820,7 +850,7 @@ class CoordinateWindow:
             panel.create_window(px(14), px(56) + index * px(48), window=button,
                                 anchor='nw', width=px(126), height=px(38))
             self.nav_buttons.append(button)
-        self.nav_footer = panel.create_text(px(18), px(280), anchor='sw',
+        self.nav_footer = panel.create_text(px(18), px(310), anchor='sw',
                                             text='F6 开始 / 暂停\nF9 停止任务',
                                             fill=COLORS['muted'], font=theme.font(10),
                                             justify='left')
@@ -857,18 +887,22 @@ class CoordinateWindow:
         self.refresh_nav_highlight()
 
     def sync_log_module(self):
-        if not hasattr(self, 'collection_log') or self.active_module not in (0, 1):
+        if not hasattr(self, 'collection_log') or self.active_module not in (0, 1, 3):
             return
         if self.log_module == self.active_module:
             return
         self.log_module = self.active_module
         self.collection_log.page.pack_forget()
         self.cooking_catalog.runtime_page.pack_forget()
+        if hasattr(self, 'fishing_log'):
+            self.fishing_log.page.pack_forget()
         self.show_log_source()
 
     def log_source(self):
         if self.log_module == 1:
             return self.cooking_catalog, self.cooking_catalog.runtime_page, '自动烹饪'
+        if self.log_module == 3:
+            return self.fishing_log, self.fishing_log.page, '自动钓鱼'
         return self.collection_log, self.collection_log.page, '自动采集'
 
     def show_log_source(self):
@@ -946,7 +980,7 @@ class CoordinateWindow:
                     self.refresh_nav_highlight()
                 return
         # The merged-away 参数设定 page keeps its tab (page state and tests rely
-        # on the four-page structure) but has no navigation entry, so fall back
+        # on its page structure) but has no navigation entry, so fall back
         # to the module the navigation currently highlights.
         try:
             self.control_tabs.select(MODULES[self.active_module][1])
@@ -1386,6 +1420,9 @@ class CoordinateWindow:
         if hasattr(self, 'blueberry_survey'):
             self.blueberry_survey.poll()
         self.poll_route_recording()
+        if hasattr(self, 'fishing_status'):
+            self.update_fishing_page()
+            self.fishing_log.apply_events(self.fishing.take_log_events())
         playback = self.playback.take_latest()
         if playback is not None:
             self.playback_status = playback
@@ -2328,6 +2365,9 @@ class CoordinateWindow:
         self.draw()
 
     def reconnect(self):
+        fishing = getattr(self, 'fishing', None)
+        if fishing is not None:
+            fishing.stop()
         if self.playback.active or bool(getattr(self, 'cooking', None) and self.cooking.active):
             self.stop_playback()
         if self.scene_worker:
@@ -2355,6 +2395,11 @@ class CoordinateWindow:
 
     def close(self):
         if self.closed:
+            return
+        fishing = getattr(self, 'fishing', None)
+        if fishing is not None and fishing.active:
+            fishing.stop()
+            self.root.after(100, self.close)
             return
         self.closed = True
         self.root.after_cancel(self.timer)

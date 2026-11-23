@@ -308,6 +308,10 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
                 heapq.heappush(frontier, (new_cost + math.dist(world(neighbor), local), next(counter), neighbor, new_cost))
         found_local = reached is not None
         if reached is None:
+            if direct_safe:
+                return plan_path(position, target, obstacles, check, grid_step=grid_step,
+                                 search_radius=search_radius, max_nodes=max_nodes, horizon=horizon,
+                                 approach_goal=approach_goal, before_search=before_search, prefer_clearance=False)
             if remaining <= horizon or remaining - math.dist(world(best), goal) < policy.COORD_NAV_MIN_PROGRESS:
                 raise NavigationWait('暂未找到可通行路径，正在重新寻路')
             reached = best
@@ -356,10 +360,6 @@ class LocalNavigator:
         self.waypoint = None
         self.memory_leg = None
         self.learning_time = None
-            if direct_safe:
-                return plan_path(position, target, obstacles, check, grid_step=grid_step,
-                                 search_radius=search_radius, max_nodes=max_nodes, horizon=horizon,
-                                 approach_goal=approach_goal, before_search=before_search, prefer_clearance=False)
         self.learning_started = None
         self.learning_finished = None
         self.memory_path, self.walked_path = [], []

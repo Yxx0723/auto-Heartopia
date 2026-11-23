@@ -167,14 +167,16 @@ def fetch_php_file_content():
 log = logger.patch(update_extra)
 
 logger.remove()
-log.add(
-    sys.stdout,
-    level="INFO",
-    colorize=True,
-    format="{time:HH:mm:ss.SSS} - "
-    "<cyan>{module}.{function}:{line}</cyan> - " + "<cyan>{VER}</cyan> - "
-    "<level>{message}</level>",
-)
+# One-file Windows GUI builds have no console streams.
+if sys.stdout is not None:
+    log.add(
+        sys.stdout,
+        level="INFO",
+        colorize=True,
+        format="{time:HH:mm:ss.SSS} - "
+        "<cyan>{module}.{function}:{line}</cyan> - " + "<cyan>{VER}</cyan> - "
+        "<level>{message}</level>",
+    )
 
 log.add(
     PATH_LOG,

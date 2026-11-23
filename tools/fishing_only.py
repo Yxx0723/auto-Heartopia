@@ -46,9 +46,11 @@ def find_game():
 def bring_front(hwnd):
     ctypes.windll.user32.AllowSetForegroundWindow(ctypes.c_uint(-1).value)
     win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-    time.sleep(.1)
-    win32gui.SetForegroundWindow(hwnd)
-    win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+    try:
+        time.sleep(.1)
+        win32gui.SetForegroundWindow(hwnd)
+    finally:
+        win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
     time.sleep(.4)
     return win32gui.GetForegroundWindow() == hwnd
 

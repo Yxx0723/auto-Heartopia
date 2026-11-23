@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from utils.core import thresholds as policy
+from utils.core.fishing_log import append_fishing_event, fishing_event, format_fishing_event
 from utils.drivers.mono_scene import MemorySceneMap
 from utils.drivers.screen import ScreenSource
 from utils.drivers.town_window import TimelineInput, TownWindow
@@ -49,10 +50,17 @@ AIM_GAIN_X = 2.4
 AIM_GAIN_Y = 1.4
 #: 落点圈静止锚点（本钓点 1382×807 画面实测），识别失败时兜底
 AIM_ANCHOR = (685.0, 275.0)
+AIM_REFERENCE_SIZE = (1382, 807)
 #: 鱼影面积下限：排除木栈道/水花等小暗块
 FISH_MIN_AREA = 1200
 #: 活体判定：两帧中心位移下限（像素）
 FISH_MIN_MOVE = 3.0
+FISH_TRACK_MIN_AREA = 600
+FISH_TRACK_RADIUS = 55.0
+AIM_SETTLE_SECONDS = 0.45
+AIM_HOLD_SECONDS = 5.0
+AIM_SAMPLE_SECONDS = 0.20
+AIM_TARGET_MAX_AGE = 0.75
 
 
 class _MouseInput(ctypes.Structure):
@@ -78,7 +86,8 @@ _USER32.SendInput.restype = wintypes.UINT
 def move_mouse(dx, dy):
     """裸相对移动。带 MOUSEEVENTF_MOVE_NOCOALESCE(0x2000) 时游戏会忽略。"""
     event = _Input(type=0, mi=_MouseInput(int(dx), int(dy), 0, 0x0001, 0, 0))
-    _USER32.SendInput(1, ctypes.byref(event), ctypes.sizeof(_Input))
+    if _USER32.SendInput(1, ctypes.byref(event), ctypes.sizeof(_Input)) != 1:
+        raise OSError('无法发送瞄准输入')
 
 
 def find_game():
@@ -95,13 +104,17 @@ def find_game():
 
 
 class FishingRunner:
-    def __init__(self, duration=600.0, out_dir=None, verbose=True):
+    def __init__(self, duration=600.0, out_dir=None, verbose=True, *, profile=None,
+                 hwnd=None, stop_requested=None, on_event=None):
+        self.stop_requested = stop_requested or (lambda: False)
+        self.on_event = on_event
+        self.require_foreground = hwnd is not None
         self.duration = float(duration)
         self.out = Path(out_dir) if out_dir else ROOT / 'fishing-runs'
         self.out.mkdir(parents=True, exist_ok=True)
         self.verbose = verbose
-        self.hwnd = find_game()
-        if win32gui.IsIconic(self.hwnd):
+        self.hwnd = hwnd if hwnd is not None else find_game()
+        if not self.require_foreground and win32gui.IsIconic(self.hwnd):
             win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
             time.sleep(0.8)
         _, self.pid = win32process.GetWindowThreadProcessId(self.hwnd)
@@ -109,22 +122,19 @@ class FishingRunner:
         client = win32gui.ClientToScreen(self.hwnd, (0, 0))
         width, height = win32gui.GetClientRect(self.hwnd)[2:]
         self.client_rect = (client[0], client[1], width, height)
-        bring_front(self.hwnd)
-        time.sleep(0.4)
+        if not self.require_foreground:
+            bring_front(self.hwnd)
+            time.sleep(0.4)
+        self.check_input()
 
-        self.scene = MemorySceneMap(self.pid, ROOT / 'webui/coordinate-monitor/profile.json')
-        meta = self.scene.meta
-        trace = self.scene.memory.snapshot()['paths'][0]['trace']
-        entity = next(t['pointer'] for t in trace if t['field'] == '<entity>k__BackingField')
-        self.lpc = next(p for p in meta.dictionary(meta.ref(entity, '_components'), max_items=128)
-                        if meta.obj(p)['name'] == 'LocalPlayerComponent')
-        self.meta = meta
-        self.rod = meta.ref(self.lpc, '_interactTool')
-        self.rod_fields = meta.obj(self.rod)['fields']
-        self.float_component = meta.ref(self.rod, 'floatComponent')
-        self.float_fields = meta.obj(self.float_component)['fields']
-        self.read_line = make_line_reader(self.hwnd, self.client_rect)
-        self.device = TimelineInput(TownWindow('心动小镇'))
+        self.scene = MemorySceneMap(self.pid, profile or ROOT / 'webui/coordinate-monitor/profile.json')
+        try:
+            self.bind_rod()
+            self.read_line = make_line_reader(self.hwnd, self.client_rect)
+            self.device = TimelineInput(TownWindow('心动小镇'))
+        except BaseException:
+            self.scene.close()
+            raise
 
         self.held = False
         self.casts = 0
@@ -132,12 +142,41 @@ class FishingRunner:
         self.phase_at = time.monotonic()
         self.started = time.monotonic()
         self.log_path = self.out / 'autofish.jsonl'
+        self.last_game_state = None
+
+    def bind_rod(self):
+        meta = self.scene.meta
+        trace = self.scene.memory.snapshot()['paths'][0]['trace']
+        entity = next(t['pointer'] for t in trace if t['field'] == '<entity>k__BackingField')
+        self.lpc = next(p for p in meta.dictionary(meta.ref(entity, '_components'), max_items=128)
+                        if meta.obj(p)['name'] == 'LocalPlayerComponent')
+        self.meta = meta
+        self.rod = meta.ref(self.lpc, '_interactTool')
+        if not self.rod:
+            raise ValueError('请先拿出鱼竿')
+        rod = meta.obj(self.rod)
+        if rod['name'] != 'HandHoldFishingRod':
+            raise ValueError('请先拿出鱼竿')
+        self.rod_fields = rod['fields']
+        self.float_component = meta.ref(self.rod, 'floatComponent')
+        if not self.float_component:
+            raise ValueError('当前鱼竿没有可读取的浮标')
+        self.float_fields = meta.obj(self.float_component)['fields']
+
+    def check_input(self):
+        if self.stop_requested():
+            raise InterruptedError('已停止自动钓鱼')
+        if win32gui.GetForegroundWindow() != self.hwnd:
+            raise InterruptedError('游戏失去前台，已停止自动钓鱼')
 
     # ---------- 观测 ----------
     def _bool(self, fields, name):
         return bool(self.meta.data(self.rod + 16, 4096)[fields[name]['offset'] - 16])
 
     def state(self):
+        if (self.meta.ref(self.lpc, '_interactTool') != self.rod
+                or self.meta.ref(self.rod, 'floatComponent') != self.float_component):
+            raise ValueError('鱼竿或浮标已更换，请重新启动钓鱼')
         raw = self.meta.data(self.float_component + 16, 4096)
         offset = self.float_fields['<State>k__BackingField']['offset'] - 16
         return struct.unpack_from('<i', raw, offset)[0]
@@ -152,24 +191,44 @@ class FishingRunner:
             return None
         return cv2.cvtColor(np.asarray(pic.convert('RGB')), cv2.COLOR_RGB2BGR)
 
-    def fish_of(self, frame):
+    def fish_of(self, frame, previous=None):
         if frame is None:
             return None
-        shadows = [s for s in find_shadows(frame) if s.area >= FISH_MIN_AREA]
-        return max(shadows, key=lambda s: s.area) if shadows else None
+        minimum = FISH_MIN_AREA if previous is None else FISH_TRACK_MIN_AREA
+        shadows = find_shadows(frame, min_area=minimum)
+        if not shadows:
+            return None
+        if previous is None:
+            return shadows[0]
+        height, width = frame.shape[:2]
+        scale_x = width / AIM_REFERENCE_SIZE[0]
+        scale_y = height / AIM_REFERENCE_SIZE[1]
+
+        def distance(shadow):
+            return np.hypot((shadow.cx - previous.cx) / scale_x,
+                            (shadow.cy - previous.cy) / scale_y)
+
+        nearest = min(shadows, key=distance)
+        return nearest if distance(nearest) <= FISH_TRACK_RADIUS else None
 
     # ---------- 动作 ----------
     def press(self):
         if not self.held:
-            self.device.execute({'type': 'mouse_down', 'button': 'left'})
+            self.check_input()
             self.held = True
+            self.device.execute({'type': 'mouse_down', 'button': 'left'})
+            self.log('button', '已发送：按住鼠标左键')
 
-    def release(self):
+    def release(self, *, report=True):
         if self.held:
             self.device.execute({'type': 'mouse_up', 'button': 'left'})
             self.held = False
+            if report:
+                self.log('button', '已发送：松开鼠标左键')
 
     def keep_front(self):
+        if self.require_foreground or self.held:
+            return win32gui.GetForegroundWindow() == self.hwnd
         try:
             if win32gui.IsIconic(self.hwnd):
                 win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
@@ -183,37 +242,51 @@ class FishingRunner:
 
     # ---------- 日志 ----------
     def log(self, event, reason='', **extra):
-        row = {'dt': round(time.monotonic() - self.started, 2), 'ev': event,
-               'reason': reason, **extra}
+        row = fishing_event(event, reason, dt=round(time.monotonic() - self.started, 2), **extra)
         try:
             with self.log_path.open('a', encoding='utf-8') as fh:
                 fh.write(json.dumps(row, ensure_ascii=False) + '\n')
         except Exception:
             pass
+        append_fishing_event(self.out / '钓鱼日志.txt', row)
         if self.verbose:
-            print(json.dumps(row, ensure_ascii=False), flush=True)
+            print(format_fishing_event(row)[0], end='', flush=True)
+        if self.on_event is not None:
+            self.on_event(row)
 
     # ---------- 主循环 ----------
     def run(self):
-        self.log_path.write_text('', encoding='utf-8')
-        self.log('init', '自动钓鱼启动', pid=self.pid, duration=self.duration)
         try:
-            while time.monotonic() - self.started < self.duration:
+            self.log_path.write_text('', encoding='utf-8')
+            self.log('init', '自动钓鱼启动', pid=self.pid, duration=self.duration)
+            while not self.stop_requested() and time.monotonic() - self.started < self.duration:
+                if self.require_foreground:
+                    self.check_input()
                 self._tick()
-        except KeyboardInterrupt:
-            self.log('interrupt', '用户中断')
+        except (KeyboardInterrupt, InterruptedError) as exc:
+            self.log('interrupt', str(exc) or '用户中断')
         except Exception as exc:
             self.log('error', f'{type(exc).__name__}: {exc}')
+            raise
         finally:
-            self.release()
             try:
+                try:
+                    self.release()
+                except Exception:
+                    self.device.release_all()
+                    self.held = False
+                    raise
+            finally:
                 self.scene.close()
-            except Exception:
-                pass
-            self.log('end', '结束', casts=self.casts, phase=self.phase)
+                self.log('end', '自动钓鱼已结束', casts=self.casts, phase=self.phase)
 
     def _tick(self):
         state = self.state()
+        if state != self.last_game_state:
+            self.last_game_state = state
+            description = {0: '空闲／拉扯结束', 1: '浮标飞行中', 2: '浮标已入水，等待咬钩',
+                           6: '鱼已咬钩，正在拉扯'}.get(state, f'其他浮标状态（{state}）')
+            self.log('game_state', description, state=state)
         can_throw = self.can_throw()
         now = time.monotonic()
 
@@ -236,7 +309,8 @@ class FishingRunner:
                 time.sleep(0.25)
                 return
             time.sleep(0.18)
-            fish2 = self.fish_of(self.grab())
+            second = self.grab()
+            fish2 = self.fish_of(second, fish1)
             if fish2 is None:
                 time.sleep(0.25)
                 return
@@ -247,15 +321,21 @@ class FishingRunner:
             if not self.keep_front():
                 time.sleep(0.3)
                 return
+            self.aim_fish = fish2
+            self.aim_frame_shape = second.shape[:2]
+            self.log('fish_detected', f'确认移动鱼影，中心（{fish2.cx:.0f}, {fish2.cy:.0f}），'
+                     f'两帧间移动 {moved:.1f} 像素')
             self.press()
             self.phase = 'aiming'
-            self.phase_at = now
-            self.log('press', f'活鱼 area={fish2.area} 中心=({round(fish2.cx)},{round(fish2.cy)}) '
-                              f'移动={moved:.1f}px')
+            self.phase_at = time.monotonic()
+            self.aim_seen_at = self.phase_at
+            self.aim_sample_at = self.phase_at
+            self.log('press', f'开始瞄准，保留 {AIM_HOLD_SECONDS:g} 秒观察时间')
             return
 
         if self.phase == 'aiming':
-            if now - self.phase_at < 0.45:      # 瞄准态需要一点时间才置位
+            elapsed = now - self.phase_at
+            if elapsed < AIM_SETTLE_SECONDS:
                 time.sleep(0.05)
                 return
             if not self.keep_front():
@@ -263,32 +343,65 @@ class FishingRunner:
                 self.phase = 'idle'
                 self.log('abort_aim', '失焦，放弃本次')
                 return
+            preview = elapsed < AIM_HOLD_SECONDS
+            if preview and now - self.aim_sample_at < AIM_SAMPLE_SECONDS:
+                time.sleep(0.04)
+                return
+            self.aim_sample_at = now
             frame = self.grab()
-            fish = self.fish_of(frame)
-            ring = find_ring(frame) if frame is not None else None
-            if ring is not None and not (380 <= ring.cx <= 980 and 180 <= ring.cy <= 395):
-                ring = None                      # 越界视为误检
-            if fish is None:
+            matching_frame = frame is not None and frame.shape[:2] == self.aim_frame_shape
+            fish = self.fish_of(frame, self.aim_fish) if matching_frame else None
+            if fish is not None:
+                self.aim_fish = fish
+                self.aim_seen_at = now
+            if preview and fish is None:
+                self.log('aim_observe', f'{elapsed:.1f} 秒：暂未重新识别到同一条鱼影，继续观察')
+                return
+            if not matching_frame or now - self.aim_seen_at > AIM_TARGET_MAX_AGE:
                 self.release()
                 self.phase = 'idle'
-                self.log('abort_aim', '瞄准时鱼影丢失')
+                self.log('abort_aim', '无法取得有效瞄准画面' if not matching_frame else '鱼影已丢失，未校准抛竿')
                 return
-            anchor_x, anchor_y = (ring.cx, ring.cy) if ring else AIM_ANCHOR
-            dx = fish.cx - anchor_x
-            dy = fish.cy - anchor_y
-            mx = int(np.clip(dx / AIM_GAIN_X, -420, 420))
-            my = int(np.clip(dy / AIM_GAIN_Y, -300, 300))
-            if abs(mx) >= 2 or abs(my) >= 2:
+            target_source = '跟踪' if fish is not None else '最近一次确认'
+            fish = self.aim_fish
+            height, width = frame.shape[:2]
+            sx, sy = width / AIM_REFERENCE_SIZE[0], height / AIM_REFERENCE_SIZE[1]
+            ring = find_ring(
+                frame, x_range=(380 * sx, 980 * sx), y_range=(180 * sy, 395 * sy),
+                min_radius=max(1, round(13 * sy)), max_radius=max(2, round(42 * sy)),
+            )
+            if preview and ring is None:
+                self.log('aim_observe', f'{elapsed:.1f} 秒：鱼影（{fish.cx:.0f}, {fish.cy:.0f}），落点圈未识别，暂不移动')
+                return
+            anchor_x, anchor_y = (ring.cx, ring.cy) if ring else (AIM_ANCHOR[0] * sx, AIM_ANCHOR[1] * sy)
+            dx, dy = fish.cx - anchor_x, fish.cy - anchor_y
+            mx = int(np.clip(dx / (AIM_GAIN_X * sx), -420, 420))
+            my = int(np.clip(dy / (AIM_GAIN_Y * sy), -300, 300))
+            anchor_source = '落点圈' if ring else '预设锚点'
+            self.log('aim_observe', f'{elapsed:.1f} 秒：鱼影（{fish.cx:.0f}, {fish.cy:.0f}，{target_source}），'
+                     f'{anchor_source}（{anchor_x:.0f}, {anchor_y:.0f}），画面偏差（{dx:+.0f}, {dy:+.0f}）像素')
+            moved = abs(mx) >= 2 or abs(my) >= 2
+            self.check_input()
+            if moved:
                 move_mouse(mx, my)
-            self.release()                       # 立刻抛竿，等回弹就晚了
+            if not preview:
+                # The aim marker recenters quickly. Send the release before doing any log I/O.
+                self.release(report=False)
+            if moved:
+                horizontal = f'向右 {mx}' if mx > 0 else f'向左 {-mx}' if mx < 0 else '水平不动'
+                vertical = f'向下 {my}' if my > 0 else f'向上 {-my}' if my < 0 else '垂直不动'
+                self.log('move', f'已发送：鼠标相对移动，{horizontal}、{vertical}', dx=mx, dy=my)
+            else:
+                self.log('aim_observe', '偏差低于移动阈值，本帧没有发送鼠标移动')
+            if preview:
+                return
+            self.log('button', '已发送：松开鼠标左键')
             self.casts += 1
             self.phase = 'waiting'
-            self.phase_at = now
-            self.log('cast', f'抛竿#{self.casts} 环=({round(anchor_x)},{round(anchor_y)}) '
-                             f'鱼=({round(fish.cx)},{round(fish.cy)}) '
-                             f'偏差=({dx:.0f},{dy:.0f}) 注入=({mx},{my})')
-            if frame is not None:
-                cv2.imwrite(str(self.out / f'cast_{self.casts:02d}.png'), frame)
+            self.phase_at = time.monotonic()
+            self.log('cast', f'已发送第 {self.casts} 次抛竿，等待游戏反馈',
+                     target_source=target_source, anchor_source=anchor_source)
+            cv2.imwrite(str(self.out / f'cast_{self.casts:02d}.png'), frame)
             return
 
         if self.phase == 'retrieve':
@@ -311,7 +424,7 @@ class FishingRunner:
                 self.press()
                 self.phase = 'hooked'
                 self.phase_at = now
-                self.log('hook', '咬钩 State=6，长按收线', color=self.read_line() or {})
+                self.log('hook', '游戏报告咬钩，开始长按收线', color=self.read_line() or {})
             elif state == 0 and can_throw and now - self.phase_at > 1.5:
                 self.phase = 'idle'
                 self.log('cast_miss', '抛竿未生效，重试')
@@ -327,29 +440,36 @@ class FishingRunner:
             return
 
         if self.phase == 'hooked':
-            color = self.read_line() or {}
             if not self.keep_front():
-                time.sleep(0.15)
+                self.release()
+                self.phase = 'idle'
+                self.log('interrupt', '游戏失去前台，已松开左键')
                 return
             if state == 0:
                 self.release()
                 self.phase = 'idle'
                 self.phase_at = time.monotonic()
-                self.log('land', '拉扯结束 State=0，松手')
-            elif color.get('red', 0) >= policy.FISHING_LINE_RED_PIXELS and self.held:
-                self.release()
-                self.log('slack', f"线红 {color['red']}px，松手放线", color=color)
-            elif not self.held and color.get('dom') in ('white', 'yellow'):
-                self.press()
-                self.log('rehold', '张力恢复，继续收线', color=color)
+                self.log('land', '拉扯结束，已松开左键；鱼是否入包未确认')
             elif now - self.phase_at > policy.FISHING_HOOK_TIMEOUT_SECONDS:
                 self.release()
                 self.phase = 'idle'
                 self.log('hook_timeout', '咬钩超时，松手')
+            else:
+                self.adjust_tension()
             time.sleep(0.05)
             return
 
         time.sleep(0.1)
+
+    def adjust_tension(self):
+        color = self.read_line() or {}
+        if color.get('red', 0) >= policy.FISHING_LINE_RED_PIXELS:
+            if self.held:
+                self.release()
+                self.log('slack', f"线红 {color['red']}px，松手放线", color=color)
+        elif not self.held and color.get('dom') in ('white', 'yellow'):
+            self.press()
+            self.log('rehold', '张力恢复，继续收线', color=color)
 
 
 def main():

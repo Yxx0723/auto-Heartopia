@@ -40,6 +40,12 @@ if __name__ == '__main__':
             result = {'state':'error','read_only':True,'input_sent':False,'issue':issue_summary(exc)}
         Path(sys.argv[2]).write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
         raise SystemExit(0 if result.get('state')=='ready' else 1)
+    if len(sys.argv) == 3 and sys.argv[1] == '--check-fishing-output':
+        import json
+        from tools.fishing_auto_run import FishingRunner
+        result = {'state': 'ready', 'runner': FishingRunner.__name__, 'input_sent': False}
+        Path(sys.argv[2]).write_text(json.dumps(result), encoding='utf-8')
+        raise SystemExit(0)
     from utils.ui.native_coordinate_monitor import main
     from utils.flows.coordinate_player import drive_points
     from utils.flows.native_guidance_follow import drive_guidance

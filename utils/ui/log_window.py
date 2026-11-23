@@ -9,6 +9,7 @@ from collections import deque
 import tkinter as tk
 from tkinter import ttk
 
+from utils.core.fishing_log import format_fishing_event
 from utils.ui import theme
 
 COLORS = theme.COLORS
@@ -78,9 +79,17 @@ class CollectionLog:
             lines.append((f'{stamp} [{label}] {prefix}{message}\n', style))
         if not lines:
             return
-        self.history.extend(lines)
         try:
             self.status.configure(text='采集状态：'+label)
+        except tk.TclError:
+            pass
+        self.append_lines(lines)
+
+    def append_lines(self, lines):
+        if not lines:
+            return
+        self.history.extend(lines)
+        try:
             append_log_lines(self.text, lines, 500)
         except tk.TclError:
             pass
@@ -101,6 +110,11 @@ class CollectionLog:
     def remove_log_view(self, view):
         if view in self.views:
             self.views.remove(view)
+
+
+class FishingLog(CollectionLog):
+    def apply_events(self, events):
+        self.append_lines([format_fishing_event(row) for row in events])
 
 
 COLLECTION_STATES = {
