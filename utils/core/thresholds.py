@@ -549,6 +549,24 @@ COOKING_TARGET_DRIFT_PIXELS = 4.
 # Engineering bound for typed default recipe material-slot traversal.
 COOKING_MAX_MATERIAL_SLOTS = 8
 
+# Auto-fishing: FloatComponent.State value meaning "fish hooked / line pulling".
+# Measured live 2026-11-22: 0 = idle, 1 = hook in flight, 2 = float waiting,
+# 6 = hooked and pulling. Only 6 triggers reeling.
+FISHING_STATE_HOOKED = 6
+# Line-tension visual thresholds, HSV pixel counts inside the line ROI.
+# Red is not yet calibrated (all observed fish stayed white); value is a
+# conservative engineering bound, revisit once a red-line catch is sampled.
+FISHING_LINE_RED_PIXELS = 100
+FISHING_LINE_YELLOW_PIXELS = 150
+# Poll period for state sampling while reeling.
+FISHING_POLL_SECONDS = .02
+# Safety cut-off: stop holding the button if a hook never resolves.
+FISHING_HOOK_TIMEOUT_SECONDS = 30.
+# Cast is a single quick click of the left button (user-confirmed 2026-11-22).
+FISHING_CAST_SECONDS = .08
+# If nothing bites within this window after casting, reel in and recast.
+FISHING_RECAST_SECONDS = 20.
+
 # Local extracted geometry: engineering budgets/costs, NOT measured game abilities.
 # Source meshes remain advisory. No slope/step/climbing limit is inferred here.
 COORD_REFERENCE_MAX_BYTES = 4 * 1024 * 1024

@@ -41,6 +41,13 @@ GOLDEN_VALUES = {
     'COOKING_RECEIPT_SECONDS': 15.,
     'COOKING_POLL_SECONDS': .1,
     'COOKING_INVENTORY_SECONDS': .5,
+    'FISHING_STATE_HOOKED': 6,
+    'FISHING_LINE_RED_PIXELS': 100,
+    'FISHING_LINE_YELLOW_PIXELS': 150,
+    'FISHING_POLL_SECONDS': .02,
+    'FISHING_HOOK_TIMEOUT_SECONDS': 30.,
+    'FISHING_CAST_SECONDS': .08,
+    'FISHING_RECAST_SECONDS': 20.,
     'COORD_SPECIAL_INVENTORY_SETTLE_SECONDS': 6.,
     'COORD_SPECIAL_INVENTORY_POLL_SECONDS': 1.,
     'COORD_SPECIAL_PENDING_SECONDS': 120.,
@@ -306,7 +313,7 @@ def test_every_public_constant_is_pinned():
 def test_thresholds_are_probabilities():
     """matchTemplate 归一化结果落在 [0, 1]。"""
     for name, value in GOLDEN_VALUES.items():
-        if name.startswith(("COORD_", "MONO_", "COOKING_")):
+        if name.startswith(("COORD_", "MONO_", "COOKING_", "FISHING_")):
             continue  # Coordinate units/timing and metadata traversal budgets.
         assert 0.0 < value <= 1.0, f"{name} = {value} 不在匹配度取值范围内"
 
