@@ -35,6 +35,7 @@ from utils.ui.blueberry_survey_panel import BlueberrySurveyPanel
 from utils.ui.scene_map_worker import SceneMapWorker
 from utils.ui.map_draw_cache import MapDrawCache, Viewport, object_key, muted_color, nearby_model_key
 from utils.ui.collision_display import collision_faces
+from utils.ui.map_surface_reference import draw_wooden_platforms
 from utils.ui.map_presentation import (draw_grid, draw_chrome, draw_player, chrome_bounds,
                                       draw_waypoint_labels, draw_target_indicator)
 from utils.ui.map_labels import layout_waypoints, HoverTarget, MapHover, target_indicator
@@ -1716,6 +1717,8 @@ class CoordinateWindow:
             for key, coords, _ in self.map_cache.geometry.visible_water_islands(viewport):
                 self.map_cache.polygon(key, coords, -1, fill=MAP_STYLE['ground'],
                                        outline=MAP_STYLE['shore'], width=1., tags='reference-water-island')
+        if view.position is not None:
+            draw_wooden_platforms(self.map_cache, scale)
         detail_footprints = {tuple(value for point in box['polygon'] for value in point) for _, box in nearby_boxes}
         for key, coords, _ in scene_boxes:
             kind = self.map_cache.geometry.barrier_kinds.get(key)
