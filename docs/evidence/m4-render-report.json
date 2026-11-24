@@ -1,0 +1,29 @@
+{
+  "views": [
+    "outputs\\m4\\standard.png",
+    "outputs\\m4\\terrain.png",
+    "outputs\\m4\\heightslice-y17.5.png",
+    "outputs\\m4\\heightslice-y48.png"
+  ],
+  "height_data": {
+    "wall_edges": 3398,
+    "classes": {
+      "deep": 411,
+      "main": 2956,
+      "low": 31
+    },
+    "y_range": [
+      -45.59375,
+      53.375
+    ],
+    "ground_elevation_available": false,
+    "ground_faces_in_collider": 0
+  },
+  "not_rendered": [
+    "等高线（无地表）",
+    "地表高程色阶（无地表）",
+    "住宅地皮（来自运行时场景快照）",
+    "桥面上下层（无世界变换）"
+  ],
+  "disclaimer": "离屏渲染对比图，非应用内截图"
+}

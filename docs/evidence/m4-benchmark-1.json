@@ -1,0 +1,46 @@
+[
+  {
+    "mode": "standard",
+    "anchor": null,
+    "frames": 200,
+    "median_ms": 2.579,
+    "p95_ms": 3.465,
+    "max_ms": 4.225,
+    "canvas_items": 94,
+    "median_delta_pct": 0.0,
+    "p95_delta_pct": 0.0
+  },
+  {
+    "mode": "terrain",
+    "anchor": null,
+    "frames": 200,
+    "median_ms": 2.654,
+    "p95_ms": 3.373,
+    "max_ms": 3.826,
+    "canvas_items": 177,
+    "median_delta_pct": 2.91,
+    "p95_delta_pct": -2.66
+  },
+  {
+    "mode": "heightslice",
+    "anchor": 17.5,
+    "frames": 200,
+    "median_ms": 2.629,
+    "p95_ms": 3.446,
+    "max_ms": 4.83,
+    "canvas_items": 180,
+    "median_delta_pct": 1.94,
+    "p95_delta_pct": -0.55
+  },
+  {
+    "mode": "heightslice",
+    "anchor": 48.0,
+    "frames": 200,
+    "median_ms": 2.657,
+    "p95_ms": 3.535,
+    "max_ms": 4.782,
+    "canvas_items": 174,
+    "median_delta_pct": 3.02,
+    "p95_delta_pct": 2.02
+  }
+]

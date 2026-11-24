@@ -212,3 +212,10 @@ test.bat
 # Private cooking calibration and per-pot inventory evidence
 /烹饪记录/
 /烹饪配置/
+
+# M4 离屏渲染工作目录
+/outputs/
+
+
+# M4-R1 运行时本地缓存（底图与标定，不入库、不分发）
+/runtime/

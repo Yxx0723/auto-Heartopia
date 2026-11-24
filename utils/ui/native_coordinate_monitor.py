@@ -41,6 +41,9 @@ from utils.ui.map_presentation import (draw_grid, draw_chrome, draw_player, chro
                                       draw_waypoint_labels, draw_target_indicator, draw_terrain_tints,
                                       draw_map_texture)
 from utils.ui.map_labels import layout_waypoints, HoverTarget, MapHover, target_indicator
+from utils.ui.map_height_layers import draw_height_layers
+from utils.ui.base_map_layer import BaseMapLayer
+from utils.core.terrain_height import coverage as terrain_coverage
 from utils.drivers.mono_scene import MemorySceneMap, NavigationSceneMap
 from utils.core.map_water_reference import GRASSLAND_POND, MAP_WATER_AREAS, MAP_WATER_ISLANDS
 from utils.core.map_reference_roads import REFERENCE_ROADS
@@ -197,6 +200,12 @@ def portable_data_directory(root, name, legacy_name):
 
 
 class CoordinateWindow:
+    # Defaults keep the map code safe on construction paths that do not build the
+    # canvas (tests assemble partial windows), and let the underlay degrade to the
+    # M3 rendering instead of raising.
+    base_map_enabled = True
+    base_map = None
+
     def __init__(self, root, monitor, resources, clock=time.monotonic, point_path=None, wall_clock=None,
                  playback_runner=None, scene_factory=None, cooking_runner=None, guidance_runner=None,
                  cooking_entry_runner=None, cooking_selection_runner=None, single_pot_runner=None):
@@ -387,9 +396,15 @@ class CoordinateWindow:
         left, left_inner = self.toolbar_pill(head)
         left.pack(side='left')
         (self.scene_filters_toggle,
-         self.route_overview_button) = self.pack_toolbar_buttons(
+         self.route_overview_button,
+         self.terrain_view_button,
+         self.height_slice_button,
+         self.base_map_button) = self.pack_toolbar_buttons(
             left_inner, [('分类筛选 ▾', self.toggle_scene_filters),
-                         ('路线全览', self.show_route_overview)])
+                         ('路线全览', self.show_route_overview),
+                         ('地势', self.toggle_terrain_view),
+                         ('分层', self.toggle_height_slice_view),
+                         ('原生底图', self.toggle_base_map)])
         right, right_inner = self.toolbar_pill(head)
         right.pack(side='right')
         self.map_expand_button = self.pack_toolbar_buttons(right_inner, [
@@ -397,6 +412,7 @@ class CoordinateWindow:
             ('＋', lambda: self.set_zoom(self.zoom * 1.5)),
             ('重置缩放', self.reset_map_view),
             ('大地图', self.toggle_map_size)])[-1]
+        self._sync_base_map_button()
         return head
 
     def build(self):
@@ -432,6 +448,10 @@ class CoordinateWindow:
         self.canvas = tk.Canvas(plotcard, bg=MAP_STYLE['ground'], bd=0, highlightthickness=0, height=270)
         self.map_cache = MapDrawCache(self.canvas, MAP_WATER_AREAS, SCENE_RANKS, roads=REFERENCE_ROADS,
                                      water_islands=MAP_WATER_ISLANDS, main_map_water=(GRASSLAND_POND,))
+        # Static high-resolution underlay. Draws only when the viewport changes;
+        # when it is present the flat M3 colour blocks are skipped entirely.
+        self.base_map = BaseMapLayer(self.canvas)
+        self.base_map_enabled = True
         self.house_plot_layer = HousePlotLayer(self.canvas)
         self.map_hover, self.map_hover_job = MapHover(self.canvas), None
         self.map_pointer = None
@@ -1678,6 +1698,15 @@ class CoordinateWindow:
             dx = max(5., max(abs(x - cx) for x, _ in route_points))
             dz = max(5., max(abs(z - cz) for _, z in route_points))
             scale = min(max(1., w - 76) / (2 * dx), max(1., h - 76) / (2 * dz)) * self.zoom
+        elif self.map_view in ('terrain', 'heightslice'):
+            # Height views frame the verified wall reference, not the player, so
+            # the relief stays comparable between redraws.
+            bounds = terrain_coverage()['bounds']
+            cx = (bounds['x'][0] + bounds['x'][1]) / 2
+            cz = (bounds['z'][0] + bounds['z'][1]) / 2
+            dx = max(5., (bounds['x'][1] - bounds['x'][0]) / 2)
+            dz = max(5., (bounds['z'][1] - bounds['z'][0]) / 2)
+            scale = min(max(1., w - 76) / (2 * dx), max(1., h - 76) / (2 * dz)) * self.zoom
         else:
             # Stable local detail: far routes, old trails and large colliders
             # must not keep shrinking the player's immediate surroundings.
@@ -1704,8 +1733,22 @@ class CoordinateWindow:
                              if (obj.get('category') if obj.get('category') in SCENE_CATEGORIES else 'other')
                              in self.scene_categories]
         main_map = view.position is not None and self.scene_state.get('survey_scene') == 'startown'
-        draw_terrain_tints(self.map_cache, main_map)
-        if self.scene_roads_var.get() and view.position is not None:
+        layer = getattr(self, 'base_map', None)
+        show_base = bool(self.base_map_enabled and layer is not None
+                         and layer.available and main_map)
+        if layer is not None:
+            layer.draw(viewport, show_base)
+        if not show_base:
+            # Only fall back to the flat M3 blocks when no calibrated raster can
+            # cover the view; the raster already contains water, roads and relief.
+            draw_terrain_tints(self.map_cache, main_map)
+        draw_height_layers(self.map_cache, viewport, self.map_view,
+                           None if view.position is None else view.position[1])
+        # The base raster already contains water, roads and platforms as painted
+        # artwork. Re-filling them would flatten that artwork, so the static
+        # reference layers stand down while it is in use and only the dynamic
+        # world-coordinate layers (player, route, resources, plots) stay on top.
+        if not show_base and self.scene_roads_var.get() and view.position is not None:
             for key, coords, _ in self.map_cache.geometry.visible_roads(viewport):
                 self.map_cache.polyline(key, coords, -3, [
                     {'fill': '#C7C29B', 'width': 10, 'capstyle': 'round', 'joinstyle': 'round',
@@ -1713,7 +1756,7 @@ class CoordinateWindow:
                     {'fill': MAP_STYLE['road'], 'width': 5, 'capstyle': 'round', 'joinstyle': 'round',
                      'tags': 'reference-road'},
                     {'fill': '#ECDBB5', 'width': 1, 'tags': 'reference-road-center'}])
-        if self.scene_water_var.get() and view.position is not None:
+        if not show_base and self.scene_water_var.get() and view.position is not None:
             for key, coords, _ in self.map_cache.geometry.visible_water(
                     viewport, main_map=main_map):
                 self.map_cache.polygon(key, coords, -2,
@@ -1725,7 +1768,7 @@ class CoordinateWindow:
             for key, coords, _ in self.map_cache.geometry.visible_water_islands(viewport):
                 self.map_cache.polygon(key, coords, -1, fill=MAP_STYLE['ground'],
                                        outline=MAP_STYLE['shore'], width=1., tags='reference-water-island')
-        if view.position is not None:
+        if not show_base and view.position is not None:
             draw_wooden_platforms(self.map_cache, scale)
         detail_footprints = {tuple(value for point in box['polygon'] for value in point) for _, box in nearby_boxes}
         for key, coords, _ in scene_boxes:
@@ -2336,6 +2379,9 @@ class CoordinateWindow:
                 id(scene.get('global_resources')), len(scene.get('global_resources', ())),
                 tuple(tuple(p) for p in self.playback_status.get('navigation_path', [])),
                 self.playback_status.get('waypoint'), self.map_view, self.zoom, self.scene_radius,
+                None if view.position is None or self.map_view != 'heightslice'
+                else round(view.position[1], 2),
+                self.base_map_enabled,
                 None if self.scene_categories is None else frozenset(self.scene_categories),
                 tuple(v.get() for v in (self.scene_objects_var, self.scene_colliders_var, self.scene_water_var,
                                         self.scene_roads_var, self.scene_barriers_var,
@@ -2363,11 +2409,48 @@ class CoordinateWindow:
 
     def reset_map_view(self):
         self.map_view = 'nearby'
+        self._sync_height_view_buttons()
         self.set_zoom(1.)
 
     def show_route_overview(self):
         self.map_view = 'route' if self.saved_points else 'nearby'
         self.set_zoom(1.)
+
+    def _set_height_view(self, view):
+        self.map_view = 'nearby' if self.map_view == view else view
+        self._sync_height_view_buttons()
+        self.set_zoom(1.)
+
+    def toggle_base_map(self):
+        self.base_map_enabled = not self.base_map_enabled
+        self.base_map.invalidate()
+        self._sync_base_map_button()
+        self.request_draw()
+
+    def _sync_base_map_button(self):
+        button = getattr(self, 'base_map_button', None)
+        layer = getattr(self, 'base_map', None)
+        if button is None:
+            return
+        # The toolbar is built before the canvas, so the layer may not exist yet;
+        # the label is refreshed again from toggle_base_map.
+        if layer is None or not layer.available:
+            button.configure(text='原生底图 ✕')
+        else:
+            button.configure(text='原生底图 ●' if self.base_map_enabled else '原生底图')
+
+    def toggle_terrain_view(self):
+        self._set_height_view('terrain')
+
+    def toggle_height_slice_view(self):
+        self._set_height_view('heightslice')
+
+    def _sync_height_view_buttons(self):
+        for name, button, label in (
+                ('terrain', getattr(self, 'terrain_view_button', None), '地势'),
+                ('heightslice', getattr(self, 'height_slice_button', None), '分层')):
+            if button is not None:
+                button.configure(text=f'{label} ●' if self.map_view == name else label)
 
     def show_mineral_overview(self):
         self.scene_categories = {'rock', 'ore'}
