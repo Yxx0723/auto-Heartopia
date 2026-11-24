@@ -76,11 +76,14 @@ def cells_for(bounds):
 
 class SceneGeometryCache:
     """Prepare bounds once per immutable worker snapshot, not on every frame."""
-    def __init__(self, water_areas, ranks, roads=(), water_islands=()):
+    def __init__(self, water_areas, ranks, roads=(), water_islands=(), *, main_map_water=()):
         self.ranks = ranks
+        water_areas = tuple(water_areas)
         self.water = [(('water', index), *polygon_data(polygon))
                       for index, polygon in enumerate(water_areas) if len(polygon) >= 3]
         self.water_keys = {entry[0] for entry in self.water}
+        self.main_map_water_keys = {('water', index) for index, polygon in enumerate(water_areas)
+                                    if polygon in main_map_water}
         self.water_islands = [(('water-island', index), *polygon_data(polygon))
                               for index, polygon in enumerate(water_islands) if len(polygon) >= 3]
         self.roads = []
@@ -208,9 +211,10 @@ class SceneGeometryCache:
                  and polygon_distance(x, z, self.boxes[i][1]) <= radius]
         return models, boxes
 
-    def visible_water(self, viewport):
+    def visible_water(self, viewport, *, main_map=True):
         bounds = viewport.bounds()
-        return [entry for entry in self.water if intersects(entry[2], bounds)]
+        return [entry for entry in self.water
+                if (main_map or entry[0] not in self.main_map_water_keys) and intersects(entry[2], bounds)]
 
     def visible_water_islands(self, viewport):
         bounds = viewport.bounds()
@@ -277,9 +281,11 @@ class MapDrawCache:
     Offscreen entries form a bounded pool for zooming back out. Items absent
     from the next source snapshot are deleted immediately, including animals.
     """
-    def __init__(self, canvas, water_areas=(), ranks=None, max_entries=4096, roads=(), water_islands=()):
+    def __init__(self, canvas, water_areas=(), ranks=None, max_entries=4096, roads=(), water_islands=(),
+                 *, main_map_water=()):
         self.canvas = canvas
-        self.geometry = SceneGeometryCache(water_areas, ranks or {}, roads, water_islands)
+        self.geometry = SceneGeometryCache(water_areas, ranks or {}, roads, water_islands,
+                                           main_map_water=main_map_water)
         self.live = CanvasLayer(canvas)
         self.fixed = OrderedDict()
         self.viewport, self.used = None, set()

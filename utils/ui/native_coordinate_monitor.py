@@ -41,7 +41,7 @@ from utils.ui.map_presentation import (draw_grid, draw_chrome, draw_player, chro
                                       draw_waypoint_labels, draw_target_indicator)
 from utils.ui.map_labels import layout_waypoints, HoverTarget, MapHover, target_indicator
 from utils.drivers.mono_scene import MemorySceneMap, NavigationSceneMap
-from utils.core.map_water_reference import MAP_WATER_AREAS, MAP_WATER_ISLANDS
+from utils.core.map_water_reference import GRASSLAND_POND, MAP_WATER_AREAS, MAP_WATER_ISLANDS
 from utils.core.map_reference_roads import REFERENCE_ROADS
 from utils.ui import theme
 from utils.ui.theme import (COLORS, MAP_STYLE, RoundedPanel, apply_dpi_scale,
@@ -430,7 +430,7 @@ class CoordinateWindow:
         self.build_map_toolbar(plotcard)
         self.canvas = tk.Canvas(plotcard, bg=MAP_STYLE['ground'], bd=0, highlightthickness=0, height=270)
         self.map_cache = MapDrawCache(self.canvas, MAP_WATER_AREAS, SCENE_RANKS, roads=REFERENCE_ROADS,
-                                     water_islands=MAP_WATER_ISLANDS)
+                                     water_islands=MAP_WATER_ISLANDS, main_map_water=(GRASSLAND_POND,))
         self.house_plot_layer = HousePlotLayer(self.canvas)
         self.map_hover, self.map_hover_job = MapHover(self.canvas), None
         self.map_pointer = None
@@ -1711,7 +1711,8 @@ class CoordinateWindow:
                      'tags': 'reference-road'},
                     {'fill': '#b5ac88', 'width': 1, 'dash': (3, 9), 'tags': 'reference-road-center'}])
         if self.scene_water_var.get() and view.position is not None:
-            for key, coords, _ in self.map_cache.geometry.visible_water(viewport):
+            for key, coords, _ in self.map_cache.geometry.visible_water(
+                    viewport, main_map=self.scene_state.get('survey_scene') == 'startown'):
                 self.map_cache.polygon(key, coords, -2,
                                        underlay={'fill': '', 'outline': MAP_STYLE['shore_outer'],
                                                  'width': 5, 'tags': 'reference-water-shore'},

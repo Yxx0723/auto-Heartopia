@@ -59,3 +59,57 @@ def test_coastal_sea_is_present_across_map(pixel):
 @pytest.mark.parametrize('pixel', [(120,170),(195,230),(920,365),(925,615),(740,750)])
 def test_offshore_islands_remain_land(pixel):
     assert not wet(pixel)
+
+
+@pytest.mark.parametrize('point', [(-187, -12), (-188, -17), (-182, -24), (-184, -21)])
+def test_grassland_pond_fills_reference_water_and_keeps_narrow_link(point):
+    from utils.core.map_water_reference import GRASSLAND_POND
+    assert inside(point, GRASSLAND_POND)
+    assert not any(inside(point, island) for island in MAP_WATER_ISLANDS)
+
+
+@pytest.mark.parametrize('point', [(-175, -20), (-194, -16), (-181, -7), (-182, -29), (-179, -18)])
+def test_grassland_pond_dry_banks_are_not_filled(point):
+    from utils.core.map_water_reference import GRASSLAND_POND
+    assert not inside(point, GRASSLAND_POND)
+
+
+def test_grassland_pond_ring_is_simple_and_closed_by_canvas():
+    from utils.core.map_water_reference import GRASSLAND_POND
+    from utils.core.coordinate_navigation import segments_cross
+    ring = GRASSLAND_POND
+    assert len(ring) == len(set(ring)) >= 35
+    edges = list(zip(ring, ring[1:] + ring[:1]))
+    for i, (a, b) in enumerate(edges):
+        for j, (c, d) in enumerate(edges[i+2:], i+2):
+            if i == 0 and j == len(edges)-1:
+                continue
+            assert not segments_cross(a, b, c, d)
+    assert edges[-1][-1] == edges[0][0]
+
+
+def test_grassland_pond_cache_tracks_scene_zoom_pan_and_resize():
+    from utils.core.map_water_reference import GRASSLAND_POND
+    canvas = Canvas()
+    cache = MapDrawCache(canvas, MAP_WATER_AREAS, water_islands=MAP_WATER_ISLANDS,
+                         main_map_water=(GRASSLAND_POND,))
+    pond_key = ('water', MAP_WATER_AREAS.index(GRASSLAND_POND))
+    for width, height, x, z, scale, main_map in (
+            (600, 400, -179, -15, 3., True),
+            (600, 400, -185, -20, 7., False),
+            (850, 525, -183, -16, 10., True),
+            (850, 525, 80, 80, 10., True),
+            (780, 520, -180, -10, 5., True)):
+        viewport = Viewport(width, height, x, z, scale)
+        cache.begin(viewport)
+        for key, coords, _ in cache.geometry.visible_water(viewport, main_map=main_map):
+            cache.polygon(key, coords, -2, fill='blue')
+        cache.finish()
+        entry = cache.fixed[pond_key]
+        assert entry.visible == (main_map and x < 0)
+        item, _ = entry.commands[0]
+        if entry.visible:
+            assert canvas.coords(item) == pytest.approx([
+                value for point in GRASSLAND_POND for value in viewport.screen(*point)])
+        assert len(entry.commands) == 1
+    assert len(cache.geometry.main_map_water_keys) == 1
