@@ -17,6 +17,7 @@ from utils.core.native_scene_versions import native_scene_layout
 from utils.drivers.managed_box_lifecycle import DetachedBoxGuard
 from utils.drivers.global_minerals import GlobalMineralReader
 from utils.drivers.house_entrances import HouseEntranceReader
+from utils.drivers.house_plots import HousePlotReader
 from utils.drivers.special_gather import SPECIAL_COMPONENTS, special_gather
 
 # Verified on 2026-10-14 against the standing player's blueberry bush and the
@@ -1466,6 +1467,15 @@ class MemorySceneMap:
                 self.house_entrances.cache['context'])).encode()).hexdigest()
         except (ValueError, OSError):
             pass  # Missing entrances must not discard live objects or collision geometry.
+        house_plots, house_plot_state = [], 'unavailable'
+        if not getattr(self, 'navigation_only', False) and house_state == 'ready':
+            try:
+                if getattr(self, 'house_plot_reader', None) is None:
+                    self.house_plot_reader = HousePlotReader(self.house_entrances)
+                house_plots = self.house_plot_reader.snapshot()
+                house_plot_state = 'ready'
+            except (ValueError, OSError):
+                pass  # Missing display data never changes navigation or other scene layers.
         terrain = ()
         main_terrain = False
         if world_state == 'ready':
@@ -1547,6 +1557,7 @@ class MemorySceneMap:
                 'position': current['position'], 'barrier_state': barrier_state, 'world_state': world_state,
                 'global_resources': global_resources, 'global_resource_state': global_state,
                 'house_entrances': house_entrances, 'house_entrance_state': house_state,
+                'house_plots': house_plots, 'house_plot_state': house_plot_state,
                 'patrol_context': patrol_context,
                 'house_exclusions': [], 'house_exclusion_state': 'disabled',
                 'global_resource_counts': {category: sum(p['category'] == category for p in global_resources)

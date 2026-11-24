@@ -310,6 +310,7 @@ def category_window(tmp_path):
     window.scene_colliders_var = tk.BooleanVar(tcl, False)
     window.scene_water_var = tk.BooleanVar(tcl, False)
     window.scene_roads_var = tk.BooleanVar(tcl, True)
+    window.scene_nearby_colliders_var = tk.BooleanVar(tcl, False)
     window.scene_all_button, window.scene_none_button, window.scene_filter_hint = Mock(), Mock(), Mock()
     window.scene_filter_buttons = {category: Mock() for category in SCENE_CATEGORIES}
     window.saved_points = [{'id': 1, 'position': [-43., 23., 130.]}]
@@ -327,6 +328,7 @@ def test_nearby_models_and_collision_overlay_render_without_resource_filter_chan
             {'polygon': [[x+18, z-1], [x+50, z-1], [x+50, z+1], [x+18, z+1]], 'height': [y, y+6]}]}
     window.scene_categories = None
     window.scene_colliders_var.set(True)
+    window.scene_nearby_colliders_var.set(True)
     window.map_hover = Mock()
     window.draw()
     assert {'nearby-model', 'nearby-collision'} <= window.map_cache.visible_tags
@@ -351,7 +353,7 @@ def test_map_hover_picks_only_visible_categories_without_changing_routes(tmp_pat
     targets = window.map_hover.update.call_args.args[1]
     assert [target.title for target in targets] == ['蓝莓', '路线点 1']
     assert '平面距离' in targets[0].detail
-    window.scene_state['objects'][0]['map_cached'] = True
+    next(obj for obj in window.scene_state['objects'] if obj['category']=='blueberry')['map_cached'] = True
     window.draw()
     assert '缓存参考' in window.map_hover.update.call_args.args[1][0].detail
     assert window.saved_points == original
@@ -1035,3 +1037,16 @@ def test_configured_fallback_food_scope_reaches_playback_worker(tmp_path,label,m
     window.food_fallback_var=Mock();window.food_fallback_var.get.return_value=label
     window.start_playback()
     assert window.playback.start.call_args.kwargs['food_fallback']==mode
+
+
+def test_house_plot_category_controls_its_own_layer(tmp_path):
+    window=category_window(tmp_path)
+    window.house_plot_layer=Mock()
+    window.toggle_scene_category('house_plot')
+    assert window.house_plot_layer.draw.call_args.args[2] is True
+    window.toggle_scene_category('house_plot')
+    assert window.house_plot_layer.draw.call_args.args[2] is False
+    window.set_scene_categories(True)
+    assert window.house_plot_layer.draw.call_args.args[2] is True
+    window.set_scene_categories(False)
+    assert window.house_plot_layer.draw.call_args.args[2] is False

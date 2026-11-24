@@ -1,0 +1,39 @@
+{
+  "focused": {
+    "passed": 171,
+    "failed": 0
+  },
+  "full": {
+    "passed": 3992,
+    "failed": 13,
+    "xfail": 27,
+    "seconds": 199.23
+  },
+  "baseline_recheck": {
+    "tested": 43,
+    "passed": 30,
+    "failed": 13
+  },
+  "new_failures": [],
+  "existing_failures": [
+    "tests.test_architecture.TestImportTimeSideEffects::test_no_new_modules_with_import_time_side_effects",
+    "tests.test_architecture.TestLayerDirection::test_layers_only_import_layers_they_are_allowed_to",
+    "tests.test_architecture.TestOsCouplingRatchet::test_no_new_module_touches_the_os_directly",
+    "tests.test_architecture.TestVisionIsolation::test_only_vision_imports_cv2",
+    "tests.test_thresholds::test_every_public_constant_is_pinned",
+    "tests.unit.test_monitor_60hz::test_ui_frame_budget_subtracts_render_cost_without_spinning[0.1-1]",
+    "tests.unit.test_monitor_lower_layout::test_compact_tabs_groups_and_map_restore_at_both_window_sizes",
+    "tests.unit.test_monitor_refresh::test_drag_defers_drawing_and_renders_latest_data_once_after_settling",
+    "tests.unit.test_monitor_refresh::test_filter_zoom_route_edit_trail_clear_and_pause_are_not_lost",
+    "tests.unit.test_monitor_refresh::test_moving_player_new_scene_and_navigation_updates_each_repaint",
+    "tests.unit.test_monitor_refresh::test_stationary_frames_and_sample_metadata_changes_do_not_repaint",
+    "tests.unit.test_runtime_log_switching::test_module_logs_keep_history_and_move_one_full_window",
+    "tests.unit.test_scene_barrier_map::test_native_barrier_switch_is_independent_and_leaves_obstacles_intact[True-False]"
+  ],
+  "windows_live": "passed",
+  "packaged_live": {
+    "state": "ready",
+    "plot_count": 12,
+    "sha256": "18653d6866b2f856f36864867f68bbcb6ff4390fc3547dbb5b1b754ae12e44ed"
+  }
+}
