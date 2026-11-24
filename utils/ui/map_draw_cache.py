@@ -372,6 +372,20 @@ class MapDrawCache:
             entry.commands.append((item, ()))
             self.register(entry, item, layer.get('tags'))
 
+    def texture(self, key, strokes, rank, color):
+        """Retain one cache entry for all marks on a reference polygon."""
+        if not strokes:
+            return
+        self.geometry.valid_keys.add(key)
+        if self.existing(key) is not None:
+            return
+        entry = self.new_entry(key, rank, None)
+        for x, z, end, _ in strokes:
+            item = self.canvas.create_line(*self.viewport.screen(x, z), *self.viewport.screen(end, z),
+                                           fill=color, width=1, capstyle='round', tags='map-texture')
+            entry.commands.append((item, ()))
+            self.register(entry, item, 'map-texture')
+
     def polyline(self, key, coords, rank, layers):
         if self.existing(key) is not None:
             return
@@ -439,7 +453,7 @@ class MapDrawCache:
         x, z = self.viewport.screen(*anchor)
         draw(SymbolPainter(self, entry), x, z)
 
-    def finish(self):
+    def finish(self, *, house_layer=False, house_changed=False):
         removed = []
         for key, entry in list(self.fixed.items()):
             if key not in self.geometry.valid_keys:
@@ -456,8 +470,12 @@ class MapDrawCache:
                     del self.fixed[key]
         if removed:
             self.canvas.delete(*removed)
-        if self.changed:
-            for rank in (-3, -2, -1, 0, 1, 2):
+        if self.changed or house_changed:
+            for rank in (-5, -4.5, -4, -3, -2, -1.5, -1, -0.5):
+                self.canvas.tag_raise(f'map-rank-{rank}')
+            if house_layer:
+                self.canvas.tag_raise('house-plots')
+            for rank in (-0.25, 0, 1, 2, 3):
                 self.canvas.tag_raise(f'map-rank-{rank}')
 
     @property

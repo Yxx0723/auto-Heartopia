@@ -12,6 +12,9 @@ class Canvas:
     def create(self,*coords,**opts):
         self.serial+=1;self.items[self.serial]=(coords,opts);return self.serial
     create_polygon=create_text=create
+    def coords(self, item, *coords):
+        self.items[item] = (coords, self.items[item][1])
+
     def tag_raise(self,tag): pass
 
 
@@ -44,6 +47,7 @@ def test_pan_zoom_resize_reprojects_polygons_and_numbers_without_duplicates():
         first_poly,first_text=list(c.items.values())[:2]
         assert first_poly[0][:2]==view.screen(*s['house_plots'][0]['polygon'][0])
         assert first_text[0]==view.screen(*s['house_plots'][0]['label_position'])
+    assert c.serial == 24
 
 
 def test_scene_failure_switch_filter_and_reconnect_leave_no_old_items():

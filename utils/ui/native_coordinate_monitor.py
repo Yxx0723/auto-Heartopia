@@ -38,7 +38,8 @@ from utils.ui.collision_display import collision_faces
 from utils.ui.house_plot_layer import HousePlotLayer
 from utils.ui.map_surface_reference import draw_wooden_platforms
 from utils.ui.map_presentation import (draw_grid, draw_chrome, draw_player, chrome_bounds,
-                                      draw_waypoint_labels, draw_target_indicator)
+                                      draw_waypoint_labels, draw_target_indicator, draw_terrain_tints,
+                                      draw_map_texture)
 from utils.ui.map_labels import layout_waypoints, HoverTarget, MapHover, target_indicator
 from utils.drivers.mono_scene import MemorySceneMap, NavigationSceneMap
 from utils.core.map_water_reference import GRASSLAND_POND, MAP_WATER_AREAS, MAP_WATER_ISLANDS
@@ -1702,22 +1703,25 @@ class CoordinateWindow:
             scene_objects = [obj for obj in scene_objects
                              if (obj.get('category') if obj.get('category') in SCENE_CATEGORIES else 'other')
                              in self.scene_categories]
+        main_map = view.position is not None and self.scene_state.get('survey_scene') == 'startown'
+        draw_terrain_tints(self.map_cache, main_map)
         if self.scene_roads_var.get() and view.position is not None:
             for key, coords, _ in self.map_cache.geometry.visible_roads(viewport):
                 self.map_cache.polyline(key, coords, -3, [
-                    {'fill': '#D5DCCB', 'width': 9, 'capstyle': 'round', 'joinstyle': 'round',
+                    {'fill': '#C7C29B', 'width': 10, 'capstyle': 'round', 'joinstyle': 'round',
                      'tags': 'reference-road-edge'},
                     {'fill': MAP_STYLE['road'], 'width': 5, 'capstyle': 'round', 'joinstyle': 'round',
                      'tags': 'reference-road'},
-                    {'fill': '#b5ac88', 'width': 1, 'dash': (3, 9), 'tags': 'reference-road-center'}])
+                    {'fill': '#ECDBB5', 'width': 1, 'tags': 'reference-road-center'}])
         if self.scene_water_var.get() and view.position is not None:
             for key, coords, _ in self.map_cache.geometry.visible_water(
-                    viewport, main_map=self.scene_state.get('survey_scene') == 'startown'):
+                    viewport, main_map=main_map):
                 self.map_cache.polygon(key, coords, -2,
                                        underlay={'fill': '', 'outline': MAP_STYLE['shore_outer'],
-                                                 'width': 5, 'tags': 'reference-water-shore'},
-                                       fill=MAP_STYLE['water'], outline=MAP_STYLE['shore'], width=1.5,
+                                                 'width': 7, 'tags': 'reference-water-shore'},
+                                       fill=MAP_STYLE['water'], outline=MAP_STYLE['shore'], width=3,
                                        tags='reference-water')
+                draw_map_texture(self.map_cache, key, coords, -1.5, '#78AEB2', 4, 1.5)
             for key, coords, _ in self.map_cache.geometry.visible_water_islands(viewport):
                 self.map_cache.polygon(key, coords, -1, fill=MAP_STYLE['ground'],
                                        outline=MAP_STYLE['shore'], width=1., tags='reference-water-island')
@@ -1731,7 +1735,7 @@ class CoordinateWindow:
             cached = key in self.map_cache.geometry.cached_keys
             if kind == 'mountain':
                 if self.scene_colliders_var.get():
-                    self.map_cache.polygon(key, coords, -1, fill='', outline='#bb9874', width=2,
+                    self.map_cache.polygon(key, coords, -0.25, fill='', outline='#bb9874', width=2,
                                            tags=('scene-mountain', 'scene-terrain'))
             elif kind:
                 if self.scene_barriers_var.get():
@@ -1739,7 +1743,7 @@ class CoordinateWindow:
                     self.map_cache.barrier(key, coords, color, kind)
             elif self.scene_colliders_var.get():
                 color = muted_color(MAP_STYLE['collision']) if cached else MAP_STYLE['collision']
-                self.map_cache.polygon(key, coords, -1, fill='', outline=color, width=1,
+                self.map_cache.polygon(key, coords, -0.25, fill='', outline=color, width=1,
                                        tags='scene-collider')
         # Keep this detail overlay separate from resource categories and from
         # navigation geometry. Coordinates are game units, not calibrated metres.
@@ -1755,11 +1759,11 @@ class CoordinateWindow:
             self.map_cache.symbol(object_key(obj), (obj['position'][0], obj['position'][2]),
                                   SCENE_RANKS.get(category, 0),
                                   lambda painter, x, z, category=category: self.draw_scene_symbol(painter, x, z, category))
-        self.map_cache.finish()
         if not hasattr(self, 'house_plot_layer'):
             self.house_plot_layer = HousePlotLayer(canvas)
-        self.house_plot_layer.draw(self.scene_state, viewport,
+        house_changed = self.house_plot_layer.draw(self.scene_state, viewport,
             self.scene_objects_var.get() and (self.scene_categories is None or 'house_plot' in self.scene_categories))
+        self.map_cache.finish(house_layer=True, house_changed=house_changed)
         canvas = self.map_cache.live
         segment, coords = None, []
         for point in view.trail:

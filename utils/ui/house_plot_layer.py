@@ -2,7 +2,7 @@
 import math
 from utils.drivers.house_plots import SOURCE
 
-PLOT_COLOR = '#D8B66C'
+PLOT_COLOR = '#F2DFA2'
 TAG = 'house-plots'
 
 
@@ -40,24 +40,33 @@ def validated_plots(scene):
 class HousePlotLayer:
     def __init__(self, canvas):
         self.canvas, self.signature = canvas, None
+        self.viewport = None
+        self.items = []
         self.redraws = 0
 
     def draw(self, scene, viewport, enabled=True):
         rows = validated_plots(scene) if enabled else ()
-        signature = (repr(scene.get('cache_context')), viewport,
+        signature = (repr(scene.get('cache_context')),
                      tuple((r['house_number'], r['field_id'], tuple(map(tuple, r['polygon'])),
                             tuple(r['label_position'])) for r in rows))
         if signature == self.signature:
-            self.canvas.tag_raise(TAG)
-            return
+            if viewport != self.viewport:
+                for row, (boundary, label) in zip(rows, self.items):
+                    self.canvas.coords(boundary, *(v for p in row['polygon'] for v in viewport.screen(*p)))
+                    self.canvas.coords(label, *viewport.screen(*row['label_position']))
+                self.viewport = viewport
+            return False
         self.canvas.delete(TAG)
         self.signature = signature
+        self.viewport = viewport
         self.redraws += 1
+        self.items = []
         for row in rows:
             coords = [v for p in row['polygon'] for v in viewport.screen(*p)]
-            self.canvas.create_polygon(*coords, fill='', outline=PLOT_COLOR, width=2,
-                                       tags=(TAG, 'house-plot-boundary'))
-            self.canvas.create_text(*viewport.screen(*row['label_position']), text=str(row['house_number']),
-                                    fill=PLOT_COLOR, font=('Microsoft YaHei UI', 11, 'bold'),
-                                    tags=(TAG, 'house-plot-number'))
-        self.canvas.tag_raise(TAG)
+            boundary = self.canvas.create_polygon(*coords, fill='', outline=PLOT_COLOR, width=2,
+                                                  tags=(TAG, 'house-plot-boundary'))
+            label = self.canvas.create_text(*viewport.screen(*row['label_position']), text=str(row['house_number']),
+                                            fill='#53452D', font=('Microsoft YaHei UI', 11, 'bold'),
+                                            tags=(TAG, 'house-plot-number'))
+            self.items.append((boundary, label))
+        return bool(self.items)
