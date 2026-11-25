@@ -47,7 +47,7 @@ class ApproachRisks:
             self.entries = entries
             self.revision += 1
 
-    def record(self, start, end, *, attempt_id=None, mode='walk', geometry=None):
+    def record(self, start, end, *, attempt_id=None, mode='walk', geometry=None, entrance=False):
         if not valid_position(start) or not valid_position(end):
             return
         dx, dz = end[0]-start[0], end[2]-start[2]
@@ -62,7 +62,7 @@ class ApproachRisks:
         self.entries.append({'identity':identity, 'start':tuple(start), 'direction':direction,
                              'focus':(start[0]+direction[0]*min(policy.COORD_APPROACH_FOCUS_DISTANCE,length),
                                       start[2]+direction[1]*min(policy.COORD_APPROACH_FOCUS_DISTANCE,length)),
-                             'mode':mode, 'source':'movement_stall', 'support_ref':None,
+                             'mode':mode, 'entrance':entrance, 'source':'movement_stall', 'support_ref':None,
                              'confidence':'temporary_risk', 'geometry':geometry,
                              'expires_at':self.clock()+policy.COORD_NAV_PROBE_SECONDS})
         self.entries = self.entries[-policy.COORD_APPROACH_RISK_LIMIT:]
@@ -74,16 +74,21 @@ class ApproachRisks:
             return 0.
         direction = tuple((b-a)/length for a,b in zip(start,end))
         result = 0.
+        matches = []
+        now = self.clock()
         for entry in self.entries:
-            if entry['mode'] != mode or abs(height-entry['start'][1]) > policy.COORD_APPROACH_HEIGHT_BAND:
+            if entry['expires_at'] <= now or entry['mode'] != mode or abs(height-entry['start'][1]) > policy.COORD_APPROACH_HEIGHT_BAND:
                 continue
             alignment = sum(a*b for a,b in zip(direction,entry['direction']))
             if alignment < policy.COORD_APPROACH_DIRECTION_COSINE:
                 continue
             gap = segment_gap(entry['focus'],start,end)
-            if gap < policy.COORD_APPROACH_RISK_RADIUS:
-                result += policy.COORD_APPROACH_RISK_WEIGHT*(1-gap/policy.COORD_APPROACH_RISK_RADIUS)*min(
-                    length, 2*policy.COORD_APPROACH_RISK_RADIUS)
+            if gap < 2 * policy.COORD_APPROACH_RISK_RADIUS:
+                matches.append(gap)
+        radius = policy.COORD_APPROACH_RISK_RADIUS * (1 + .5 * min(2, max(0, len(matches)-1)))
+        for gap in matches:
+            if gap < radius:
+                result += policy.COORD_APPROACH_RISK_WEIGHT * (1-gap/radius) * min(length, 2*radius)
         return result
 
     def success(self, start, end, mode='walk'):
@@ -127,6 +132,8 @@ class ApproachRisks:
             if sum(a*b for a, b in zip(direction, entry['direction'])) < policy.COORD_DIRECTION_INDEPENDENT_COSINE:
                 continue
             if segment_gap(entry['focus'], start, end) <= policy.COORD_APPROACH_REPEAT_LATERAL:
+                if entry['entrance']:
+                    return True
                 matches += 1
         return matches >= policy.COORD_APPROACH_REPEAT_FAILURES
 

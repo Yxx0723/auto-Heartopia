@@ -104,3 +104,23 @@ def test_risk_expiry_invalidates_old_detour_and_replans_straight():
     assert nav.next_target((0,0,0),(0,0,6))[0] != 0
     now[0] = 100.
     assert nav.next_target((0,0,0),(0,0,6))[0] == 0
+
+
+def test_repeated_local_failures_expand_the_avoidance_cost():
+    risks = store()
+    edge = ((1.6, 0), (1.6, 3))
+    assert risks.cost(*edge, 0) == 0
+    risks.record((0, 0, 0), (0, 0, 4), attempt_id='two')
+    assert risks.cost(*edge, 0) > 0
+    assert risks.cost(*reversed(edge), 0) == 0
+
+
+def test_backtrack_blocks_the_failed_direction_until_expiry():
+    now = [0.]
+    risks = ApproachRisks(clock=lambda: now[0])
+    risks.record((0, 0, 0), (2, 0, 0), entrance=True)
+    assert risks.repeats_failed_entry((0, 0), (2, 0), 0)
+    assert not risks.repeats_failed_entry((2, 0), (0, 0), 0)
+    now[0] = 100.
+    assert not risks.repeats_failed_entry((0, 0), (2, 0), 0)
+    assert risks.cost((0, 0), (2, 0), 0) == 0

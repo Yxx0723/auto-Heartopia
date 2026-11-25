@@ -2,7 +2,9 @@
 import math
 
 from utils.core import thresholds as policy
-from utils.core.coordinate_route import distance
+from utils.core.coordinate_route import distance, direction_keys, key_vector
+from utils.core.coordinate_navigation import NavigationWait
+from utils.core.traversal_evidence import scene_scope
 from utils.drivers.guidance_input_lease import GuidanceInputLease
 from utils.flows.coordinate_player import _Follower, _MovementRetry
 
@@ -100,6 +102,63 @@ class CollectionFollower(_Follower):
         finally:
             self.release('path_escape_complete')
             self.navigator.invalidate()
+
+    def retreat(self, position, basis, index, total):
+        scope = self.travel_progress.scene
+        points = self.travel_progress.retreat_points(position)
+        if not points:
+            return False
+        self.report('recovering', '检查已走过的轨迹，尝试退出死路',
+                    waypoint=index+1, waypoint_count=total, recovery_phase='backtrack')
+        deadline = self.clock.monotonic() + 2 * policy.COORD_RECOVERY_LEG_SECONDS
+        entry = position
+        escaped = False
+        try:
+            for target in points:
+                while self.clock.monotonic() < deadline:
+                    self.release('backtrack_recheck')
+                    current = self.read(force=True)
+                    with self.navigator._path_escape_map(current, target, self.guard, self.planning_release) as obstacles:
+                        if scene_scope(self.navigator.scene) != scope or abs(current[1]-target[1]) > policy.COORD_DIRECTION_SAMPLE_HEIGHT:
+                            return escaped
+                        if distance(current, target) <= policy.COORD_REACH_RADIUS:
+                            if distance(current, entry) > policy.COORD_REACH_RADIUS:
+                                self.navigator.risks.record(current, entry, entrance=True,
+                                    attempt_id=('backtrack', self.travel_progress.tag,
+                                                self.travel_progress.backtracks, target))
+                                escaped = True
+                            entry = current
+                            break
+                        if not obstacles.covers_search(current, distance(current, target)+1.) \
+                                or not self.navigator.motion_clear(current, target):
+                            return escaped
+                        travel = self.steering_travel(current, target)
+                        keys = direction_keys(current, target, basis)
+                        if not keys:
+                            return escaped
+                        dx, dz = key_vector(keys, basis)
+                        scale = travel / math.hypot(dx,dz)
+                        endpoint = (current[0]+dx*scale, current[1], current[2]+dz*scale)
+                        if not self.navigator.motion_clear(current, endpoint):
+                            return escaped
+                    if self.clock.monotonic() >= deadline:
+                        return escaped
+                    self.apply_movement(keys, current, target)
+                    self.wait_movement(self.clock.monotonic(), distance(current,target), False)
+                else:
+                    return escaped
+        except (NavigationWait, _MovementRetry):
+            pass
+        finally:
+            self.release('backtrack_complete')
+            self.navigator.invalidate()
+            self.travel_progress.visits.clear()
+            self.travel_progress.begin_probe(self.position)
+            self.report('recovering', '已沿原轨迹回退，暂时避开失败入口并重新规划' if escaped
+                        else '回退未到达安全历史采样点，结束本次回退',
+                        waypoint=index+1, waypoint_count=total,
+                        recovery_result='backtracked' if escaped else 'backtrack_aborted')
+        return escaped
 
     def guard(self):
         self.input_lease.poll()

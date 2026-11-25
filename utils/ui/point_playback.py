@@ -412,8 +412,7 @@ class PointPlayback:
                 factory = RecordedWalkNavigator
             elif auto_navigate and factory is CollectionNavigator:
                 options = {'native_map_collection': False,
-                           'road_preference': load_road_preference(self.profile.parent),
-                           'require_far_roads': True}
+                           'road_preference': load_road_preference(self.profile.parent)}
             navigation = ({'navigator': factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic, **options)}
                           if auto_navigate else {})
             if auto_navigate and isinstance(navigation['navigator'],CollectionNavigator) \

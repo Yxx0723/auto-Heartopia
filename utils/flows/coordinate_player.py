@@ -1438,11 +1438,17 @@ class _Follower:
                     anchor = None
                     best, progress_at = math.inf, self.clock.monotonic()
                 position = self.read()
+                movement_loop = False
+                retreat = getattr(self, 'retreat', None)
                 if self.navigator and self.waypoints is not None:
                     point_tag=((self.cycle,index,self.supplements.retrying) if self.supplements else (self.cycle,index))
                     self.travel_progress.bind(point_tag, position,
                                               points[index]['position'], self.calibration_speed)
-                    if self.supplements and distance(position,points[index]['position'])>policy.COORD_REACH_RADIUS \
+                    if retreat and distance(position, points[index]['position']) > policy.COORD_REACH_RADIUS:
+                        self.travel_progress.bind_scene(scene_scope(self.navigator.scene_provider()))
+                        movement_loop = bool(self.keys and self.travel_progress.scene
+                                             and self.travel_progress.looping(position))
+                    elif self.supplements and distance(position, points[index]['position']) > policy.COORD_REACH_RADIUS \
                             and self.travel_progress.looping(position):
                         raise _SkipPoint('反复回到同一区域且未走通，结束本次尝试')
                 if segment_start is None:
@@ -1646,9 +1652,9 @@ class _Follower:
                     remaining = distance(position, target)
                 physically_stalled = bool(self.navigator and self.waypoints is not None
                                            and self.travel_progress.stalled(position))
-                if remaining < best - policy.COORD_STUCK_DISTANCE and not physically_stalled:
+                if remaining < best - policy.COORD_STUCK_DISTANCE and not physically_stalled and not movement_loop:
                     best, progress_at = remaining, now
-                elif physically_stalled or now - progress_at >= policy.COORD_STUCK_SECONDS:
+                elif movement_loop or physically_stalled or now - progress_at >= policy.COORD_STUCK_SECONDS:
                     if self.waypoints is None:
                         raise ValueError('角色未向目标前进，可能遇到障碍，已停止')
                     if getattr(getattr(self.navigator, 'path', None), 'road_mode', None):
@@ -1662,10 +1668,11 @@ class _Follower:
                         # Optional diagnostics must never abort recovery.
                         context = {'state': 'unavailable', 'contact_confirmed': False,
                                    'diagnostic_error': str(exc)}
-                    self.report('recovering', f'点位 {index + 1}/{len(points)} · 检测到移动无进展，已记录现场',
+                    reason = '检测到循环移动' if movement_loop else '检测到移动无进展'
+                    self.report('recovering', f'点位 {index + 1}/{len(points)} · {reason}，已记录现场',
                                 waypoint=index+1, waypoint_count=len(points), position=list(position),
                                 target=list(points[index]['position']), steering_target=list(target),
-                                input_keys=attempted_keys, incident_kind='movement_stall',
+                                input_keys=attempted_keys, incident_kind='movement_loop' if movement_loop else 'movement_stall',
                                 stalled_seconds=max(now-progress_at,
                                     self.travel_progress.elapsed-self.travel_progress.motion_at
                                     if physically_stalled else 0.),
@@ -1676,12 +1683,18 @@ class _Follower:
                         self.approach_attempt(index)
                         self.navigator.blocked(position, target,
                                                attempt_id=(self.cycle,index,self.approach_attempts),
-                                               evidence='movement_stall' if physically_stalled and attempted_keys else 'progress_timeout')
+                                               evidence='movement_loop' if movement_loop else
+                                               'movement_stall' if physically_stalled and attempted_keys else 'progress_timeout')
                     try:
                         improved = False
                         # A small advance followed by another stall (or an
                         # interrupted action) remains the same failed episode.
                         self.fail_recovery(index, len(points))
+                        if retreat and self.recovery_attempts and (movement_loop or self.recovery.failures >= 2):
+                            if retreat(position, basis, index, len(points)):
+                                navigation_leg = anchor = None
+                                best, progress_at = math.inf, self.clock.monotonic()
+                                continue
                         while self.recovery.failures < self.recovery_attempts:
                             if self.recover(target, basis, segment_start, index, len(points)):
                                 improved = True

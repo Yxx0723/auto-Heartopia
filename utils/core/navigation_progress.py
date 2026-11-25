@@ -24,6 +24,8 @@ class NavigationProgress:
             return
         self.tag = tag
         self.visits.clear()
+        self.backtracks = 0
+        self.scene = None
         self.elapsed = self.motion_at = 0.
         self.anchor = (position[0], position[2])
         speed = max(.5, min(10., speed))
@@ -51,6 +53,28 @@ class NavigationProgress:
         # never a new per-point time budget.
         self.anchor = (position[0], position[2])
         self.motion_at = self.elapsed
+
+    def bind_scene(self, scope):
+        if scope != self.scene or scope is None:
+            self.visits.clear()
+            self.scene = scope
+
+    def retreat_points(self, position):
+        if self.scene is None or self.backtracks >= 2:
+            return []
+        points = []
+        for _, sample in reversed(self.visits):
+            previous = points[-1] if points else position
+            gap = math.hypot(sample[0]-previous[0], sample[2]-previous[2])
+            if gap > 3. or abs(sample[1]-previous[1]) > policy.COORD_DIRECTION_SAMPLE_HEIGHT:
+                break
+            if gap > 2 * policy.COORD_REACH_RADIUS:
+                points.append(sample)
+                if len(points) == 2:
+                    break
+        if points:
+            self.backtracks += 1
+        return points
 
     def looping(self, position):
         """Repeated returns with substantial travel, not ordinary slow walking."""

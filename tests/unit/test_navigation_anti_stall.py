@@ -214,3 +214,24 @@ def test_point_budget_skips_unreachable_point_and_continues_to_collect_next(monk
     assert reached == [2]
     assert sum(e['type'] == 'key_down' and e['key'] == 'f' for _, e in game.events) == 1
     assert not game.keys and game.closed
+
+
+def test_backtrack_history_is_reverse_order_bounded_and_scene_scoped():
+    from utils.core.navigation_progress import NavigationProgress
+
+    progress = NavigationProgress()
+    progress.bind(0, (0, 0, 0), (8, 0, 0), 2.)
+    progress.bind_scene('town')
+    for x in range(4):
+        progress.looping((x, 0, 0))
+        progress.account(.5)
+    position = (4, 0, 0)
+    assert progress.retreat_points(position) == [(3, 0, 0), (2, 0, 0)]
+    assert progress.retreat_points(position)
+    assert not progress.retreat_points(position)
+    progress.bind(1, position, (8, 0, 0), 2.)
+    progress.bind_scene('town')
+    progress.looping(position)
+    progress.bind_scene('another-scene')
+    assert not progress.visits
+    assert not progress.retreat_points(position)

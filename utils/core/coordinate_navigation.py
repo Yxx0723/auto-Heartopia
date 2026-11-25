@@ -245,7 +245,7 @@ class ObstacleMap:
         """Soft cost on a complete segment, independent of water and hard exclusions."""
         width = policy.COORD_NAV_PREFERRED_CLEARANCE - policy.COORD_NAV_MINIMUM_CLEARANCE
         deficit = max(0., policy.COORD_NAV_PREFERRED_CLEARANCE - self.solid_clearance(start, end))
-        return math.dist(start, end) * min(1., deficit / width)
+        return 1.5 * math.dist(start, end) * min(1., deficit / width)
 
     def risk_cost(self, start, end):
         return (self.risks.cost(start, end, self.height) if self.risks is not None else 0.) \
@@ -658,7 +658,7 @@ class LocalNavigator:
         self.memory_path = []
         self.memory_aim = None
         self.memory_state = 'learning' if self.path_memory else 'off'
-        if not self.movement_risk_evidence_only or evidence == 'movement_stall':
+        if not self.movement_risk_evidence_only or evidence in ('movement_stall', 'movement_loop'):
             self.risks.record(position,target,attempt_id=attempt_id,mode=mode,
                               geometry=local_geometry(self.obstacles,position))
         self.last_decision = {'kind':'approach_failed', 'risk_revision':self.risks.revision,
