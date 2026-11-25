@@ -11,3 +11,15 @@ def scene_scope(scene):
     except (TypeError,ValueError,OverflowError):
         return None
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def learning_scope(scene):
+    """Share only the verified main map across game processes."""
+    runtime = scene_scope(scene)
+    if runtime is None:
+        return None
+    version = scene.get('traversal_map_version')
+    if scene.get('map_scene_name') == 'startown' and isinstance(version, str) and len(version) == 64:
+        value = json.dumps(['startown', version, scene.get('terrain_revision')])
+        return hashlib.sha256(value.encode()).hexdigest()
+    return runtime

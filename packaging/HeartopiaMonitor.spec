@@ -1,10 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+import subprocess
 
 root = Path(SPECPATH).resolve().parent
+build_id = Path(workpath) / 'heartopia-build.txt'
+try:
+    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+except (OSError, subprocess.CalledProcessError):
+    revision = 'unknown'
+build_id.write_text(revision, encoding='utf-8')
 icon = root / 'packaging/assets/monitor.ico'
 a = Analysis([str(root / 'tools/coordinate_monitor.py')], pathex=[str(root)],
-    binaries=[], datas=[(str(root / 'webui/coordinate-monitor/profile.json'), 'monitor'),
+    binaries=[], datas=[(str(root / 'version.txt'), '.'), (str(build_id), '.'),
+                         (str(root / 'webui/coordinate-monitor/profile.json'), 'monitor'),
                          (str(root / 'webui/coordinate-monitor/road-mask.png'), 'monitor'),
                          (str(root / 'webui/coordinate-monitor/road-mask-calibration.json'), 'monitor'),
                          (str(root / 'data/cooking/cooking_catalog.json'), 'data/cooking'),

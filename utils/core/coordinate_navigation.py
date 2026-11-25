@@ -97,6 +97,7 @@ class ObstacleMap:
                  risks=None, respect_water=True, road_preference=None):
         self.height = position[1]
         self.risks = risks
+        self.historical_failures = ()
         self.road_preference = road_preference if respect_water and scene.get('survey_scene') == 'startown' else None
         self.origin = tuple(position)
         self.search_radius = policy.COORD_NAV_SEARCH_RADIUS if search_radius is None else search_radius
@@ -251,11 +252,25 @@ class ObstacleMap:
         return (self.risks.cost(start, end, self.height) if self.risks is not None else 0.) \
             + self.reference_risks.cost(start, end)
 
+    def historical_cost(self, start, end):
+        if not self.historical_failures:
+            return 0.
+        length = math.dist(start,end)
+        if not length:
+            return 0.
+        dx, dz = (end[0]-start[0])/length, (end[1]-start[1])/length
+        penalty = 0.
+        for entry, target in self.historical_failures:
+            x, z = target[0]-entry[0], target[1]-entry[1]
+            if dx*x+dz*z > .75*math.hypot(x,z):
+                penalty += max(0., 1.-point_segment_distance(entry,start,end))
+        return length * min(2.,penalty)
+
     def travel_cost(self, start, end):
         length = math.dist(start, end)
         road_saving = (ROAD_DISCOUNT * self.road_preference.road_length(start, end, length)
                        if self.road_preference is not None else 0.)
-        return length - road_saving + self.risk_cost(start, end) + self.clearance_cost(start, end)
+        return length - road_saving + self.risk_cost(start, end) + self.clearance_cost(start, end) + self.historical_cost(start, end)
 
 
 class PlannedPath(list):
@@ -398,10 +413,11 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
                    or road.road_length(start, local, direct_length) < direct_length - 1e-8)
                    and road.near_segment(start, local, direct_length))
     prefer_road = direct_safe and road_nearby
+    prefer_history = direct_safe and obstacles.historical_cost(start,local) > 0
     raw = [start, local]
     travel_cost = obstacles.travel_cost
 
-    if not direct_safe or prefer_detour or prefer_road:
+    if not direct_safe or prefer_detour or prefer_road or prefer_history:
         before_search()
         check()
         step = grid_step
@@ -412,7 +428,7 @@ def plan_path(position, target, obstacles, check=lambda: None, *, grid_step=None
         frontier = [(direct_length * heuristic_scale, next(counter), (0, 0), 0.)]
         costs, parents, closed = {(0, 0): 0.}, {}, set()
         best, reached = (0, 0), None
-        reached_cost = travel_cost(start, local) if prefer_road else math.inf
+        reached_cost = travel_cost(start, local) if prefer_road or prefer_history else math.inf
         point_cache, edge_cache = {}, {}
         offsets = [(dx, dz) for dx in (-1, 0, 1) for dz in (-1, 0, 1) if dx or dz]
 

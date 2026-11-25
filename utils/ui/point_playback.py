@@ -17,6 +17,7 @@ from utils.core.special_patrol import validate_patrol
 from utils.core import thresholds as policy
 from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.route_path_memory import RoutePathMemory
+from utils.drivers.route_archive_maintenance import RouteArchiveMaintenance, load_options, write_json
 from utils.drivers.playback_history import PlaybackHistory, RecordingPosition, GuidanceRecordingPosition
 from utils.core.guidance_navigation import GuidanceNavigator
 from utils.core.road_preference import load_road_preference
@@ -87,6 +88,30 @@ class PointPlayback:
         self.special_outcome = None
         self.incomplete_count = 0
         self.patrol_result = None
+        self.archive_config = self.history_root/'archive-settings.json' if self.history_root else None
+        self.archive_options = load_options(self.archive_config or self.profile.parent/'archive-settings.json')
+        self.archive_worker = (RouteArchiveMaintenance(self.history_root, self.archive_options, self.record_log)
+                               if self.history_root is not None else None)
+        if self.archive_worker:
+            self.archive_worker.submit()
+
+    def set_history_use(self, enabled):
+        if self.archive_options['use_history'] == enabled:
+            return
+        self.archive_options['use_history'] = enabled
+        if self.archive_config is not None:
+            try:
+                self.archive_config.parent.mkdir(parents=True, exist_ok=True)
+                write_json(self.archive_config, self.archive_options)
+            except OSError as exc:
+                self.record_log('archive', f'保存历史寻路开关失败：{exc}')
+
+    def _open_history(self, root, route, name, options):
+        if root is None or not self.archive_options['archive']:
+            return None
+        return PlaybackHistory(root, route, name, {**options, **self.archive_options}, learn=self.archive_options['learn'],
+                               consult_history=self.archive_options['use_history'],
+                               on_close=self.archive_worker.submit if self.archive_worker else None)
 
     @property
     def active(self):
@@ -223,7 +248,7 @@ class PointPlayback:
         history_root = self.history_root
         if history_root is not None and data.get('recorded_walk'):
             history_root = history_root / 'recorded'
-        self.history = (PlaybackHistory(history_root, deepcopy(data),
+        self.history = (self._open_history(history_root, deepcopy(data),
                         Path(route_path).stem if route_path is not None else '未命名路线',
                         {'start_mode': start_mode, 'loop_count': loop_count,
                          'auto_navigate': auto_navigate, 'remember_paths': remember_paths,
@@ -267,7 +292,7 @@ class PointPlayback:
         self.special_outcome = self.patrol_result = None
         self.incomplete_count = 0
         self.navigation_path = []
-        self.history = (PlaybackHistory(self.history_root, {'engine': 'native_guidance', 'points': []},
+        self.history = (self._open_history(self.history_root, {'engine': 'native_guidance', 'points': []},
                         '跟随游戏引导', {'manual_start': True, 'no_interaction': True})
                         if self.history_root is not None else None)
         self.update('playback_wait', ('切回游戏按 F6 准备地图并检查首点公交追踪 · F9停止' if bus_target is not None
@@ -668,5 +693,7 @@ class PointPlayback:
         self.stop()
         if self.thread:
             self.thread.join(timeout=policy.COORD_MONITOR_RETRY_SECONDS)
+        if self.archive_worker:
+            self.archive_worker.close()
         if self.diagnostics:
             self.diagnostics.close()

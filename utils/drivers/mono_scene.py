@@ -1555,6 +1555,7 @@ class MemorySceneMap:
                 'terrain_state': 'ready' if terrain else 'unavailable',
                 'navigation_reference': getattr(self, 'navigation_reference', None) if terrain else None,
                 'terrain_revision': 'main-terrain-v1' if terrain else None,
+                'traversal_map_version': self.memory.profile.get('game_assembly_sha256') if terrain else None,
                 'schema': 'memory-scene-map-v1', 'state': 'ready', 'read_only': True,
                 'scope': 'loaded-scene-partial', 'objects': objects, 'colliders': colliders, 'models': models,
                 'position': current['position'], 'barrier_state': barrier_state, 'world_state': world_state,

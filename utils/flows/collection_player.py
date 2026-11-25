@@ -4,7 +4,7 @@ import math
 from utils.core import thresholds as policy
 from utils.core.coordinate_route import distance, direction_keys, key_vector
 from utils.core.coordinate_navigation import NavigationWait
-from utils.core.traversal_evidence import scene_scope
+from utils.core.traversal_evidence import learning_scope, scene_scope
 from utils.drivers.guidance_input_lease import GuidanceInputLease
 from utils.flows.coordinate_player import _Follower, _MovementRetry
 
@@ -113,20 +113,32 @@ class CollectionFollower(_Follower):
         deadline = self.clock.monotonic() + 2 * policy.COORD_RECOVERY_LEG_SECONDS
         entry = position
         escaped = False
+        pulse = None
+        evidence = []
+        record = getattr(self.reader, 'record_motion', None)
         try:
             for target in points:
                 while self.clock.monotonic() < deadline:
-                    self.release('backtrack_recheck')
                     current = self.read(force=True)
+                    self.release('backtrack_recheck')
                     with self.navigator._path_escape_map(current, target, self.guard, self.planning_release) as obstacles:
                         if scene_scope(self.navigator.scene) != scope or abs(current[1]-target[1]) > policy.COORD_DIRECTION_SAMPLE_HEIGHT:
                             return escaped
+                        if pulse is not None:
+                            start, at = pulse
+                            if self.navigator.motion_clear(start, current):
+                                evidence.append((start, current, self.position_at-at))
+                            pulse = None
                         if distance(current, target) <= policy.COORD_REACH_RADIUS:
                             if distance(current, entry) > policy.COORD_REACH_RADIUS:
                                 self.navigator.risks.record(current, entry, entrance=True,
                                     attempt_id=('backtrack', self.travel_progress.tag,
                                                 self.travel_progress.backtracks, target))
                                 escaped = True
+                                if callable(record):
+                                    for start, end, seconds in evidence:
+                                        record(start, end, seconds, learning_scope(self.navigator.scene), recovery=True)
+                            evidence.clear()
                             entry = current
                             break
                         if not obstacles.covers_search(current, distance(current, target)+1.) \
@@ -144,6 +156,7 @@ class CollectionFollower(_Follower):
                     if self.clock.monotonic() >= deadline:
                         return escaped
                     self.apply_movement(keys, current, target)
+                    pulse = current, self.position_at
                     self.wait_movement(self.clock.monotonic(), distance(current,target), False)
                 else:
                     return escaped

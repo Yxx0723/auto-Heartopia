@@ -628,6 +628,13 @@ class CoordinateWindow:
             activeforeground=COLORS['text'], selectcolor=COLORS['button'],
             font=theme.font(12), bd=0, highlightthickness=0)
         self.navigation_check.pack(side='left', padx=(0, 12))
+        self.history_navigation_var = tk.BooleanVar(self.root, value=self.playback.archive_options['use_history'])
+        self.history_navigation_check = tk.Checkbutton(navigationbar, text='寻路参考历史经验',
+            variable=self.history_navigation_var,
+            command=lambda: self.playback.set_history_use(self.history_navigation_var.get()),
+            bg=COLORS['bg'], fg=COLORS['text'], selectcolor=COLORS['button'],
+            activebackground=COLORS['bg'], activeforeground=COLORS['text'], font=theme.font(12), bd=0)
+        self.history_navigation_check.pack(side='left', padx=(0, 12))
         if SHOW_PATH_MEMORY_CONTROLS:
             self.path_memory_var = tk.BooleanVar(self.root, value=self.load_path_memory_option())
             self.path_memory_check = tk.Checkbutton(waitbar, text='使用路线记忆', variable=self.path_memory_var,

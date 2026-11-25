@@ -23,7 +23,7 @@ from utils.core.coordinate_route import (build_waypoints, direction_keys, distan
                                          key_vector, make_basis, rotate_basis, valid_position,
                                          validate_coordinate_route)
 from utils.drivers.coordinate_memory import ReadOnlyPosition
-from utils.core.traversal_evidence import scene_scope
+from utils.core.traversal_evidence import learning_scope, scene_scope
 from utils.drivers.timeline_hotkeys import PlaybackControls
 from utils.drivers.town_window import TimelineInput, TownWindow
 from utils.drivers.windows_input import PreciseClock
@@ -216,6 +216,8 @@ class _Follower:
                 'count': self.scene_wait_count, 'total_seconds': self.scene_wait_total,
                 'longest_seconds': self.scene_wait_longest}
         extra.setdefault('traversal_scope', scene_scope(getattr(self.navigator, 'scene', None)))
+        if extra.get('incident_kind') == 'movement_stall':
+            extra['learning_scope'] = learning_scope(getattr(self.navigator, 'scene', None))
         extra.setdefault('traversal_mode', 'walk' if self.clock.monotonic() >= self.direction_unsafe_until else 'unknown')
         extra.setdefault('direction_source', self.direction_source)
         if 'position' not in extra and valid_position(self.position):
@@ -307,7 +309,7 @@ class _Follower:
         self._memory_anchor = tuple(position), now, scope, frozenset(self.keys)
         if old is not None and old[2:] == self._memory_anchor[2:] \
                 and self.navigator.motion_clear(old[0], position):
-            record(old[0], tuple(position), now-old[1], scope)
+            record(old[0], tuple(position), now-old[1], learning_scope(current))
 
     def set_keys(self, keys):
         if set(keys) != self.keys:
@@ -1751,6 +1753,8 @@ class _Follower:
                                     self.travel_progress.elapsed-self.travel_progress.motion_at
                                     if physically_stalled else 0.),
                                 physical_stall=physically_stalled,
+                                position_source='last_successful_read',
+                                position_age_seconds=max(0., now-self.position_at),
                                 point_drive_seconds=self.travel_progress.elapsed,
                                 collision_context=context)
                     if self.navigator:

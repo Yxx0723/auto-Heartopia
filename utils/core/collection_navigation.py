@@ -1,7 +1,7 @@
 """Saved destinations over the proven local controller, without game guidance."""
 import time
 from utils.core.guidance_navigation import GuidanceNavigator, NavigationWait
-from utils.core.traversal_evidence import scene_scope
+from utils.core.traversal_evidence import learning_scope, scene_scope
 from utils.core.coordinate_route import distance
 from utils.core.collection_schedule import MEMORY_REJOIN_SECONDS, FAILED_ENTRY_SECONDS
 from utils.core.coordinate_navigation import point_segment_distance
@@ -35,6 +35,16 @@ class CollectionNavigator(GuidanceNavigator):
         self.partial_aim=None
         self._shortcut_guard=lambda:None
         super().__init__(*args,respect_water=True,**kwargs)
+
+    def _build_map(self, scene, position, target, radius):
+        obstacles = super()._build_map(scene, position, target, radius)
+        library = getattr(self, 'traversal_memory', None)
+        failures = getattr(library, 'historical_failures', None)
+        if callable(failures) and navigation_quality_valid(scene, self.scene_clock()):
+            observed = failures(position, learning_scope(scene), radius)
+            if isinstance(observed, tuple):
+                obstacles.historical_failures = observed
+        return obstacles
 
     def blocked(self,position,target,**kwargs):
         self.partial_aim=None
@@ -258,8 +268,10 @@ class CollectionNavigator(GuidanceNavigator):
             if self.memory_state=='reusing':
                 return self._compare_memory(position,target,key,planned,check,before_plan)
         self._refresh_obstacles(position,target)
+        if not navigation_quality_valid(self.scene, self.scene_clock()):
+            return planned if planned is not None else super().next_target(position,target,check,before_plan)
         direction=[b-a for a,b in zip(position,target)]
-        candidates=library.candidates(position,scene_scope(self.scene),direction)
+        candidates=library.candidates(position,learning_scope(self.scene),direction)
         choices=[]
         for row in candidates:
             check()
@@ -271,7 +283,7 @@ class CollectionNavigator(GuidanceNavigator):
             p=(position[0],position[2]);q=(aim[0],aim[2])
             if not self.obstacles.clear(p,q,escape=True) or self.obstacles.risk_cost(p,q)>0:
                 continue
-            choices.append((distance(b,target)+entry+10*row.get('failures',0),aim))
+            choices.append((distance(b,target)+entry+10*row.get('failures',0)-.15*min(5,row.get('confidence',1)),aim))
         if choices:
             aim=min(choices,key=lambda v:v[0])[1]
             # Join only exactly contiguous observed edges. Short sampling edges

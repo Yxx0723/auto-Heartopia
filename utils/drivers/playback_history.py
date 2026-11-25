@@ -7,6 +7,7 @@ import math
 import os
 from pathlib import Path
 import threading
+import sys
 from uuid import uuid4
 from utils.drivers.traversal_memory import TraversalMemory
 
@@ -14,7 +15,7 @@ from utils.core.coordinate_route import valid_position
 
 
 class PlaybackHistory:
-    def __init__(self, root, route, name, options, wall_clock=None):
+    def __init__(self, root, route, name, options, wall_clock=None, *, learn=True, consult_history=True, on_close=None):
         self.wall_clock = wall_clock or (lambda: datetime.now().astimezone())
         self.lock = threading.RLock()
         self.streams = []
@@ -34,10 +35,23 @@ class PlaybackHistory:
         safe_name = re.sub(r'[^\w .-]', '_', str(name))[:40].strip(' .') or '未命名路线'
         self.path = Path(root)/(safe_name+'-'+self.run_id)
         self.memory = None
+        self.consult_history, self.on_close = consult_history, on_close
+        self.learn = learn
+        self.motion = None
+        try:
+            base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[2]))
+            version = (base/'version.txt').read_text(encoding='utf-8-sig').strip()
+        except OSError:
+            version = 'unknown'
+        try:
+            build = (base/'heartopia-build.txt').read_text(encoding='utf-8').strip()
+        except OSError:
+            build = None
         self.summary = {'schema': 'playback-history-v1', 'route_name': name,
                         'created_at': now.isoformat(timespec='milliseconds'),
                         'started_at': None, 'ended_at': None, 'state': 'waiting',
-                        'options': options, 'sample_count': 0, 'distance_xz': 0.,
+                        'options': options, 'program_version': version, 'program_commit': build,
+                        'sample_count': 0, 'verified_motion_count': 0, 'distance_xz': 0.,
                         'reached_count': 0, 'cycle_finished_count': 0,
                         'detail_schema': 'playback-evidence-v1', 'planned_path_count': 0,
                         'incident_count': 0, 'movement_stall_count': 0}
@@ -49,7 +63,8 @@ class PlaybackHistory:
             namespace=isolation_id(route)
             memory_root=Path(root)/'隔离记忆'/namespace if namespace else Path(root)
             memory_root.mkdir(parents=True,exist_ok=True)
-            self.memory = TraversalMemory(memory_root/'寻路记忆库.sqlite3', self.run_id)
+            if learn or consult_history:
+                self.memory = TraversalMemory(memory_root/'寻路记忆库.sqlite3', self.run_id)
             self._json('route.json', route)
             self.route_digest = hashlib.sha256((self.path/'route.json').read_bytes()).hexdigest()
             self.events = (self.path/'events.jsonl').open('a', encoding='utf-8')
@@ -60,6 +75,8 @@ class PlaybackHistory:
                 stream = (self.path/(name+'.jsonl')).open('a', encoding='utf-8')
                 setattr(self, name, stream)
                 self.streams.append(stream)
+            self.motion = (self.path/'motion.jsonl').open('a', encoding='utf-8')
+            self.streams.append(self.motion)
             self._json('summary.json', self.summary)
             self._learning_index()
         except (OSError, ValueError, TypeError) as exc:
@@ -85,7 +102,7 @@ class PlaybackHistory:
                 'memory_error': self.memory.error if self.memory else None,
                 'files': {'route_snapshot': 'route.json', 'actual_trajectory': 'trajectory.jsonl',
                           'planned_paths': 'plans.jsonl', 'collision_candidates': 'incidents.jsonl',
-                          'events': 'events.jsonl', 'summary': 'summary.json'},
+                          'events': 'events.jsonl', 'summary': 'summary.json', 'verified_motion': 'motion.jsonl'},
                 'statistics': {key: self.summary.get(key, 0) for key in
                                ('sample_count', 'distance_xz', 'reached_count', 'skipped_count',
                                 'planned_path_count', 'incident_count', 'movement_stall_count')}}
@@ -133,7 +150,7 @@ class PlaybackHistory:
                 if previous_state != state or self.summary_at is None or now.timestamp()-self.summary_at >= 1:
                     self._json('summary.json', self.summary)
                     self.summary_at = now.timestamp()
-                    if self.memory is not None:
+                    if self.memory is not None and self.learn:
                         self.memory.flush(self.path, state)
                         if self.memory.error:
                             self.archive_error = '寻路记忆库：'+self.memory.error
@@ -182,15 +199,24 @@ class PlaybackHistory:
                'contact_confirmed': False}
         self.incidents.write(json.dumps(row, ensure_ascii=False, allow_nan=False)+'\n')
         self.incidents.flush()
-        if self.memory is not None:
+        if self.memory is not None and self.learn:
             self.memory.failed(row)
         self.summary['incident_count'] += 1
         if kind == 'movement_stall':
             self.summary['movement_stall_count'] += 1
 
-    def record_motion(self, start, end, seconds, scope, mode='walk'):
-        if not self.closed and self.memory is not None:
-            self.memory.observe(start, end, seconds, scope, mode)
+    def record_motion(self, start, end, seconds, scope, mode='walk', *, recovery=False):
+        with self.lock:
+            if self.closed or self.error or self.memory is None or not self.learn:
+                return
+            row = self.memory.observe(start, end, seconds, scope, mode, recovery=recovery)
+            if row is not None:
+                try:
+                    self.motion.write(json.dumps(row, ensure_ascii=False, allow_nan=False)+'\n')
+                    self.summary['verified_motion_count'] += 1
+                except (OSError, ValueError) as exc:
+                    self.error = str(exc)
+
 
     def sample(self, position, monotonic):
         with self.lock:
@@ -208,6 +234,7 @@ class PlaybackHistory:
                 self.trajectory.write(json.dumps(entry, ensure_ascii=False, allow_nan=False)+'\n')
                 if self.last_flush is None or monotonic-self.last_flush >= 1:
                     self.trajectory.flush()
+                    self.motion.flush()
                     self.last_flush = monotonic
                 if self.previous is not None:
                     self.summary['distance_xz'] += math.hypot(position[0]-self.previous[0], position[2]-self.previous[2])
@@ -238,7 +265,8 @@ class PlaybackHistory:
                 self.error = str(exc)
             finally:
                 if self.memory is not None:
-                    self.memory.flush(self.path, self.summary['state'], force=True)
+                    if self.learn:
+                        self.memory.flush(self.path, self.summary['state'], force=True)
                     self.memory.close()
                 for stream in self.streams:
                     try:
@@ -246,6 +274,8 @@ class PlaybackHistory:
                     except OSError as exc:
                         self.error = str(exc)
                 self.closed = True
+                if self.on_close is not None:
+                    self.on_close(self.path)
 
 
 class RecordingPosition:
@@ -266,10 +296,10 @@ class RecordingPosition:
 
     @property
     def traversal_memory(self):
-        return self.history.memory
+        return self.history.memory if self.history.consult_history else None
 
-    def record_motion(self, *args):
-        self.history.record_motion(*args)
+    def record_motion(self, *args, **kwargs):
+        self.history.record_motion(*args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self.reader, name)
