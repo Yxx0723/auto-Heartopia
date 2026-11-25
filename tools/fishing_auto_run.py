@@ -19,6 +19,12 @@ import win32process
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 
+# The T panel needs a rendered frame before its icons can be clicked, and one
+# more before it is gone again. Both values match the existing tool-panel
+# helpers in utils/vision/repair_box.py so the fishing flow behaves the same.
+TOOL_PANEL_TAP_SECONDS = .1
+TOOL_PANEL_RENDER_SECONDS = .4
+
 from utils.core import thresholds as policy
 from utils.core.fishing_log import fishing_event, format_fishing_event
 from utils.core.fishing_policy import FishTarget, TensionControl, confirmed_catch
@@ -92,6 +98,9 @@ class FishingRunner:
         self.aim_evidence = None
         self.landing_evidence = None
         self.archive = None
+        # True while this runner has the T panel open for the user. Only opened
+        # once per binding attempt so a wrong keypress can never repeat.
+        self.tool_panel_open = False
 
     @property
     def casts(self):
@@ -121,7 +130,7 @@ class FishingRunner:
             if self.identity()!=entity or players()!=found or meta.ref(lpc,'_interactTool')!=rod:
                 raise BindingError('TOOL_REFERENCE_INVALID','手持工具引用正在变化')
             status = 'OTHER_TOOL' if tool else 'NO_TOOL'
-            raise BindingError(status,f'当前工具：{tool or "未装备"}。请手动拿出鱼竿，程序会继续等待')
+            raise BindingError(status,f'当前工具：{tool or "未装备"}')
         binding = player_fishing_status(meta,lpc,self.verified_images)
         float_component = meta.ref(rod,'floatComponent')
         if not float_component:
@@ -138,6 +147,46 @@ class FishingRunner:
         self.float_component,self.float_info,self.player_binding = float_component,float_info,binding
         self.identity_at = time.monotonic()
         return observed
+
+    def tap_key(self, key):
+        """Press and release one key through the same device used for playback."""
+        self.input.guard()
+        try:
+            self.device.execute({'type': 'key_down', 'key': key})
+            time.sleep(TOOL_PANEL_TAP_SECONDS)
+        finally:
+            self.device.execute({'type': 'key_up', 'key': key})
+
+    def open_tool_panel(self, status):
+        """Open the T panel and leave the rod for the user to pick.
+
+        There is no verified icon template for the fishing rod, so nothing is
+        clicked here. The runner only removes the need to find the panel; an
+        unverified coordinate can never select the wrong tool. Once the memory
+        binding reports the rod, the panel is closed again automatically.
+        """
+        if self.tool_panel_open:
+            return
+        self.tool_panel_open = True
+        try:
+            self.tap_key('t')
+        except OSError:
+            self.tool_panel_open = False
+            return
+        time.sleep(TOOL_PANEL_RENDER_SECONDS)
+        self.log('tool_panel', '当前未持鱼竿，已打开工具面板，请点击鱼竿，程序确认后自动开始',
+                 binding_status=status)
+
+    def close_tool_panel(self):
+        """Put the T panel away again so casting never lands on its buttons."""
+        if not self.tool_panel_open:
+            return
+        self.tool_panel_open = False
+        try:
+            self.tap_key('t')
+        except OSError:
+            return
+        time.sleep(TOOL_PANEL_RENDER_SECONDS)
 
     def await_binding(self, *, recovery=False):
         deadline = time.monotonic() + (policy.FISHING_REBIND_LIMIT if recovery else policy.FISHING_START_BIND_LIMIT)
@@ -156,15 +205,29 @@ class FishingRunner:
                 if issue != last_issue:
                     self.log('binding_wait',issue,attempt=attempt,error_type=type(exc).__name__,binding_status=status)
                     last_issue = issue
+                if status in ('NO_TOOL','OTHER_TOOL') and not recovery:
+                    # Waiting on its own never produced a rod. Open the panel so
+                    # only one click is left; recovery stays hands-off because a
+                    # tool switched mid-session is the user's own doing.
+                    self.open_tool_panel(status)
                 if recovery and attempt >= policy.FISHING_MAX_READ_FAILURES:
                     break
                 time.sleep(min(policy.FISHING_BIND_POLL, max(0.,deadline-time.monotonic())))
             else:
                 self.input.guard()
+                if self.tool_panel_open:
+                    # The panel covers part of the screen; close it and confirm
+                    # the rod survived before any casting click is sent.
+                    self.close_tool_panel()
+                    try:
+                        observed = self.bind_rod()
+                    except (OSError,ValueError,KeyError,StopIteration,struct.error):
+                        continue
                 if time.monotonic() >= deadline:
                     break
                 self.log('bound','已确认鱼竿和浮标',attempt=attempt,binding_status='READY_ROD',state=observed[0],player_stage=observed[2]['stage'])
                 return observed
+        self.close_tool_panel()
         raise InterruptedError(f'鱼竿及浮标绑定超时（{attempt} 次）：{last_issue or "读取超过时限"}')
 
     @staticmethod

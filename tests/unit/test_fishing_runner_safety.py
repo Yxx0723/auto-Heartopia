@@ -54,6 +54,7 @@ def mock_runner():
     runner.aim_poll_at = 0.
     runner.cycle_seconds = 0.
     runner.cycle_count = 0
+    runner.tool_panel_open = False
     return runner
 
 
@@ -210,3 +211,73 @@ def test_start_binding_retries_when_float_reference_is_delayed():
     assert runner.await_binding()[0]==2
     assert runner.bind_rod.call_count==2
     runner.input.press.assert_not_called()
+
+
+def pressed_keys(runner):
+    """Keys sent as presses, in order; releases are ignored."""
+    return [call.args[0]['key'] for call in runner.device.execute.call_args_list
+            if call.args[0].get('type') == 'key_down']
+
+
+def test_start_binding_opens_the_tool_panel_when_no_tool_is_held(monkeypatch):
+    monkeypatch.setattr(live, 'TOOL_PANEL_RENDER_SECONDS', 0.)
+    monkeypatch.setattr(live.policy, 'FISHING_BIND_POLL', 0.)
+    runner = mock_runner()
+    no_tool = live.BindingError('NO_TOOL', '当前工具：未装备')
+    misses = {'left': 2}
+
+    def bind():
+        if misses['left']:
+            misses['left'] -= 1
+            raise no_tool
+        return (2, False, {'stage': 1})
+
+    runner.bind_rod = Mock(side_effect=bind)
+    assert runner.await_binding()[0] == 2
+    # Opened once and put away again before any cast click is authorized.
+    assert pressed_keys(runner) == ['t', 't']
+    assert runner.tool_panel_open is False
+
+
+def test_tool_panel_is_not_opened_twice_while_the_user_picks_a_rod(monkeypatch):
+    monkeypatch.setattr(live, 'TOOL_PANEL_RENDER_SECONDS', 0.)
+    monkeypatch.setattr(live.policy, 'FISHING_BIND_POLL', 0.)
+    runner = mock_runner()
+    no_tool = live.BindingError('NO_TOOL', '当前工具：未装备')
+    misses = {'left': 5}
+
+    def bind():
+        if misses['left']:
+            misses['left'] -= 1
+            raise no_tool
+        return (2, False, {'stage': 1})
+
+    runner.bind_rod = Mock(side_effect=bind)
+    assert runner.await_binding()[0] == 2
+    # Five misses still press T only twice: open, then close.
+    assert pressed_keys(runner) == ['t', 't']
+
+
+def test_recovery_never_opens_the_tool_panel(monkeypatch):
+    monkeypatch.setattr(live, 'TOOL_PANEL_RENDER_SECONDS', 0.)
+    monkeypatch.setattr(live.policy, 'FISHING_BIND_POLL', 0.)
+    runner = mock_runner()
+    runner.bind_rod = Mock(side_effect=live.BindingError('NO_TOOL', '当前工具：未装备'))
+    with pytest.raises(InterruptedError, match='工具已切换'):
+        runner.await_binding(recovery=True)
+    # A tool changed mid-session belongs to the user; the runner stays hands-off.
+    assert pressed_keys(runner) == []
+
+
+def test_binding_timeout_closes_the_panel_it_opened(monkeypatch):
+    monkeypatch.setattr(live, 'TOOL_PANEL_RENDER_SECONDS', 0.)
+    monkeypatch.setattr(live.policy, 'FISHING_START_BIND_LIMIT', .05)
+    monkeypatch.setattr(live.policy, 'FISHING_BIND_POLL', .01)
+    runner = mock_runner()
+    runner.bind_rod = Mock(side_effect=live.BindingError('NO_TOOL', '当前工具：未装备'))
+    with pytest.raises(InterruptedError, match='绑定超时'):
+        runner.await_binding()
+    assert runner.tool_panel_open is False
+    # The panel must not be left covering the screen after a failed start.
+    assert pressed_keys(runner) == ['t', 't']
+
