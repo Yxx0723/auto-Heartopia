@@ -44,6 +44,12 @@ def find_game():
     return games[0]
 
 
+class BindingError(ValueError):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
 class FishingRunner:
     def __init__(self, duration=None, out_dir=None, verbose=True, *, profile=None,
                  hwnd=None, stop_requested=None, on_event=None, catch_target=None):
@@ -67,11 +73,6 @@ class FishingRunner:
         self.verified_images = set()
         self.inventory_reader = None
         self.scene = MemorySceneMap(self.pid,self.profile)
-        try:
-            self.bind_rod()
-        except BaseException:
-            self.scene.close()
-            raise
         self.input = FishingInput(self.device,self.check_input)
         self.phase = 'idle'
         self.started = self.phase_at = time.monotonic()
@@ -104,30 +105,75 @@ class FishingRunner:
         return entity
 
     def bind_rod(self):
-        self.meta = meta = self.scene.meta
-        self.entity = self.identity()
-        components = meta.dictionary(meta.ref(self.entity,'_components'),max_items=128)
-        players = [p for p in components if meta.obj(p)['name']=='LocalPlayerComponent']
-        if len(players)!=1:
-            raise ValueError('玩家对象未确认')
-        self.lpc = players[0]
-        self.player_binding = player_fishing_status(meta,self.lpc,self.verified_images)
-        self.rod = meta.ref(self.lpc,'_interactTool')
-        if not self.rod or meta.obj(self.rod)['name']!='HandHoldFishingRod':
-            raise ValueError('当前手持工具不是鱼竿，请先拿出鱼竿')
-        self.rod_info = meta.obj(self.rod)
-        self.float_component = meta.ref(self.rod,'floatComponent')
-        if not self.float_component:
-            raise ValueError('鱼竿的浮标引用尚未就绪')
-        self.float_info = meta.obj(self.float_component)
+        meta = self.scene.meta
+        entity = self.identity()
+        def players():
+            return [p for p in meta.dictionary(meta.ref(entity,'_components'),max_items=128)
+                    if meta.obj(p)['name']=='LocalPlayerComponent']
+        found = players()
+        if len(found)!=1:
+            raise BindingError('PLAYER_UNAVAILABLE','玩家对象未确认')
+        lpc = found[0]
+        rod = meta.ref(lpc,'_interactTool')
+        rod_info = meta.obj(rod) if rod else None
+        tool = rod_info['name'] if rod_info else None
+        if tool!='HandHoldFishingRod':
+            if self.identity()!=entity or players()!=found or meta.ref(lpc,'_interactTool')!=rod:
+                raise BindingError('TOOL_REFERENCE_INVALID','手持工具引用正在变化')
+            status = 'OTHER_TOOL' if tool else 'NO_TOOL'
+            raise BindingError(status,f'当前工具：{tool or "未装备"}。请手动拿出鱼竿，程序会继续等待')
+        binding = player_fishing_status(meta,lpc,self.verified_images)
+        float_component = meta.ref(rod,'floatComponent')
+        if not float_component:
+            raise BindingError('FLOAT_INITIALIZING','等待浮标初始化')
+        float_info = meta.obj(float_component)
+        if float_info['name']!='FloatComponent':
+            raise BindingError('TOOL_REFERENCE_INVALID','鱼竿浮标类型不符')
+        observed = self.read_binding_state(meta,rod,rod_info,float_component,float_info,binding)
+        if self.identity()!=entity or players()!=found or meta.ref(lpc,'_interactTool')!=rod \
+                or meta.ref(rod,'floatComponent')!=float_component or meta.ref(lpc,'Status')!=binding[0]:
+            raise BindingError('TOOL_REFERENCE_INVALID','读取期间钓鱼对象归属变化')
+        self.meta,self.entity,self.lpc = meta,entity,lpc
+        self.rod,self.rod_info = rod,rod_info
+        self.float_component,self.float_info,self.player_binding = float_component,float_info,binding
         self.identity_at = time.monotonic()
+        return observed
 
-    def read_field(self, pointer, info, name, fmt):
+    def await_binding(self, *, recovery=False):
+        deadline = time.monotonic() + (policy.FISHING_REBIND_LIMIT if recovery else policy.FISHING_START_BIND_LIMIT)
+        last_issue = None
+        attempt = 0
+        while time.monotonic() < deadline:
+            self.input.guard()
+            attempt += 1
+            try:
+                observed = self.bind_rod()
+            except (OSError,ValueError,KeyError,StopIteration,struct.error) as exc:
+                issue = str(exc)
+                status = getattr(exc,'status','STATE_UNCONFIRMED')
+                if recovery and status in ('NO_TOOL','OTHER_TOOL') and attempt >= 2 and issue == last_issue:
+                    raise InterruptedError(f'工具已切换：{issue}') from exc
+                if issue != last_issue:
+                    self.log('binding_wait',issue,attempt=attempt,error_type=type(exc).__name__,binding_status=status)
+                    last_issue = issue
+                if recovery and attempt >= policy.FISHING_MAX_READ_FAILURES:
+                    break
+                time.sleep(min(policy.FISHING_BIND_POLL, max(0.,deadline-time.monotonic())))
+            else:
+                self.input.guard()
+                if time.monotonic() >= deadline:
+                    break
+                self.log('bound','已确认鱼竿和浮标',attempt=attempt,binding_status='READY_ROD',state=observed[0],player_stage=observed[2]['stage'])
+                return observed
+        raise InterruptedError(f'鱼竿及浮标绑定超时（{attempt} 次）：{last_issue or "读取超过时限"}')
+
+    @staticmethod
+    def read_field(meta, pointer, info, name, fmt):
         offset = info['fields'][name]['offset']
         size = struct.calcsize(fmt)
         if not 16 <= offset <= info['size']-size:
             raise ValueError(f'钓鱼字段范围无效：{name}')
-        return struct.unpack(fmt,self.meta.data(pointer+offset,size))[0]
+        return struct.unpack(fmt,meta.data(pointer+offset,size))[0]
 
     def state(self):
         if time.monotonic()-self.identity_at >= .5:
@@ -137,13 +183,15 @@ class FishingRunner:
         if self.meta.ref(self.lpc,'_interactTool')!=self.rod or \
                 self.meta.ref(self.rod,'floatComponent')!=self.float_component:
             raise ValueError('鱼竿或浮标引用已变化')
-        state = self.read_field(self.float_component,self.float_info,'<State>k__BackingField','<i')
-        ready = self.read_field(self.rod,self.rod_info,'CanThrow','<B')
-        if ready not in (0,1):
-            raise ValueError('抛竿状态未确认')
-        player = read_player_fishing(self.meta,self.player_binding)
-        if player['stage'] not in range(6):
-            raise ValueError('玩家钓鱼阶段未确认')
+        return self.read_binding_state(self.meta,self.rod,self.rod_info,self.float_component,
+                                       self.float_info,self.player_binding)
+
+    def read_binding_state(self,meta,rod,rod_info,float_component,float_info,binding):
+        state = self.read_field(meta,float_component,float_info,'<State>k__BackingField','<i')
+        ready = self.read_field(meta,rod,rod_info,'CanThrow','<B')
+        player = read_player_fishing(meta,binding)
+        if ready not in (0,1) or state not in range(7) or player['stage'] not in range(6):
+            raise BindingError('STATE_UNCONFIRMED','浮标、抛竿标志或玩家阶段未确认')
         return state,bool(ready),player
 
     def check_input(self):
@@ -202,7 +250,8 @@ class FishingRunner:
 
     def recover(self,event,reason,phase='idle'):
         self.input.release()
-        self.close_cycle()
+        if event != 'reference_retry':
+            self.close_cycle()
         self.failures[event] += 1
         self.consecutive_failures += 1
         self.stats['recoveries'] += 1
@@ -277,16 +326,15 @@ class FishingRunner:
             state,can_throw,player = self.state()
             battle = player['stage']==2
             idle = state==0 and player['stage']==0
-        except (OSError,ValueError,KeyError,StopIteration) as exc:
+        except (OSError,ValueError,KeyError,StopIteration,struct.error) as exc:
             self.input.release()
-            self.read_failures += 1
-            if self.read_failures>=policy.FISHING_MAX_READ_FAILURES:
-                raise InterruptedError(f'连续无法读取鱼竿或浮标状态：{exc}') from exc
-            self.recover('reference_retry',f'游戏状态读失败，尝试重新绑定：{exc}')
-            try:
-                self.bind_rod()
-            except (OSError,ValueError,KeyError,StopIteration):
-                pass
+            previous = self.phase
+            if previous == 'aiming':
+                self.begin_cast()
+                self.log('cast','松开瞄准键后等待实际浮标反馈')
+            self.recover('reference_retry',f'已释放按键，重新定位玩家和工具：{exc}',
+                         'waiting' if previous=='aiming' else previous)
+            self.await_binding(recovery=True)
             return
         self.read_failures = 0
         now = time.monotonic()
@@ -444,7 +492,9 @@ class FishingRunner:
         self.enter('idle')
         outcome = 'finished'
         try:
-            self.log('init','自动钓鱼启动，钓获按当前咬钩鱼种的背包增量确认')
+            self.log('init','正在获取玩家、鱼竿和浮标')
+            self.await_binding()
+            self.enter('idle')
             while (self.duration is None or time.monotonic()-self.started<self.duration) and \
                     (self.catch_target is None or self.stats['catches']<self.catch_target):
                 self.tick()

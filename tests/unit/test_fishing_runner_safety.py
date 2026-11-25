@@ -100,9 +100,9 @@ def test_existing_bite_does_not_retrieve_or_press_without_tension():
 def test_rebind_does_not_generate_input_until_state_is_resolved():
     runner = mock_runner()
     runner.state = Mock(side_effect=ValueError('引用变化'))
-    runner.bind_rod = Mock()
+    runner.await_binding = Mock()
     runner.tick()
-    runner.bind_rod.assert_called_once()
+    runner.await_binding.assert_called_once_with(recovery=True)
     runner.input.press.assert_not_called()
 
 
@@ -201,3 +201,12 @@ def test_visual_success_animation_never_starts_reeling():
     runner.tick()
     runner.input.press.assert_not_called()
     assert runner.stats['bites']==0
+
+
+def test_start_binding_retries_when_float_reference_is_delayed():
+    runner = mock_runner()
+    runner.bind_rod = Mock(side_effect=[ValueError('浮标引用尚未就绪'),(2,False,{'stage':1})])
+    runner.state = Mock(return_value=(2,False,{'stage':1}))
+    assert runner.await_binding()[0]==2
+    assert runner.bind_rod.call_count==2
+    runner.input.press.assert_not_called()
