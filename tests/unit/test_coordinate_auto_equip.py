@@ -111,7 +111,7 @@ def test_f9_during_selection_stops_and_releases_all_keys():
 @pytest.mark.parametrize('fault', ['unknown_icon', 'no_effect', 'unknown_state', 'locked'])
 def test_selection_failure_never_moves_or_spams_clicks(fault):
     game = RepairGame(current=890)
-    game.held, game.stop_at = False, 5.
+    game.held, game.stop_at = False, 16.
     selector = Selector(game, success=fault != 'no_effect')
     if fault == 'unknown_icon':
         selector.prepare = Mock(side_effect=ValueError('icon missing'))
@@ -120,7 +120,7 @@ def test_selection_failure_never_moves_or_spams_clicks(fault):
     elif fault == 'locked':
         game.tools_snapshot = lambda: {'state': 'locked', 'name': '斧镐'}
     result, selector, statuses = run(game, selector)
-    assert not result and selector.clicks == (1 if fault == 'no_effect' else 0)
+    assert not result and selector.clicks == (3 if fault == 'no_effect' else 0)
     assert not [e for _, e in game.events if e['type'] == 'key_down']
     assert any(state == 'equip_paused' for _, state, _, _ in statuses)
 
@@ -143,3 +143,73 @@ def test_tool_put_away_after_collection_is_reequipped_without_recollecting_or_sk
     result, selector, _ = run(game, count=2, collect_wait=2.)
     assert result and selector.clicks == 2 and game.held
     assert [e['key'] for _, e in game.events if e['type'] == 'key_down'].count('f') == 2
+
+
+def test_failed_first_selection_reopens_panel_and_rechecks_before_retry():
+    game = RepairGame(current=890)
+    game.held = False
+    selector = Selector(game, success=False)
+    use = selector.use
+    resets = []
+    game.reset_tool_reader = lambda: resets.append(game.time)
+
+    def second_succeeds(*args):
+        selector.success = selector.clicks == 1
+        return use(*args)
+
+    selector.use = second_succeeds
+    result, _, statuses = run(game, selector)
+    assert result and game.held
+    assert selector.clicks == selector.prepares == selector.closes == 2
+    assert resets
+    assert any(extra.get('equip_phase') == 'verify_timeout' for _, _, _, extra in statuses)
+
+
+def test_refresh_recovers_from_stale_reference_without_a_second_click():
+    from utils.drivers.tool_durability import ToolReferenceChanged
+
+    game = RepairGame(current=890)
+    game.held = False
+    selector = Selector(game)
+    snapshot = game.tools_snapshot
+    refreshed = []
+    game.reset_tool_reader = lambda: refreshed.append(True)
+
+    def read():
+        if selector.clicks and not refreshed:
+            raise ToolReferenceChanged('工具对象已切换')
+        return snapshot()
+
+    game.tools_snapshot = read
+    result, _, statuses = run(game, selector)
+    assert result and game.held and selector.clicks == 1
+    assert any(extra.get('equip_phase') == 'reference_changed' for _, _, _, extra in statuses)
+
+
+def test_unconfirmed_click_with_unavailable_state_pauses_at_total_deadline():
+    game = RepairGame(current=890)
+    game.held, game.stop_at = False, 16.
+    selector = Selector(game, success=False)
+    snapshot = game.tools_snapshot
+    game.tools_snapshot = lambda: {'state': 'unavailable'} if selector.clicks else snapshot()
+    result, _, statuses = run(game, selector)
+    pauses = [(at, extra) for at, state, _, extra in statuses if state == 'equip_paused']
+    assert not result and selector.clicks == 1 and not game.keys
+    assert pauses[0][0] == pytest.approx(15., abs=.2)
+    assert pauses[0][1]['equip_phase'] == 'timeout'
+
+
+def test_selection_error_after_click_does_not_toggle_a_held_tool():
+    game = RepairGame(current=890)
+    game.held = False
+    selector = Selector(game)
+    use = selector.use
+
+    def click_then_error(*args):
+        use(*args)
+        raise OSError('鼠标回执丢失')
+
+    selector.use = click_then_error
+    result, _, statuses = run(game, selector)
+    assert result and game.held and selector.clicks == 1
+    assert any(extra.get('equip_phase') == 'selection_failed' for _, _, _, extra in statuses)

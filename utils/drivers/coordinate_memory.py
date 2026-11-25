@@ -250,6 +250,10 @@ class ReadOnlyPosition:
     def tools_snapshot(self):
         return self._tools_snapshot(held=False)
 
+    def reset_tool_reader(self):
+        """Discard cached tool metadata before resolving the current objects again."""
+        self.tool_reader = None
+
     def stamina_snapshot(self):
         if self.locator is None:
             raise ValueError('当前坐标版本不支持体力检测')

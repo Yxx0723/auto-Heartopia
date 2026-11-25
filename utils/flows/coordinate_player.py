@@ -50,6 +50,10 @@ class _SkipPoint(Exception):
     pass
 
 
+class _EquipTimeout(ValueError):
+    pass
+
+
 class _RecoveryLimit(Exception):
     def __init__(self, reason):
         super().__init__(reason)
@@ -125,6 +129,8 @@ class _Follower:
         self.tool_selector = tool_selector
         self.equip_pending, self.equip_menu_pending = False, False
         self.equip_verify_until = 0.
+        self.equip_deadline = None
+        self.equip_attempt = 0
         self.repair_cycle = ToolRepairCycle()
         self.last_tool_check = self.last_repair_report = float('-inf')
         self.tool_status = {'state': 'unavailable'}
@@ -1134,51 +1140,119 @@ class _Follower:
     def equip_axe_pick(self, index, total):
         self.release()
         self.navigation_waiting = True
-        self.report('equipping', '正在拿出斧镐，确认持用后自动继续 · F6暂停 · F9停止',
-                    waypoint=index+1, waypoint_count=total)
+        if self.equip_deadline is None:
+            self.equip_deadline = self.clock.monotonic()+15.
+            self.equip_attempt = 0
+        context = {'waypoint': index+1, 'waypoint_count': total}
+        last_read_issue = None
+
+        def check():
+            self.guard()
+            if self.clock.monotonic() >= self.equip_deadline:
+                raise _EquipTimeout('装备确认达到 15 秒上限')
+
+        def wait(seconds):
+            remaining = max(0., self.equip_deadline-self.clock.monotonic())
+            self.wait(min(seconds, remaining))
+            check()
+
+        def tap(key):
+            check()
+            try:
+                self.set_keys({key})
+                wait(.1)
+            finally:
+                self.release()
+
+        def read(*, refresh=False):
+            nonlocal last_read_issue
+            self.guard()
+            if refresh:
+                reset = getattr(self.reader, 'reset_tool_reader', None)
+                if callable(reset):
+                    reset()
+            tool = self.read_tool()
+            if not ToolRepairCycle.usable(tool):
+                if tool.get('state') == 'locked':
+                    raise ValueError('斧镐尚未解锁')
+                error = self.tool_read_error or {}
+                kind = 'reference_changed' if error.get('type') == 'ToolReferenceChanged' else 'read_failed'
+                message = '斧镐引用或状态已变化' if kind == 'reference_changed' else '斧镐状态读取失败'
+                if kind != last_read_issue:
+                    self.report('equipping', message, equip_phase=kind, **context, **self.tool_read_diagnostics())
+                last_read_issue = kind
+            else:
+                last_read_issue = None
+            return tool
+
+        def held(tool):
+            return ToolRepairCycle.usable(tool) and tool['equipped']
+
         try:
-            if not self.equip_pending:
-                self.wait(.15)
-                tool = self.read_tool()
+            self.report('equipping', '正在确认手持斧镐，成功后自动继续',
+                        equip_phase='start', **context)
+            if not self.equip_pending and self.equip_attempt == 0:
+                wait(.15)
+            # A paused or interrupted click stays pending until its effect is
+            # checked, including when F6 was pressed after the verify window.
+            tool = read(refresh=self.equip_attempt > 0)
+            while True:
+                if self.equip_pending:
+                    while not held(tool) and self.clock.monotonic() < self.equip_verify_until:
+                        wait(.1)
+                        tool = read()
+                    self.equip_pending = False
+                    if not held(tool):
+                        self.report('equipping', '斧镐选用后的确认超时，重新读取当前工具',
+                                    equip_phase='verify_timeout', equip_attempt=self.equip_attempt, **context)
+                        tool = read(refresh=True)
+                check()
+                if held(tool):
+                    if self.equip_menu_pending:
+                        self.tool_selector.close_menu(self.window, tap, check, wait)
+                        self.equip_menu_pending = False
+                        tool = read()
+                        check()
+                    if held(tool):
+                        self.equip_deadline = None
+                        self.report('playing', '已确认手持斧镐，继续当前点位',
+                                    equip_phase='confirmed', equip_attempt=self.equip_attempt, **context)
+                        return True
+                if self.equip_attempt >= 3:
+                    raise _EquipTimeout('3 次装备尝试后仍未确认手持斧镐')
                 if not ToolRepairCycle.usable(tool):
-                    raise ValueError('暂时无法确认斧镐状态，请等待读取恢复')
-                if not tool['equipped']:
+                    wait(.15)
+                    tool = read(refresh=True)
+                    continue
+
+                self.equip_attempt += 1
+                try:
+                    if self.equip_menu_pending:
+                        self.tool_selector.close_menu(self.window, tap, check, wait)
                     self.equip_menu_pending = True
-                    target = self.tool_selector.prepare(self.window, self.repair_tap, self.wait, self.guard)
-                    # Opening the menu can race a manual selection. Clicking an
-                    # already held tool can put it away, so re-read before input.
-                    tool = self.read_tool()
-                    if not ToolRepairCycle.usable(tool):
-                        raise ValueError('选用前斧镐状态发生变化')
-                    if not tool['equipped']:
+                    target = self.tool_selector.prepare(self.window, tap, wait, check)
+                    self.report('equipping', f'核对第 {self.equip_attempt}/3 次选用前的手持状态',
+                                equip_phase='before_selection', equip_attempt=self.equip_attempt, **context)
+                    tool = read(refresh=self.equip_attempt > 1)
+                    check()
+                    if ToolRepairCycle.usable(tool) and not tool['equipped']:
                         self.equip_pending = True
-                        self.equip_verify_until = self.clock.monotonic()+3.
-                        try:
-                            self.tool_selector.use(target, self.device, self.guard, self.wait)
-                        finally:
-                            self.release()
-            # An interrupted click is never repeated on F6 resume. First
-            # verify its result, even if the original deadline has elapsed.
-            tool = self.read_tool()
-            while self.equip_pending and self.clock.monotonic() < self.equip_verify_until \
-                    and not (ToolRepairCycle.usable(tool) and tool['equipped']):
-                self.wait(.1)
-                tool = self.read_tool()
-            if not ToolRepairCycle.usable(tool) or not tool['equipped']:
-                self.equip_pending = False
-                raise ValueError('选用后尚未确认手持斧镐，请检查 T 面板')
-            if self.equip_menu_pending:
-                self.tool_selector.close_menu(self.window, self.repair_tap, self.guard, self.wait)
-                self.equip_menu_pending = False
-            self.equip_pending = False
-            tool = self.read_tool()
-            if not ToolRepairCycle.usable(tool) or not tool['equipped']:
-                raise ValueError('斧镐持用状态再次改变，请确认后继续')
-            self.report('playing', '已手持斧镐，继续当前点位 · F6暂停 · F9停止',
-                        waypoint=index+1, waypoint_count=total)
-            return True
+                        self.equip_verify_until = min(self.equip_deadline, self.clock.monotonic()+3.)
+                        self.tool_selector.use(target, self.device, check, wait)
+                        tool = read()
+                except _EquipTimeout:
+                    raise
+                except (ValueError, OSError) as exc:
+                    self.report('equipping', f'斧镐选用失败：{exc}，重新确认面板和手持状态',
+                                equip_phase='selection_failed', equip_attempt=self.equip_attempt, **context)
+                    wait(.15)
+                    tool = read(refresh=True)
         except (ValueError, OSError) as exc:
-            self.repair_pause(f'自动拿出斧镐未完成：{exc}', index, total, state='equip_paused')
+            self.equip_deadline = None
+            self.equip_pending = False
+            self.repair_pause(f'自动拿出斧镐未完成：{exc}', index, total, state='equip_paused',
+                              equip_phase='timeout' if isinstance(exc, _EquipTimeout) else 'failed',
+                              equip_attempt=self.equip_attempt, **self.tool_read_diagnostics())
         finally:
             self.release()
             self.navigation_waiting = False

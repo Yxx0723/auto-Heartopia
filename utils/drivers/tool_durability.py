@@ -5,6 +5,10 @@ from utils.core.tool_durability import tool_status
 from utils.drivers.mono_scene import SceneMetadata
 
 
+class ToolReferenceChanged(ValueError):
+    """The runtime or object references changed during a validated read."""
+
+
 class ToolDurabilityReader:
     def __init__(self, read, mono_base, domain):
         self.meta, self.base = SceneMetadata(read, domain), mono_base
@@ -72,13 +76,13 @@ class ToolDurabilityReader:
             if struct.unpack_from('<i', raw, start+offsets[1])[0] == tool_id:
                 found.append(struct.unpack_from('<Q', raw, start+offsets[2])[0])
         if len(found) != 1 or not found[0] or self.stamp(dictionary) != stamp:
-            raise ValueError('工具耐久列表正在变化')
+            raise ToolReferenceChanged('工具耐久列表正在变化')
         return found[0], stamp
 
     def snapshot(self, held=False):
         meta = self.meta
         if meta.pointer(self.base+0x4d3878) != meta.domain:
-            raise ValueError('工具运行时已切换')
+            raise ToolReferenceChanged('工具运行时已切换')
         node = meta.static_ref(self.world_class, '_currentLevel')
         self.expected(node, 'LevelNode', 'XDTGame.Core')
         owner, modules = meta.ref(node, '_instance'), meta.ref(node, '_dataModules')
@@ -143,5 +147,5 @@ class ToolDurabilityReader:
                 or meta.ref(modules, 'group') != group or meta.ref(group, '_modules') != array
                 or meta.array_refs(array) != members or meta.static_ref(self.world_class, '_currentLevel') != node
                 or meta.pointer(self.base+0x4d3878) != meta.domain):
-            raise ValueError('工具耐久在读取时发生变化')
+            raise ToolReferenceChanged('工具对象、场景或手持状态在读取时发生变化')
         return result
