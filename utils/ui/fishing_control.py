@@ -16,16 +16,21 @@ class FishingControl:
         self.thread = None
         self.events = SimpleQueue()
         self.out_dir = None
+        self.metrics = {}
+        self.runner = None
         self.message = '在钓点拿出鱼竿，点击开始后切回游戏按 F6。'
 
     @property
     def active(self):
         return self.thread is not None and self.thread.is_alive()
 
-    def start(self):
+    def start(self, duration=None, catch_target=None):
         if self.active:
             return
         self.cancelled.clear()
+        self.metrics = {}
+        self.runner = None
+        self.duration,self.catch_target = duration,catch_target
         self.message = '正在准备自动钓鱼…'
         self.thread = Thread(target=self.run, name='auto-fishing')
         self.thread.start()
@@ -49,6 +54,8 @@ class FishingControl:
 
     def run(self):
         self.out_dir = None
+        self.duration = getattr(self,'duration',None)
+        self.catch_target = getattr(self,'catch_target',None)
         try:
             with self.input_gate.claim('自动钓鱼'):
                 self.out_dir = self.log_dir / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
@@ -68,16 +75,8 @@ class FishingControl:
         import win32gui
         from tools.fishing_auto_run import FishingRunner, find_game
 
-        stop_logged = False
-
         def stop_requested():
-            nonlocal stop_logged
-            from_button = self.cancelled.is_set()
-            from_key = bool(win32api.GetAsyncKeyState(win32con.VK_F9) & 0x8000)
-            if (from_button or from_key) and not stop_logged:
-                stop_logged = True
-                self.log('hotkey', '收到停止请求' if from_button else '检测到 F9，停止钓鱼')
-            return from_button or from_key
+            return self.cancelled.is_set() or bool(win32api.GetAsyncKeyState(win32con.VK_F9) & 0x8000)
 
         hwnd = find_game()
         self.message = '已待命。切回游戏按 F6 开始，按 F9 取消。'
@@ -106,6 +105,11 @@ class FishingControl:
                 self.message = f"{row['reason']} · 抛竿 {runner.casts} 次"
 
         runner = FishingRunner(profile=self.profile, hwnd=hwnd, out_dir=self.out_dir, verbose=False,
-                               stop_requested=stop_requested, on_event=update)
+                               stop_requested=stop_requested, on_event=update,
+                               duration=self.duration, catch_target=self.catch_target)
+        self.runner = runner
         runner.run()
+        snapshot = getattr(runner,'metrics',None)
+        if callable(snapshot):
+            self.metrics = snapshot()
         self.message = f'{interrupted or "自动钓鱼已结束"} · 抛竿 {runner.casts} 次'

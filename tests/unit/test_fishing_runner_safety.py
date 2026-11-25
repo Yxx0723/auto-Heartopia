@@ -1,233 +1,203 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
+import threading
+import time
 
+import numpy as np
 import pytest
 
-pytest.importorskip("win32gui")
+pytest.importorskip('win32gui')
 from tools import fishing_auto_run as live
+from utils.drivers.fishing_input import FishingInput
+from utils.vision.aim_ring import Ring
+from utils.vision.fish_shadow import Shadow
 
 
-def make_runner(monkeypatch, *, held):
+def test_watchdog_releases_during_blocking_capture():
+    device = Mock()
+    stopped = threading.Event()
+    def guard():
+        if stopped.is_set():
+            raise InterruptedError('F9')
+    watch = FishingInput(device,guard)
+    watch.start()
+    try:
+        watch.press()
+        stopped.set()
+        end = time.monotonic()+.5
+        while watch.held and time.monotonic()<end:
+            time.sleep(.01)
+        assert device.execute.call_args.args[0]=={'type':'mouse_up','button':'left'}
+        with pytest.raises(InterruptedError,match='F9'):
+            watch.press()
+    finally:
+        watch.close()
+
+
+def mock_runner():
+    from collections import Counter
     runner = live.FishingRunner.__new__(live.FishingRunner)
-    runner.state = lambda: live.policy.FISHING_STATE_HOOKED
-    runner.last_game_state = None
-    runner.can_throw = lambda: False
-    runner.keep_front = lambda: True
-    runner.check_input = Mock()
-    runner.held = held
-    runner.phase, runner.phase_at = "hooked", 0.
-    runner.read_line = lambda: {"dom": "white"}
-    runner.log = Mock()
+    runner.started = runner.phase_at = time.monotonic()
+    runner.stats,runner.failures = Counter(),Counter()
+    runner.phase = 'idle'
+    runner.input = Mock()
+    runner.input.held = False
+    runner.target = live.FishTarget()
     runner.device = Mock()
-    monkeypatch.setattr(live, "time", SimpleNamespace(monotonic=lambda: 1., sleep=lambda _: None))
+    runner.log = Mock()
+    runner.inventory_reader = None
+    runner.cast_open = runner.cast_effective = False
+    runner.last_game_state = None
+    runner.landing_evidence = None
+    runner.consecutive_failures = runner.read_failures = 0
+    runner.size = (1382,807)
+    runner.aim_poll_at = 0.
+    runner.cycle_seconds = 0.
+    runner.cycle_count = 0
     return runner
 
 
-def test_hooked_focus_loss_releases_button(monkeypatch):
-    runner = make_runner(monkeypatch, held=True)
-    runner.keep_front = lambda: False
-    runner._tick()
-    runner.device.execute.assert_called_once_with({"type": "mouse_up", "button": "left"})
-    assert runner.phase == "idle" and not runner.held
+def test_adaptive_cast_requires_two_rings_and_releases_after_single_move(monkeypatch):
+    runner = mock_runner()
+    runner.phase = 'aiming'
+    runner.grab = lambda: np.zeros((807,1382,3),np.uint8)
+    runner.target = Mock(stable=True,last_at=time.monotonic())
+    runner.target.update.return_value = Shadow(1000,780,280,60,20,810.,300.,0.)
+    runner.target.predict.return_value = (815.,302.)
+    runner.ring = None
+    monkeypatch.setattr(live,'find_ring',lambda *a,**k:Ring(700.,280.,20.))
+    def release(move):
+        move()
+    runner.input.release.side_effect = release
+    runner.observe_aim(time.monotonic(),True)
+    runner.input.release.assert_not_called()
+    runner.observe_aim(time.monotonic(),True)
+    assert runner.phase=='waiting' and runner.casts==1
+    runner.device.native.mouse.assert_called_once()
 
 
-def test_hook_timeout_prevents_repress(monkeypatch):
-    runner = make_runner(monkeypatch, held=False)
-    runner.phase_at = -live.policy.FISHING_HOOK_TIMEOUT_SECONDS
-    runner._tick()
-    runner.device.execute.assert_not_called()
-    assert runner.phase == "idle" and not runner.held
+def test_aim_timeout_treats_release_as_possible_cast(monkeypatch):
+    runner = mock_runner()
+    runner.phase = 'aiming'
+    runner.phase_at -= live.policy.FISHING_AIM_LIMIT+.1
+    runner.target.last_at = runner.started
+    runner.state = lambda: (0,True,{'stage':0,'fish_id':0})
+    runner.tick()
+    assert runner.phase=='waiting' and runner.casts==1
+    runner.input.release.assert_called_once_with()
+    runner.device.native.mouse.assert_not_called()
 
 
-def test_error_exits_and_closes_even_when_mouse_up_fails(monkeypatch, tmp_path):
-    runner = make_runner(monkeypatch, held=True)
-    runner.started, runner.duration, runner.pid = 0., 10., 123
-    runner.log_path = tmp_path / "fishing.jsonl"
-    runner.stop_requested = lambda: False
-    runner.require_foreground = False
-    runner.scene = Mock()
-    runner.casts = 0
-    runner._tick = Mock(side_effect=OSError("read error"))
-    runner.device.execute.side_effect = OSError("button release error")
-    with pytest.raises(OSError, match="button release error"):
-        runner.run()
-    runner.device.release_all.assert_called_once()
-    runner.scene.close.assert_called_once()
+def test_existing_bite_does_not_retrieve_or_press_without_tension():
+    runner = mock_runner()
+    runner.state = lambda:(5,False,{'stage':2,'fish_id':10})
+    runner.inventory = Mock(return_value=None)
+    runner.tick()
+    assert runner.phase=='hooked' and runner.stats['bites']==1
+    runner.input.press.assert_not_called()
 
 
-def test_formal_fishing_waits_for_new_f6_press_in_game(monkeypatch, tmp_path):
+def test_rebind_does_not_generate_input_until_state_is_resolved():
+    runner = mock_runner()
+    runner.state = Mock(side_effect=ValueError('引用变化'))
+    runner.bind_rod = Mock()
+    runner.tick()
+    runner.bind_rod.assert_called_once()
+    runner.input.press.assert_not_called()
+
+
+def test_consecutive_cast_misses_stop():
+    runner = mock_runner()
+    runner.state = lambda:(0,True,{'stage':0,'fish_id':0})
+    for attempt in range(3):
+        runner.begin_cast()
+        runner.phase_at -= 2.
+        if attempt==2:
+            with pytest.raises(InterruptedError,match='达到上限'):
+                runner.tick()
+        else:
+            runner.tick()
+    assert runner.stats['recoveries']==3
+
+
+def test_formal_fishing_waits_for_new_f6_press_in_game(monkeypatch,tmp_path):
     from utils.drivers.input_task_gate import InputTaskGate
     from utils.ui.fishing_control import FishingControl
     import win32api
     import win32con
     import win32gui
-
-    # Held when armed, released, pressed while the monitor has focus, held
-    # through a focus change, then released and pressed again in the game.
-    pressed = iter([True, True, False, True, True, False, True])
-    foreground = iter([20, 10])
+    pressed = iter([True,True,False,True,True,False,True])
+    foreground = iter([20,10])
     wait = Mock()
-    key = lambda vk: 0x8000 if vk == win32con.VK_F6 and next(pressed) else 0
-    monkeypatch.setattr(win32api, "GetAsyncKeyState", key)
-    monkeypatch.setattr(win32gui, "GetForegroundWindow", lambda: next(foreground))
-    monkeypatch.setattr(win32gui, "IsWindow", lambda hwnd: hwnd == 10)
-    monkeypatch.setattr(live, "find_game", lambda: 10)
-    runner = Mock(return_value=SimpleNamespace(casts=0, run=Mock()))
-    monkeypatch.setattr(live, "FishingRunner", runner)
-    control = FishingControl(tmp_path / "profile.json", tmp_path, InputTaskGate())
-    monkeypatch.setattr(control.cancelled, "wait", wait)
+    monkeypatch.setattr(win32api,'GetAsyncKeyState',lambda vk:0x8000 if vk==win32con.VK_F6 and next(pressed) else 0)
+    monkeypatch.setattr(win32gui,'GetForegroundWindow',lambda:next(foreground))
+    monkeypatch.setattr(win32gui,'IsWindow',lambda hwnd:hwnd==10)
+    monkeypatch.setattr(live,'find_game',lambda:10)
+    factory = Mock(return_value=SimpleNamespace(casts=0,run=Mock()))
+    monkeypatch.setattr(live,'FishingRunner',factory)
+    control = FishingControl(tmp_path/'profile.json',tmp_path,InputTaskGate())
+    monkeypatch.setattr(control.cancelled,'wait',wait)
     control.run()
-    assert wait.call_count == 5
-    runner.assert_called_once()
-    runner.return_value.run.assert_called_once()
+    assert wait.call_count==5
+    factory.return_value.run.assert_called_once()
 
 
-def test_f9_cancels_before_f6_without_opening_fishing_runner(monkeypatch, tmp_path):
+def test_f9_cancels_before_f6(monkeypatch,tmp_path):
     from utils.drivers.input_task_gate import InputTaskGate
     from utils.ui.fishing_control import FishingControl
     import win32api
     import win32con
-
-    monkeypatch.setattr(win32api, "GetAsyncKeyState", lambda vk: 0x8000 if vk == win32con.VK_F9 else 0)
-    monkeypatch.setattr(live, "find_game", lambda: 10)
-    runner = Mock()
-    monkeypatch.setattr(live, "FishingRunner", runner)
-    control = FishingControl(tmp_path / "profile.json", tmp_path, InputTaskGate())
+    monkeypatch.setattr(win32api,'GetAsyncKeyState',lambda vk:0x8000 if vk==win32con.VK_F9 else 0)
+    monkeypatch.setattr(live,'find_game',lambda:10)
+    factory = Mock()
+    monkeypatch.setattr(live,'FishingRunner',factory)
+    control = FishingControl(tmp_path/'profile.json',tmp_path,InputTaskGate())
     control.run()
-    runner.assert_not_called()
-    assert control.message == "已取消自动钓鱼"
+    factory.assert_not_called()
+    assert control.message=='已取消自动钓鱼'
 
 
-def test_fishing_runner_import_without_console_streams(tmp_path):
-    import subprocess
-    import sys
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parents[2]
-    code = ("import sys; sys.path.insert(0, sys.argv[1]); "
-            "sys.stdout = sys.stderr = None; "
-            "from tools.fishing_auto_run import FishingRunner; "
-            "assert FishingRunner.__name__ == 'FishingRunner'")
-    method = [sys.executable, "-B", "-c", code, str(root)]
-    result = subprocess.run(method, cwd=tmp_path, capture_output=True, timeout=15)
-    assert result.returncode == 0, result.stderr.decode(errors="replace")
-    assert (tmp_path / "logs" / "日志文件.log").exists()
+def test_fishing_archive_keeps_metadata_and_summary(tmp_path):
+    import json
+    from utils.drivers.fishing_archive import FishingArchive
+    from utils.core.fishing_log import fishing_event
+    archive = FishingArchive(tmp_path,{'position':[1,2,3],'window_size':[800,600]})
+    archive.add(fishing_event('cast','已发出抛竿'))
+    archive.finish({'casts':1})
+    assert json.loads((tmp_path/'run.json').read_text(encoding='utf-8'))['position']==[1,2,3]
+    assert json.loads((tmp_path/'summary.json').read_text(encoding='utf-8'))['casts']==1
+    assert json.loads((tmp_path/'autofish.jsonl').read_text(encoding='utf-8'))['ev']=='cast'
 
 
-def test_aim_retries_then_casts_at_recently_confirmed_fish(monkeypatch, tmp_path):
-    import numpy as np
-
-    runner = make_runner(monkeypatch, held=True)
-    runner.phase, runner.phase_at, runner.casts = "aiming", 0., 0
-    runner.aim_fish = SimpleNamespace(cx=800., cy=300.)
-    frame = np.zeros((807, 1382, 3), dtype=np.uint8)
-    runner.aim_frame_shape = frame.shape[:2]
-    runner.aim_sample_at, runner.aim_seen_at = 0., 4.6
-    runner.grab = lambda: frame
-    runner.fish_of = lambda frame, previous: None
-    runner.out = tmp_path
-    move, save = Mock(), Mock()
-    monkeypatch.setattr(live, "move_mouse", move)
-    monkeypatch.setattr(live, "find_ring", lambda *args, **kwargs: None)
-    monkeypatch.setattr(live.cv2, "imwrite", save)
-    events = []
-    move.side_effect = lambda *args: events.append("aim")
-    runner.device.execute.side_effect = lambda action: events.append(action["type"])
-    now = SimpleNamespace(value=4.9)
-    monkeypatch.setattr(live, "time", SimpleNamespace(monotonic=lambda: now.value, sleep=lambda _: None))
-
-    runner._tick()
-    assert runner.phase == "aiming" and runner.held
-    assert events == []
-    now.value = 5.0
-    runner._tick()
-    assert runner.phase == "waiting" and runner.casts == 1 and not runner.held
-    assert events == ["aim", "mouse_up"]
-    assert runner.log.call_args.kwargs["target_source"] == "最近一次确认"
+def test_positive_scoped_learning_backs_up_and_deduplicates(tmp_path):
+    import sqlite3
+    from utils.drivers.fishing_archive import FishingArchive
+    from utils.core.fishing_log import fishing_event
+    run = tmp_path/'run1'
+    run.mkdir()
+    metadata = dict(position=[1,2,3],camera={'forward':[1,0]},window_size=[800,600],profile='v1')
+    archive = FishingArchive(run,metadata)
+    archive.add(fishing_event('result_unknown','未确认',cast_number=1,aim_evidence={'bad':True}))
+    archive.add(fishing_event('catch','已确认',cast_number=2,aim_evidence={'float_world_xyz':[3,2,4]}))
+    archive.finish({'casts':2})
+    with sqlite3.connect(tmp_path/'fishing-aim.backup.sqlite3') as db:
+        assert db.execute('PRAGMA integrity_check').fetchone()==('ok',)
+        assert db.execute('SELECT cast_no FROM aim_evidence').fetchall()==[(2,)]
 
 
-def test_aim_tracks_near_fish_instead_of_larger_distant_shadow(monkeypatch):
-    import numpy as np
-
-    runner = make_runner(monkeypatch, held=True)
-    frame = np.zeros((807, 1382, 3), dtype=np.uint8)
-    old = SimpleNamespace(cx=971, cy=399)
-    nearby = SimpleNamespace(cx=975, cy=403, area=720)
-    large = SimpleNamespace(cx=700, cy=240, area=2600)
-    detect = Mock(return_value=[large, nearby])
-    monkeypatch.setattr(live, "find_shadows", detect)
-    assert runner.fish_of(frame, old) is nearby
-    detect.assert_called_once_with(frame, min_area=live.FISH_TRACK_MIN_AREA)
-    detect.return_value = [large]
-    assert runner.fish_of(frame, old) is None
+def test_confirmed_escape_never_counts_as_catch():
+    runner = mock_runner()
+    runner.phase = 'hooked'
+    runner.state = lambda: (4,False,{'stage':4,'fish_id':10})
+    runner.tick()
+    assert runner.phase=='returning' and runner.stats['escapes']==1
+    assert runner.stats['catches']==0
+    runner.input.release.assert_called_once()
 
 
-def test_aim_without_fresh_frame_does_not_move_mouse(monkeypatch):
-    runner = make_runner(monkeypatch, held=True)
-    runner.phase, runner.casts = "aiming", 0
-    runner.aim_frame_shape = (807, 1382)
-    runner.aim_sample_at = runner.aim_seen_at = 0.
-    monkeypatch.setattr(live, "time", SimpleNamespace(monotonic=lambda: 5., sleep=lambda _: None))
-    runner.grab = lambda: None
-    move = Mock()
-    monkeypatch.setattr(live, "move_mouse", move)
-    runner._tick()
-    move.assert_not_called()
-    assert runner.phase == "idle" and runner.casts == 0 and not runner.held
-
-def test_preview_corrects_aim_but_does_not_release_before_five_seconds(monkeypatch):
-    import numpy as np
-
-    runner = make_runner(monkeypatch, held=True)
-    runner.phase, runner.phase_at, runner.casts = "aiming", 0., 0
-    runner.aim_sample_at = runner.aim_seen_at = 0.
-    runner.aim_fish = SimpleNamespace(cx=800., cy=300.)
-    frame = np.zeros((807, 1382, 3), dtype=np.uint8)
-    runner.aim_frame_shape = frame.shape[:2]
-    runner.grab = lambda: frame
-    runner.fish_of = lambda frame, previous: SimpleNamespace(cx=810., cy=315.)
-    monkeypatch.setattr(live, "find_ring", lambda *args, **kwargs: SimpleNamespace(cx=700., cy=280.))
-    monkeypatch.setattr(live, "time", SimpleNamespace(monotonic=lambda: 4.99, sleep=lambda _: None))
-    move = Mock()
-    monkeypatch.setattr(live, "move_mouse", move)
-
-    runner._tick()
-
-    move.assert_called_once()
-    runner.device.execute.assert_not_called()
-    assert runner.held and runner.phase == "aiming" and runner.casts == 0
-    assert runner.aim_fish.cx == 810.
-
-
-def test_preview_does_not_aim_at_stale_target_after_five_seconds(monkeypatch):
-    import numpy as np
-
-    runner = make_runner(monkeypatch, held=True)
-    runner.phase, runner.phase_at, runner.casts = "aiming", 0., 0
-    runner.aim_sample_at = runner.aim_seen_at = 0.
-    runner.aim_fish = SimpleNamespace(cx=800., cy=300.)
-    frame = np.zeros((807, 1382, 3), dtype=np.uint8)
-    runner.aim_frame_shape = frame.shape[:2]
-    runner.grab = lambda: frame
-    runner.fish_of = lambda frame, previous: None
-    monkeypatch.setattr(live, "time", SimpleNamespace(monotonic=lambda: 5., sleep=lambda _: None))
-    move = Mock()
-    monkeypatch.setattr(live, "move_mouse", move)
-
-    runner._tick()
-
-    move.assert_not_called()
-    assert runner.phase == "idle" and not runner.held and runner.casts == 0
-
-def test_fishing_file_log_distinguishes_input_and_game_feedback(tmp_path):
-    from utils.core.fishing_log import append_fishing_event, format_fishing_event
-
-    path = tmp_path / "钓鱼日志.txt"
-    inputs = {"at": "11:22:33", "ev": "move", "reason": "已发送：鼠标向右 20"}
-    feedback = {"at": "11:22:34", "ev": "game_state", "reason": "浮标已入水，等待咬钩"}
-    append_fishing_event(path, inputs)
-    append_fishing_event(path, feedback)
-    lines = path.read_text(encoding="utf-8-sig").splitlines()
-    assert lines == ["11:22:33 [输入] 已发送：鼠标向右 20", "11:22:34 [游戏反馈] 浮标已入水，等待咬钩"]
-    assert format_fishing_event(inputs)[1] == "已派发"
-    assert format_fishing_event(feedback)[1] == "已确认"
+def test_visual_success_animation_never_starts_reeling():
+    runner = mock_runner()
+    runner.state = lambda: (6,False,{'stage':5,'fish_id':10})
+    runner.tick()
+    runner.input.press.assert_not_called()
+    assert runner.stats['bites']==0

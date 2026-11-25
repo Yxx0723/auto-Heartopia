@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from utils.core import thresholds as policy
+from utils.core.fishing_policy import TensionControl
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ class FishingObserver:
         elif state == 0:
             stage = 'idle'
         else:
-            stage = 'idle'   # 未知枚举按空闲处理，不误触发
+            stage = 'unknown'
         dom, red, yellow = 'unknown', 0, 0
         if self.read_line is not None:
             color = self.read_line()
@@ -72,7 +73,7 @@ class FishingSession:
     release = 松开鼠标左键（抛竿 / 收尾 / 红时放线）
     hold  = 按下鼠标左键收线
 
-    视觉瞎（read_line 为 None）时，收线退化为一直按住（这些鱼实测 2 秒内收完）。
+    张力策略与正式运行器共用。缺少视觉数据时释放，不能授权收线。
     """
 
     def __init__(self, observer: FishingObserver, input_sink: Optional[Callable] = None,
@@ -90,6 +91,7 @@ class FishingSession:
         self.hooked_at = None
         self.casts = 0               # 已抛竿次数
         self.actions = []
+        self.tension = TensionControl()
 
     def _emit(self, kind, reason):
         action = Action(kind, reason)
@@ -132,7 +134,8 @@ class FishingSession:
             if obs.stage == 'hooked':
                 self._enter('hooked', now)
                 self.hooked_at = now
-                return self._emit('hold', '检测到咬钩，接管收线')
+                self.tension = TensionControl()
+                return self._adjust(obs,now)
             return Action('none', '待机')
 
         if self.state == 'casting':
@@ -147,9 +150,9 @@ class FishingSession:
             if obs.stage == 'hooked':
                 self._enter('hooked', now)
                 self.hooked_at = now
-                return self._emit('hold', '咬钩（State=6），开始收线')
-            # 等待过久未咬钩 → 重新抛
-            if now - self.phase_at >= self.recast_seconds:
+                self.tension = TensionControl()
+                return self._adjust(obs,now)
+            if obs.stage == 'idle' and now - self.phase_at >= self.recast_seconds:
                 self._enter('casting', now)
                 return self._emit('cast', '久未咬钩，重新抛竿')
             return Action('none', '等待咬钩')
@@ -158,7 +161,7 @@ class FishingSession:
         if obs.stage == 'idle':
             self._enter('idle', now)
             self.hooked_at = None
-            act = self._emit('release', '拉扯结束（State=0），收线完成') if self.holding \
+            act = self._emit('release', '拉扯结束（State=0），钓获未确认') if self.holding \
                 else Action('none', '拉扯结束')
             return act
 
@@ -167,13 +170,17 @@ class FishingSession:
             self.hooked_at = None
             return self._emit('release', '咬钩超时，安全松开')
 
-        # 张力控制：红=松开，恢复=按住
-        if obs.red_px >= policy.FISHING_LINE_RED_PIXELS:
+        return self._adjust(obs,now)
+
+    def _adjust(self, obs, now):
+        action = self.tension.evaluate(obs.line_dom if obs.stage=='hooked' else 'unknown',
+                                       self.holding,now)
+        if action=='press':
+            return self._emit('hold','张力恢复，继续收线')
+        if action in ('release','timeout'):
+            if action=='timeout':
+                self._enter('idle',now)
+                self.hooked_at = None
             if self.holding:
-                return self._emit('release', f'鱼线变红({obs.red_px}px)，松手放线')
-            return Action('none', '持续红，保持松开')
-        if obs.line_dom in ('white', 'yellow') or obs.yellow_px >= policy.FISHING_LINE_YELLOW_PIXELS:
-            if not self.holding:
-                return self._emit('hold', f'鱼线恢复({obs.line_dom})，继续收线')
-            return Action('none', '保持收线')
-        return Action('none', f'张力未知({obs.line_dom})，维持')
+                return self._emit('release','张力不安全，松开左键')
+        return Action('none','等待有效张力')

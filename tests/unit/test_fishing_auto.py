@@ -41,7 +41,7 @@ def test_observer_maps_state():
 
 def test_observer_maps_idle_and_unknown():
     assert FishingObserver(FakeMemory([(0, 0)]).read).observe().stage == 'idle'
-    assert FishingObserver(FakeMemory([(99, 0)]).read).observe().stage == 'idle'
+    assert FishingObserver(FakeMemory([(99, 0)]).read).observe().stage == 'unknown'
 
 
 def test_observer_merges_line_color():
@@ -80,12 +80,15 @@ def test_cast_then_release_to_waiting():
     assert s.casts == 1
 
 
-def test_waiting_bite_starts_hold():
+def test_waiting_bite_requires_two_white_samples_before_hold():
     clock = FakeClock()
-    s = sess([(0, 0), (6, 0)], clock=clock, cast_seconds=0.5, recast_seconds=20)
-    s.start(); clock.advance(0.6); s.update()   # 抛竿完成
-    act = s.update()
-    assert act.kind == 'hold' and s.holding and s.state == 'hooked'
+    colors = iter([{'dom':'white'}]*4)
+    s = sess([(0,0),(6,0)], colors, clock, cast_seconds=.5)
+    s.start()
+    clock.advance(.6)
+    s.update()
+    assert s.update().kind=='none'
+    assert s.update().kind=='hold' and s.state=='hooked'
 
 
 def test_waiting_timeout_recasts():
@@ -98,34 +101,16 @@ def test_waiting_timeout_recasts():
 
 
 def test_red_releases_then_recover_reholds():
-    clock = FakeClock()
-    # 颜色按观察次数供给：casting不读颜色(0), waiting读1次, 之后hooked每次读
-    colors = iter([
-        {'dom': 'white', 'red': 0, 'yellow': 0},   # waiting 阶段读（咬钩判定那帧）
-        {'dom': 'white', 'red': 0, 'yellow': 0},   # hooked: hold
-        {'dom': 'red', 'red': 300, 'yellow': 0},   # hooked: release
-        {'dom': 'red', 'red': 280, 'yellow': 0},   # 仍红: none
-        {'dom': 'red', 'red': 290, 'yellow': 0},   # 仍红: none
-        {'dom': 'white', 'red': 0, 'yellow': 0},   # 恢复: hold
-    ])
-    s = sess([(6, 0)] * 10, colors, clock, cast_seconds=0.5)
-    s.start(); clock.advance(0.6); s.update()      # casting->waiting, 颜色#1
-    assert s.update().kind == 'hold'               # hooked, 颜色#2
-    assert s.update().kind == 'release'            # 颜色#3 红
-    assert not s.holding
-    assert s.update().kind == 'none'               # 颜色#4 仍红
-    assert s.update().kind == 'none'               # 颜色#5 仍红
-    assert s.update().kind == 'hold'               # 颜色#6 恢复
-    assert s.holding
+    colors = iter({'dom':color} for color in ('white','white','red','red','white','white'))
+    s = sess([(6,0)],colors)
+    assert [s.update().kind for _ in range(6)]==['none','hold','release','none','none','hold']
 
 
 def test_done_releases_to_idle():
-    clock = FakeClock()
-    s = sess([(0, 0), (6, 0), (0, 0)], clock=clock, cast_seconds=0.5)
-    s.start(); clock.advance(0.6); s.update()      # ->waiting (State=0)
-    s.update()                                     # hooked (State=6), hold
-    act = s.update()                               # State=0, done
-    assert act.kind == 'release' and not s.holding and s.state == 'idle'
+    s = sess([(6,0),(6,0),(0,0)],iter([{'dom':'white'}]*3))
+    assert s.update().kind=='none'
+    assert s.update().kind=='hold'
+    assert s.update().kind=='release' and not s.holding and s.state=='idle'
 
 
 def test_hook_timeout_safety_release():
@@ -138,20 +123,17 @@ def test_hook_timeout_safety_release():
     assert act.kind == 'release' and s.state == 'idle' and '超时' in act.reason
 
 
-def test_unknown_color_keeps_hold():
-    clock = FakeClock()
-    colors = iter([{'dom': 'unknown', 'red': 0, 'yellow': 0}] * 3)
-    s = sess([(6, 0)] * 4, colors, clock, cast_seconds=0.5)
-    s.start(); clock.advance(0.6); s.update()
-    s.update()
-    assert s.update().kind == 'none' and s.holding
+def test_unknown_color_releases_hold():
+    colors = iter([{'dom':'white'},{'dom':'white'},{'dom':'unknown'}])
+    s = sess([(6,0)],colors)
+    assert s.update().kind=='none'
+    assert s.update().kind=='hold'
+    assert s.update().kind=='release' and not s.holding
 
 
-def test_auto_hook_accepted_in_idle():
-    """空闲时若外部已抛竿并咬钩，直接接管。"""
-    s = sess([(6, 0)])
-    act = s.update()
-    assert act.kind == 'hold' and s.state == 'hooked'
+def test_auto_hook_accepted_in_idle_without_immediate_input():
+    s = sess([(6,0)])
+    assert s.update().kind=='none' and s.state=='hooked'
 
 
 def test_stop_releases_any_key():
@@ -177,14 +159,15 @@ def test_full_cycle_action_sequence():
     """完整一循环：抛竿→咬钩→收线→收尾，动作序列正确。"""
     clock = FakeClock()
     colors = iter([{'dom': 'white', 'red': 0, 'yellow': 0}] * 20)
-    s = sess([(0, 0), (0, 0), (6, 0), (0, 0)], colors, clock, cast_seconds=0.5)
+    s = sess([(0, 0), (0, 0), (6, 0), (6, 0), (0, 0)], colors, clock, cast_seconds=0.5)
     kinds = [s.start().kind]
     kinds.append(s.update().kind)                    # casting none
     clock.advance(0.6)
     kinds.append(s.update().kind)                    # release -> waiting
     kinds.append(s.update().kind)                    # hooked hold
+    kinds.append(s.update().kind)                    # second white frame
     kinds.append(s.update().kind)                    # done release
-    assert kinds == ['cast', 'none', 'release', 'hold', 'release']
+    assert kinds == ['cast', 'none', 'release', 'none', 'hold', 'release']
     assert s.state == 'idle' and not s.holding and s.casts == 1
 
 
@@ -196,7 +179,7 @@ def test_replay_real_catch_sequence():
     white = iter([{'dom': 'white', 'red': 0, 'yellow': 0}] * 20)
     s = sess(states, white, clock)
     act = s.update()   # 空闲检测到咬钩，直接接管
-    assert act.kind == 'hold'
+    assert act.kind == 'none'
     kinds = [s.update().kind for _ in range(len(states) - 1)]
     assert 'release' in kinds
     assert s.state == 'idle' and not s.holding

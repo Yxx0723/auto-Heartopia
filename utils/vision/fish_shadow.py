@@ -30,6 +30,8 @@ class Shadow:
     cy: float
     angle: float       # 鱼身主轴角度（度），0=水平，90=垂直
 
+    confidence: float = 1.0
+
     @property
     def center(self):
         return (round(self.cx), round(self.cy))
@@ -51,7 +53,8 @@ def find_shadows(frame, roi=WATER_ROI, max_v=SHADOW_MAX_V, min_s=SHADOW_MIN_S,
     crop = frame[ay0:ay1, ax0:ax1]
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     V, S = hsv[:, :, 2], hsv[:, :, 1]
-    mask = ((V < max_v) & (S >= min_s)).astype(np.uint8) * 255
+    H = hsv[:, :, 0]
+    mask = ((V < max_v) & (S >= min_s) & (H >= 78) & (H <= 132)).astype(np.uint8) * 255
     # 面积按缩放平方调整
     scale_area = sx * sy
     lo = int(min_area * scale_area)
@@ -62,15 +65,22 @@ def find_shadows(frame, roi=WATER_ROI, max_v=SHADOW_MAX_V, min_s=SHADOW_MIN_S,
         x, y, bw, bh, area = (int(v) for v in stats[i])
         if not lo <= area <= hi:
             continue
-        pts = np.column_stack(np.where(labels == i))   # (row, col)
-        angle = 0.0
-        if len(pts) >= 5:
-            rect = cv2.minAreaRect(pts[:, ::-1].astype(np.float32))
-            angle = float(rect[2])
-            if rect[1][0] < rect[1][1]:
-                angle += 90.0
-        out.append(Shadow(area, ax0 + x, ay0 + y, bw, bh,
-                          ax0 + float(cents[i][0]), ay0 + float(cents[i][1]), angle))
+        if x == 0 or y == 0 or x+bw == crop.shape[1] or y+bh == crop.shape[0]:
+            continue
+        local = labels[y:y+bh,x:x+bw] == i
+        pts = cv2.findNonZero(local.astype(np.uint8))
+        rect = cv2.minAreaRect(pts)
+        short,long = sorted(rect[1])
+        if short < 2 or not 1.35 <= long/short <= 6.5:
+            continue
+        fill = area / (short*long)
+        if not .40 <= fill <= .93:
+            continue
+        angle = float(rect[2]) + (90. if rect[1][0] < rect[1][1] else 0.)
+        hue = float(np.median(H[y:y+bh,x:x+bw][local]))
+        confidence = max(0., 1. - .55*abs(fill-.72) - abs(hue-106)/60.)
+        out.append(Shadow(area, ax0+x, ay0+y, bw, bh,
+                          ax0+float(cents[i][0]), ay0+float(cents[i][1]), angle,confidence))
     out.sort(key=lambda s: -s.area)
     return out
 

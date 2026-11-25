@@ -1,484 +1,487 @@
-# -*- coding: utf-8 -*-
-"""自动钓鱼实机运行器：视觉闭环瞄准 + 内存判咬钩 + 张力收线。
-
-流程：
-    等水面出现游动鱼影（后台截图，不抢前台）
-    → 长按左键进入瞄准（实测约 450ms 才置 _aimState）
-    → 识别水面落点圈（识别不稳时回退到该钓点固定锚点）
-    → 按比例注入一次鼠标位移，让落点圈压到鱼影上
-    → 立刻松开左键抛竿（注入的落点会回弹，必须马上松）
-    → FloatComponent.State=6 咬钩 → 长按收线
-    → 鱼线红色像素超阈值 → 松手放线；State=0 → 收尾
-
-关键实现约束（2026-11-22 实机标定，勿随意改）：
-    * 鼠标位移必须用裸 ``SendInput(MOUSEEVENTF_MOVE)``；带 0x2000
-      （MOUSEEVENTF_MOVE_NOCOALESCE）会被 Unity 直接忽略。
-    * 游戏窗口最小化时截图返回 None、SetForegroundWindow 会抛错，需先恢复。
-    * 恢复窗口后的第一次点击会被"激活窗口"吞掉，因此抛竿后有 1.5s 未生效重试。
-
-安全：任何异常/退出都会松开左键并关闭内存连接。
-"""
+"""Foreground fishing runner with observed aim and bounded input."""
 import argparse
-import ctypes
+from collections import Counter
+from datetime import datetime
 import json
+import math
+from pathlib import Path
 import struct
 import sys
 import time
-from ctypes import wintypes
-from pathlib import Path
 
 import cv2
 import numpy as np
+import win32api
 import win32con
 import win32gui
 import win32process
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0,str(ROOT))
 
 from utils.core import thresholds as policy
-from utils.core.fishing_log import append_fishing_event, fishing_event, format_fishing_event
+from utils.core.fishing_log import fishing_event, format_fishing_event
+from utils.core.fishing_policy import FishTarget, TensionControl, confirmed_catch
+from utils.drivers.fishing_archive import FishingArchive
+from utils.drivers.fishing_input import FishingInput
+from utils.drivers.fishing_state import (FoodInventoryReader, fish_inventory, player_fishing_status,
+                                         read_player_fishing)
 from utils.drivers.mono_scene import MemorySceneMap
-from utils.drivers.screen import ScreenSource
 from utils.drivers.town_window import TimelineInput, TownWindow
 from utils.vision.aim_ring import find_ring
 from utils.vision.fish_shadow import find_shadows
-from tools.fishing_only import bring_front, make_line_reader
-
-#: 注入像素 → 落点圈屏幕位移 的经验增益（实测 2.4~3.1，取保守值）
-AIM_GAIN_X = 2.4
-AIM_GAIN_Y = 1.4
-#: 落点圈静止锚点（本钓点 1382×807 画面实测），识别失败时兜底
-AIM_ANCHOR = (685.0, 275.0)
-AIM_REFERENCE_SIZE = (1382, 807)
-#: 鱼影面积下限：排除木栈道/水花等小暗块
-FISH_MIN_AREA = 1200
-#: 活体判定：两帧中心位移下限（像素）
-FISH_MIN_MOVE = 3.0
-FISH_TRACK_MIN_AREA = 600
-FISH_TRACK_RADIUS = 55.0
-AIM_SETTLE_SECONDS = 0.45
-AIM_HOLD_SECONDS = 5.0
-AIM_SAMPLE_SECONDS = 0.20
-AIM_TARGET_MAX_AGE = 0.75
-
-
-class _MouseInput(ctypes.Structure):
-    _fields_ = [('dx', wintypes.LONG), ('dy', wintypes.LONG), ('mouseData', wintypes.DWORD),
-                ('dwFlags', wintypes.DWORD), ('time', wintypes.DWORD),
-                ('dwExtraInfo', ctypes.c_size_t)]
-
-
-class _InputUnion(ctypes.Union):
-    _fields_ = [('mi', _MouseInput)]
-
-
-class _Input(ctypes.Structure):
-    _anonymous_ = ('payload',)
-    _fields_ = [('type', wintypes.DWORD), ('payload', _InputUnion)]
-
-
-_USER32 = ctypes.WinDLL('user32', use_last_error=True)
-_USER32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(_Input), ctypes.c_int]
-_USER32.SendInput.restype = wintypes.UINT
-
-
-def move_mouse(dx, dy):
-    """裸相对移动。带 MOUSEEVENTF_MOVE_NOCOALESCE(0x2000) 时游戏会忽略。"""
-    event = _Input(type=0, mi=_MouseInput(int(dx), int(dy), 0, 0x0001, 0, 0))
-    if _USER32.SendInput(1, ctypes.byref(event), ctypes.sizeof(_Input)) != 1:
-        raise OSError('无法发送瞄准输入')
+from utils.vision.fishing_line import FishingLine
 
 
 def find_game():
-    found = []
-
+    games = []
     def visit(hwnd, _):
-        if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd).strip() == '心动小镇':
-            found.append(hwnd)
-
-    win32gui.EnumWindows(visit, None)
-    if not found:
-        raise RuntimeError('未找到游戏窗口')
-    return found[0]
+        if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd).strip()=='心动小镇':
+            games.append(hwnd)
+    win32gui.EnumWindows(visit,None)
+    if len(games)!=1:
+        raise RuntimeError('未找到唯一的游戏窗口')
+    return games[0]
 
 
 class FishingRunner:
-    def __init__(self, duration=600.0, out_dir=None, verbose=True, *, profile=None,
-                 hwnd=None, stop_requested=None, on_event=None):
-        self.stop_requested = stop_requested or (lambda: False)
-        self.on_event = on_event
-        self.require_foreground = hwnd is not None
-        self.duration = float(duration)
-        self.out = Path(out_dir) if out_dir else ROOT / 'fishing-runs'
-        self.out.mkdir(parents=True, exist_ok=True)
-        self.verbose = verbose
+    def __init__(self, duration=None, out_dir=None, verbose=True, *, profile=None,
+                 hwnd=None, stop_requested=None, on_event=None, catch_target=None):
+        if duration is not None and (not math.isfinite(duration) or duration<=0):
+            raise ValueError('钓鱼运行时长必须大于零')
+        self.duration,self.catch_target = duration,catch_target
+        self.out = Path(out_dir) if out_dir else ROOT/'fishing-runs'/datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+        self.out.mkdir(parents=True,exist_ok=True)
+        self.verbose,self.on_event = verbose,on_event
+        self.stop_requested = stop_requested or (lambda:False)
         self.hwnd = hwnd if hwnd is not None else find_game()
-        if not self.require_foreground and win32gui.IsIconic(self.hwnd):
-            win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
-            time.sleep(0.8)
-        _, self.pid = win32process.GetWindowThreadProcessId(self.hwnd)
-        self.rect = win32gui.GetWindowRect(self.hwnd)
-        client = win32gui.ClientToScreen(self.hwnd, (0, 0))
-        width, height = win32gui.GetClientRect(self.hwnd)[2:]
-        self.client_rect = (client[0], client[1], width, height)
-        if not self.require_foreground:
-            bring_front(self.hwnd)
-            time.sleep(0.4)
+        self.pid = win32process.GetWindowThreadProcessId(self.hwnd)[1]
+        self.size = win32gui.GetClientRect(self.hwnd)[2:]
+        self.window = TownWindow('心动小镇')
+        self.window.hwnd = self.hwnd
+        self.device = TimelineInput(self.window)
         self.check_input()
-
-        self.scene = MemorySceneMap(self.pid, profile or ROOT / 'webui/coordinate-monitor/profile.json')
+        self.profile = Path(profile or ROOT/'webui/coordinate-monitor/profile.json')
+        if catch_target is not None and (type(catch_target) is not int or catch_target<1):
+            raise ValueError('目标钓获数量必须大于零')
+        self.verified_images = set()
+        self.inventory_reader = None
+        self.scene = MemorySceneMap(self.pid,self.profile)
         try:
             self.bind_rod()
-            self.read_line = make_line_reader(self.hwnd, self.client_rect)
-            self.device = TimelineInput(TownWindow('心动小镇'))
         except BaseException:
             self.scene.close()
             raise
-
-        self.held = False
-        self.casts = 0
+        self.input = FishingInput(self.device,self.check_input)
         self.phase = 'idle'
-        self.phase_at = time.monotonic()
-        self.started = time.monotonic()
-        self.log_path = self.out / 'autofish.jsonl'
-        self.last_game_state = None
+        self.started = self.phase_at = time.monotonic()
+        self.stats = Counter()
+        self.failures = Counter()
+        self.consecutive_failures = self.screen_failures = self.read_failures = 0
+        self.last_game_state = self.ring = None
+        self.target = FishTarget()
+        self.line = FishingLine()
+        self.tension = TensionControl()
+        self.cast_open = self.cast_effective = False
+        self.cycle_seconds = 0.
+        self.cycle_count = 0
+        self.inventory_before = None
+        self.aim_poll_at = 0.
+        self.last_color = None
+        self.aim_evidence = None
+        self.landing_evidence = None
+        self.archive = None
+
+    @property
+    def casts(self):
+        return self.stats['casts']
+
+    def identity(self):
+        trace = self.scene.memory.snapshot()['paths'][0]['trace']
+        entity = next((t['pointer'] for t in trace if t['field']=='<entity>k__BackingField'),None)
+        if not entity:
+            raise ValueError('找不到当前玩家对象')
+        return entity
 
     def bind_rod(self):
-        meta = self.scene.meta
-        trace = self.scene.memory.snapshot()['paths'][0]['trace']
-        entity = next(t['pointer'] for t in trace if t['field'] == '<entity>k__BackingField')
-        self.lpc = next(p for p in meta.dictionary(meta.ref(entity, '_components'), max_items=128)
-                        if meta.obj(p)['name'] == 'LocalPlayerComponent')
-        self.meta = meta
-        self.rod = meta.ref(self.lpc, '_interactTool')
-        if not self.rod:
-            raise ValueError('请先拿出鱼竿')
-        rod = meta.obj(self.rod)
-        if rod['name'] != 'HandHoldFishingRod':
-            raise ValueError('请先拿出鱼竿')
-        self.rod_fields = rod['fields']
-        self.float_component = meta.ref(self.rod, 'floatComponent')
+        self.meta = meta = self.scene.meta
+        self.entity = self.identity()
+        components = meta.dictionary(meta.ref(self.entity,'_components'),max_items=128)
+        players = [p for p in components if meta.obj(p)['name']=='LocalPlayerComponent']
+        if len(players)!=1:
+            raise ValueError('玩家对象未确认')
+        self.lpc = players[0]
+        self.player_binding = player_fishing_status(meta,self.lpc,self.verified_images)
+        self.rod = meta.ref(self.lpc,'_interactTool')
+        if not self.rod or meta.obj(self.rod)['name']!='HandHoldFishingRod':
+            raise ValueError('当前手持工具不是鱼竿，请先拿出鱼竿')
+        self.rod_info = meta.obj(self.rod)
+        self.float_component = meta.ref(self.rod,'floatComponent')
         if not self.float_component:
-            raise ValueError('当前鱼竿没有可读取的浮标')
-        self.float_fields = meta.obj(self.float_component)['fields']
+            raise ValueError('鱼竿的浮标引用尚未就绪')
+        self.float_info = meta.obj(self.float_component)
+        self.identity_at = time.monotonic()
 
-    def check_input(self):
-        if self.stop_requested():
-            raise InterruptedError('已停止自动钓鱼')
-        if win32gui.GetForegroundWindow() != self.hwnd:
-            raise InterruptedError('游戏失去前台，已停止自动钓鱼')
-
-    # ---------- 观测 ----------
-    def _bool(self, fields, name):
-        return bool(self.meta.data(self.rod + 16, 4096)[fields[name]['offset'] - 16])
+    def read_field(self, pointer, info, name, fmt):
+        offset = info['fields'][name]['offset']
+        size = struct.calcsize(fmt)
+        if not 16 <= offset <= info['size']-size:
+            raise ValueError(f'钓鱼字段范围无效：{name}')
+        return struct.unpack(fmt,self.meta.data(pointer+offset,size))[0]
 
     def state(self):
-        if (self.meta.ref(self.lpc, '_interactTool') != self.rod
-                or self.meta.ref(self.rod, 'floatComponent') != self.float_component):
-            raise ValueError('鱼竿或浮标已更换，请重新启动钓鱼')
-        raw = self.meta.data(self.float_component + 16, 4096)
-        offset = self.float_fields['<State>k__BackingField']['offset'] - 16
-        return struct.unpack_from('<i', raw, offset)[0]
+        if time.monotonic()-self.identity_at >= .5:
+            if self.identity()!=self.entity:
+                raise ValueError('玩家对象引用已变化')
+            self.identity_at = time.monotonic()
+        if self.meta.ref(self.lpc,'_interactTool')!=self.rod or \
+                self.meta.ref(self.rod,'floatComponent')!=self.float_component:
+            raise ValueError('鱼竿或浮标引用已变化')
+        state = self.read_field(self.float_component,self.float_info,'<State>k__BackingField','<i')
+        ready = self.read_field(self.rod,self.rod_info,'CanThrow','<B')
+        if ready not in (0,1):
+            raise ValueError('抛竿状态未确认')
+        player = read_player_fishing(self.meta,self.player_binding)
+        if player['stage'] not in range(6):
+            raise ValueError('玩家钓鱼阶段未确认')
+        return state,bool(ready),player
 
-    def can_throw(self):
-        return self._bool(self.rod_fields, 'CanThrow')
+    def check_input(self):
+        if self.stop_requested() or win32api.GetAsyncKeyState(win32con.VK_F9)&0x8000:
+            raise InterruptedError('已停止自动钓鱼')
+        if not win32gui.IsWindow(self.hwnd) or win32process.GetWindowThreadProcessId(self.hwnd)[1]!=self.pid:
+            raise InterruptedError('游戏窗口已关闭或进程变化')
+        if win32gui.GetForegroundWindow()!=self.hwnd or win32gui.IsIconic(self.hwnd):
+            raise InterruptedError('游戏失去前台，已停止自动钓鱼')
+        if win32gui.GetClientRect(self.hwnd)[2:]!=self.size:
+            raise InterruptedError('游戏窗口尺寸变化，停止当前钓鱼')
 
     def grab(self):
-        left, top, right, bottom = self.rect
-        pic = ScreenSource.capture_window_background(self.hwnd, (left, top, right - left, bottom - top))
-        if pic is None:
-            return None
-        return cv2.cvtColor(np.asarray(pic.convert('RGB')), cv2.COLOR_RGB2BGR)
-
-    def fish_of(self, frame, previous=None):
-        if frame is None:
-            return None
-        minimum = FISH_MIN_AREA if previous is None else FISH_TRACK_MIN_AREA
-        shadows = find_shadows(frame, min_area=minimum)
-        if not shadows:
-            return None
-        if previous is None:
-            return shadows[0]
-        height, width = frame.shape[:2]
-        scale_x = width / AIM_REFERENCE_SIZE[0]
-        scale_y = height / AIM_REFERENCE_SIZE[1]
-
-        def distance(shadow):
-            return np.hypot((shadow.cx - previous.cx) / scale_x,
-                            (shadow.cy - previous.cy) / scale_y)
-
-        nearest = min(shadows, key=distance)
-        return nearest if distance(nearest) <= FISH_TRACK_RADIUS else None
-
-    # ---------- 动作 ----------
-    def press(self):
-        if not self.held:
-            self.check_input()
-            self.held = True
-            self.device.execute({'type': 'mouse_down', 'button': 'left'})
-            self.log('button', '已发送：按住鼠标左键')
-
-    def release(self, *, report=True):
-        if self.held:
-            self.device.execute({'type': 'mouse_up', 'button': 'left'})
-            self.held = False
-            if report:
-                self.log('button', '已发送：松开鼠标左键')
-
-    def keep_front(self):
-        if self.require_foreground or self.held:
-            return win32gui.GetForegroundWindow() == self.hwnd
+        self.input.guard()
         try:
-            if win32gui.IsIconic(self.hwnd):
-                win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
-                time.sleep(0.25)
-            if win32gui.GetForegroundWindow() != self.hwnd:
-                bring_front(self.hwnd)
-                time.sleep(0.1)
-        except Exception:
-            time.sleep(0.15)
-        return win32gui.GetForegroundWindow() == self.hwnd
+            pic = self.window.snapshot()
+            frame = cv2.cvtColor(np.asarray(pic.convert('RGB')),cv2.COLOR_RGB2BGR) if pic is not None else None
+        except (OSError,ValueError,cv2.error):
+            frame = None
+        if frame is None or frame.shape[:2]!=self.size[::-1]:
+            self.screen_failures += 1
+            if self.screen_failures>=policy.FISHING_MAX_SCREEN_FAILURES:
+                raise InterruptedError('连续截屏失败，已停止')
+            return None
+        self.screen_failures = 0
+        return frame
 
-    # ---------- 日志 ----------
-    def log(self, event, reason='', **extra):
-        row = fishing_event(event, reason, dt=round(time.monotonic() - self.started, 2), **extra)
-        try:
-            with self.log_path.open('a', encoding='utf-8') as fh:
-                fh.write(json.dumps(row, ensure_ascii=False) + '\n')
-        except Exception:
-            pass
-        append_fishing_event(self.out / '钓鱼日志.txt', row)
-        if self.verbose:
-            print(format_fishing_event(row)[0], end='', flush=True)
+    def metrics(self):
+        elapsed = max(0.,time.monotonic()-self.started)
+        casts,effective,bites,catches = (self.stats[k] for k in ('casts','effective','bites','catches'))
+        return {**dict.fromkeys(('casts','effective','bites','catches','escapes','unconfirmed','timeouts','recoveries'),0),
+                **self.stats,'phase':self.phase,'elapsed':round(elapsed,1),
+                'effective_rate':effective/casts if casts else None,
+                'bite_rate':min(1.,self.stats['cast_bites']/effective) if effective else None,
+                'catch_rate':self.stats['cast_catches']/casts if casts and self.inventory_reader is not None else None,
+                'cycle_average_seconds':self.cycle_seconds/self.cycle_count if self.cycle_count else None,
+                'catches_per_hour':catches*3600/elapsed if elapsed and self.inventory_reader is not None else None,
+                'catch_verification_available':self.inventory_reader is not None}
+
+    def log(self,event,reason,**extra):
+        row = fishing_event(event,reason,dt=round(time.monotonic()-self.started,2),**extra)
+        self.archive.add(row)
+        if self.verbose and sys.stdout is not None:
+            print(format_fishing_event(row)[0],end='')
         if self.on_event is not None:
             self.on_event(row)
 
-    # ---------- 主循环 ----------
-    def run(self):
+    def enter(self,phase):
+        self.phase,self.phase_at = phase,time.monotonic()
+
+    def close_cycle(self):
+        if self.cast_open:
+            self.cycle_seconds += time.monotonic()-self.cast_at
+            self.cycle_count += 1
+            self.cast_open = False
+
+    def recover(self,event,reason,phase='idle'):
+        self.input.release()
+        self.close_cycle()
+        self.failures[event] += 1
+        self.consecutive_failures += 1
+        self.stats['recoveries'] += 1
+        self.target = FishTarget()
+        self.ring = None
+        self.enter(phase)
+        self.log(event,reason,attempt=self.failures[event])
+        if self.consecutive_failures>=policy.FISHING_MAX_CONSECUTIVE_FAILURES:
+            raise InterruptedError('连续恢复达到上限：'+reason)
+
+    def inventory(self):
         try:
-            self.log_path.write_text('', encoding='utf-8')
-            self.log('init', '自动钓鱼启动', pid=self.pid, duration=self.duration)
-            while not self.stop_requested() and time.monotonic() - self.started < self.duration:
-                if self.require_foreground:
-                    self.check_input()
-                self._tick()
-        except (KeyboardInterrupt, InterruptedError) as exc:
-            self.log('interrupt', str(exc) or '用户中断')
+            memory = self.scene.memory
+            if self.inventory_reader is None:
+                self.inventory_reader = FoodInventoryReader(memory)
+            return fish_inventory(memory,self.inventory_reader,self.verified_images)
+        except (ValueError,OSError,KeyError,struct.error):
+            self.log('inventory_unavailable','背包暂不可核验，本轮可能无法确认钓获')
+            return None
+
+    def cast_feedback(self,state):
+        if self.cast_open and not self.cast_effective and state==2:
+            self.cast_effective = True
+            self.stats['effective'] += 1
+            self.log('cast_effective','游戏已确认浮标入水' if state==2 else '游戏已确认咬钩，抛竿已生效')
+
+    def observe_aim(self, now, aiming, can_throw=True):
+        frame = self.grab()
+        if frame is None:
+            return
+        shadow = self.target.update(find_shadows(frame),time.monotonic(),self.size,locked=aiming)
+        if not aiming:
+            if shadow is not None and self.target.stable and shadow.confidence>=.55:
+                self.input.press()
+                self.ring = None
+                self.enter('aiming')
+                self.log('fish_detected','已锁定连续移动鱼影',fish=shadow.center,confidence=shadow.confidence)
+            return
+        sx,sy = (value/ref for value,ref in zip(self.size,policy.FISHING_WINDOW_REFERENCE))
+        previous = self.ring
+        self.ring = find_ring(frame,prev=previous,x_range=(380*sx,980*sx),y_range=(180*sy,395*sy),
+                              min_radius=max(1,round(13*sy)),max_radius=max(2,round(42*sy)))
+        if not can_throw or shadow is None or self.ring is None or previous is None or not self.target.stable:
+            return
+        ring = self.ring
+        if math.hypot((ring.cx-previous.cx)/sx,(ring.cy-previous.cy)/sy)>22:
+            return
+        if time.monotonic()-self.target.last_at > policy.FISHING_LOCK_MAX_GAP:
+            return
+        target = self.target.predict(policy.FISHING_PREDICTION_SECONDS)
+        dx,dy = (target[0]-ring.cx)/sx,(target[1]-ring.cy)/sy
+        mx,my = round(dx/policy.FISHING_AIM_GAIN[0]),round(dy/policy.FISHING_AIM_GAIN[1])
+        if abs(mx)>420 or abs(my)>300 or shadow.confidence<.55 or ring.confidence<.18:
+            return
+        self.input.release(move=lambda:self.device.native.mouse(win32con.MOUSEEVENTF_MOVE,mx,my))
+        self.begin_cast()
+        self.aim_evidence = dict(fish=shadow.center,predicted=target,ring=ring.center,
+                                 correction=[mx,my],confidence=shadow.confidence,ring_confidence=ring.confidence)
+        self.log('cast','已发送校正及松开左键，等待浮标反馈',**self.aim_evidence)
+
+    def begin_cast(self):
+        self.stats['casts'] += 1
+        self.aim_evidence = self.landing_evidence = None
+        self.cast_effective = False
+        self.cast_open = True
+        self.cast_at = time.monotonic()
+        self.enter('waiting')
+
+    def tick(self):
+        self.input.guard()
+        try:
+            state,can_throw,player = self.state()
+            battle = player['stage']==2
+            idle = state==0 and player['stage']==0
+        except (OSError,ValueError,KeyError,StopIteration) as exc:
+            self.input.release()
+            self.read_failures += 1
+            if self.read_failures>=policy.FISHING_MAX_READ_FAILURES:
+                raise InterruptedError(f'连续无法读取鱼竿或浮标状态：{exc}') from exc
+            self.recover('reference_retry',f'游戏状态读失败，尝试重新绑定：{exc}')
+            try:
+                self.bind_rod()
+            except (OSError,ValueError,KeyError,StopIteration):
+                pass
+            return
+        self.read_failures = 0
+        now = time.monotonic()
+        age = now-self.phase_at
+        if state!=self.last_game_state:
+            self.last_game_state = state
+            fields = {k:v for k,v in player.items() if (not isinstance(v,(list,tuple)) or all(map(math.isfinite,v)))
+                      and (not isinstance(v,float) or math.isfinite(v))}
+            self.log('game_state','读取浮标与玩家阶段',state=state,can_throw=can_throw,player=fields)
+        self.cast_feedback(state)
+        if self.cast_open and state==2 and self.landing_evidence is None:
+            position = player['float_xyz']
+            if all(map(math.isfinite,position)) and any(position):
+                self.landing_evidence = position
+
+        if self.phase=='hooked':
+            if state==4 or player['stage']==4:
+                self.stats['escapes'] += 1
+                self.recover('escape','游戏已确认拉扯失败，等待浮标回收','returning')
+            elif state==6 or player['stage']==5 or idle:
+                self.input.release()
+                self.enter('result')
+            elif not battle:
+                self.recover('state_inconsistent','收线期间浮标进入未确认状态')
+            elif age>=policy.FISHING_HOOK_TIMEOUT_SECONDS:
+                self.stats['timeouts'] += 1
+                raise InterruptedError('收线超时，已停止')
+            else:
+                color = self.line.read(self.grab())
+                action = self.tension.evaluate(color['dom'],self.input.held,time.monotonic())
+                if action=='timeout':
+                    raise InterruptedError('张力持续无法确认，已停止')
+                if action=='release':
+                    self.input.release()
+                elif self.input.held or action=='press':
+                    self.input.press()
+                if color['dom']!=self.last_color:
+                    self.last_color = color['dom']
+                    self.log('line_sample','鱼线张力颜色变化',color=color)
+            return
+        if battle and self.phase!='result':
+            self.stats['bites'] += 1
+            if self.cast_open and not self.cast_effective:
+                self.cast_effective = True
+                self.stats['effective'] += 1
+                self.log('cast_effective','玩家已进入拉扯阶段，确认抛竿生效')
+            self.stats['cast_bites'] += int(self.cast_open)
+            self.input.release()
+            self.hooked_fish_id = player['fish_id']
+            self.inventory_before = self.inventory()
+            self.tension,self.line = TensionControl(),FishingLine()
+            self.enter('hooked')
+            self.log('hook','已确认咬钩，等待有效张力后收线')
+            return
+        if self.phase=='result':
+            after = self.inventory() if self.inventory_before is not None else None
+            fish_ids = after['fish_ids'] & {self.hooked_fish_id} if after else ()
+            if confirmed_catch(self.inventory_before,after,fish_ids):
+                self.stats['catches'] += 1
+                self.stats['cast_catches'] += int(self.cast_open)
+                self.consecutive_failures = 0
+                sample = None
+                if self.cast_open and self.aim_evidence and self.landing_evidence:
+                    sample = {**self.aim_evidence,'float_world_xyz':self.landing_evidence,
+                              'fish_id':self.hooked_fish_id,'pixel_error_verified':False}
+                self.log('catch','已确认当前咬钩鱼类入包',fish_id=self.hooked_fish_id,
+                         cast_number=self.casts,aim_evidence=sample)
+            elif self.inventory_before is not None and age<policy.FISHING_RESULT_SECONDS:
+                return
+            else:
+                self.stats['unconfirmed'] += 1
+                self.recover('result_unknown','拉扯结束，实际钓获或逃脱未确认','returning')
+                return
+            self.close_cycle()
+            self.target = FishTarget()
+            self.enter('returning')
+            return
+        if self.phase=='returning':
+            if idle:
+                self.enter('idle')
+            elif age>=policy.FISHING_RETRIEVE_SECONDS:
+                raise InterruptedError('浮标未回收，已安全停止')
+            return
+        if self.phase=='aiming':
+            if state!=0:
+                self.input.release()
+                self.begin_cast()
+                self.cast_feedback(state)
+                self.log('aim_state_changed','瞄准期间浮标状态发生变化，等待反馈')
+            elif age>=policy.FISHING_AIM_LIMIT:
+                kind = 'fish_lost' if now-self.target.last_at>policy.FISHING_LOCK_MAX_GAP else 'ring_unconfirmed'
+                self.input.release()
+                self.begin_cast()
+                self.log(kind,'瞄准达到上限，已松手；可能已经抛竿，等待实际反馈')
+                self.consecutive_failures += 1
+            else:
+                self.input.press()
+                if age>=policy.FISHING_AIM_SETTLE and now>=self.aim_poll_at:
+                    self.aim_poll_at = now+policy.FISHING_AIM_SAMPLE
+                    self.observe_aim(now,True,can_throw)
+            return
+        if self.phase=='retrieve':
+            if idle:
+                self.input.release()
+                self.enter('idle')
+                self.log('retrieved','已确认浮标回收')
+            elif state!=2 or age>=policy.FISHING_RETRIEVE_SECONDS:
+                raise InterruptedError('浮标未成功回收或状态变化，停止自动操作')
+            else:
+                self.input.press()
+            return
+        if self.phase=='waiting':
+            if idle and age>=policy.FISHING_CONFIRM_CAST_SECONDS:
+                if self.cast_effective:
+                    self.stats['unconfirmed'] += 1
+                self.recover('cast_miss','浮标未持续入水或已消失，重新搜索')
+            elif state==2 and age>=policy.FISHING_RECAST_SECONDS:
+                self.recover('recast','长时间未咬钩，准备回收浮标','retrieve')
+            elif state not in (0,2) and age>=policy.FISHING_FLIGHT_SECONDS:
+                raise InterruptedError(f'浮标长时间未确认入水（状态 {state}）')
+            elif state==0 and not can_throw and age>=policy.FISHING_FLIGHT_SECONDS:
+                raise InterruptedError('浮标未入水且鱼竿未恢复空闲')
+            return
+
+        if state in (1,2):
+            self.enter('waiting')
+            self.log('existing_float','发现已有浮标，先等待游戏状态')
+        elif idle:
+            if self.consecutive_failures>=policy.FISHING_MAX_CONSECUTIVE_FAILURES:
+                raise InterruptedError('连续抛竿失败达到上限')
+            if now>=self.aim_poll_at:
+                self.aim_poll_at = now+policy.FISHING_AIM_SAMPLE
+                self.observe_aim(now,False)
+            if self.phase=='idle' and age>=policy.FISHING_SEARCH_SECONDS:
+                self.recover('fish_lost','搜索窗口内未锁定可用鱼影')
+        elif age>=policy.FISHING_FLIGHT_SECONDS:
+            raise InterruptedError(f'游戏状态未确认（状态 {state}），停止自动操作')
+
+    def run(self):
+        resources = Path(getattr(sys,'_MEIPASS',ROOT))
+        def read_release(name):
+            path = resources/name
+            return path.read_text(encoding='utf-8').strip() if path.is_file() else None
+        metadata = {'program_version':read_release('version.txt'),'program_commit':read_release('heartopia-build.txt'),
+                    'window_size':self.size,'duration':self.duration,'catch_target':self.catch_target,
+                    'profile':json.loads(self.profile.read_text(encoding='utf-8')).get('game_assembly_sha256'),
+                    'position':None,'camera':None}
+        try:
+            metadata['position'] = self.scene.memory.read()
+            metadata['camera'] = self.scene.memory.movement_basis()
+        except (OSError,ValueError):
+            pass
+        self.archive = FishingArchive(self.out,metadata)
+        self.input.start()
+        self.enter('idle')
+        outcome = 'finished'
+        try:
+            self.log('init','自动钓鱼启动，钓获按当前咬钩鱼种的背包增量确认')
+            while (self.duration is None or time.monotonic()-self.started<self.duration) and \
+                    (self.catch_target is None or self.stats['catches']<self.catch_target):
+                self.tick()
+                time.sleep(.04)
+        except (KeyboardInterrupt,InterruptedError) as exc:
+            outcome = 'stopped'
+            self.log('interrupt',str(exc) or '用户中断')
         except Exception as exc:
-            self.log('error', f'{type(exc).__name__}: {exc}')
+            outcome = 'error'
+            self.log('error',f'{type(exc).__name__}：{exc}')
             raise
         finally:
             try:
                 try:
-                    self.release()
+                    self.input.close()
                 except Exception:
                     self.device.release_all()
-                    self.held = False
                     raise
             finally:
+                if self.phase in ('hooked','result'):
+                    self.stats['unconfirmed'] += 1
+                self.close_cycle()
                 self.scene.close()
-                self.log('end', '自动钓鱼已结束', casts=self.casts, phase=self.phase)
-
-    def _tick(self):
-        state = self.state()
-        if state != self.last_game_state:
-            self.last_game_state = state
-            description = {0: '空闲／拉扯结束', 1: '浮标飞行中', 2: '浮标已入水，等待咬钩',
-                           6: '鱼已咬钩，正在拉扯'}.get(state, f'其他浮标状态（{state}）')
-            self.log('game_state', description, state=state)
-        can_throw = self.can_throw()
-        now = time.monotonic()
-
-        if self.phase == 'idle':
-            if not can_throw:
-                if state == 1:          # 钩还在飞
-                    time.sleep(0.2)
-                    return
-                if not self.keep_front():
-                    time.sleep(0.3)
-                    return
-                self.press()
-                self.phase = 'retrieve'
-                self.phase_at = now
-                self.log('retrieve', '浮标未回收，按住收线', state=state)
-                return
-            first = self.grab()
-            fish1 = self.fish_of(first)
-            if fish1 is None:
-                time.sleep(0.25)
-                return
-            time.sleep(0.18)
-            second = self.grab()
-            fish2 = self.fish_of(second, fish1)
-            if fish2 is None:
-                time.sleep(0.25)
-                return
-            moved = ((fish2.cx - fish1.cx) ** 2 + (fish2.cy - fish1.cy) ** 2) ** 0.5
-            if moved < FISH_MIN_MOVE:
-                time.sleep(0.2)
-                return
-            if not self.keep_front():
-                time.sleep(0.3)
-                return
-            self.aim_fish = fish2
-            self.aim_frame_shape = second.shape[:2]
-            self.log('fish_detected', f'确认移动鱼影，中心（{fish2.cx:.0f}, {fish2.cy:.0f}），'
-                     f'两帧间移动 {moved:.1f} 像素')
-            self.press()
-            self.phase = 'aiming'
-            self.phase_at = time.monotonic()
-            self.aim_seen_at = self.phase_at
-            self.aim_sample_at = self.phase_at
-            self.log('press', f'开始瞄准，保留 {AIM_HOLD_SECONDS:g} 秒观察时间')
-            return
-
-        if self.phase == 'aiming':
-            elapsed = now - self.phase_at
-            if elapsed < AIM_SETTLE_SECONDS:
-                time.sleep(0.05)
-                return
-            if not self.keep_front():
-                self.release()
-                self.phase = 'idle'
-                self.log('abort_aim', '失焦，放弃本次')
-                return
-            preview = elapsed < AIM_HOLD_SECONDS
-            if preview and now - self.aim_sample_at < AIM_SAMPLE_SECONDS:
-                time.sleep(0.04)
-                return
-            self.aim_sample_at = now
-            frame = self.grab()
-            matching_frame = frame is not None and frame.shape[:2] == self.aim_frame_shape
-            fish = self.fish_of(frame, self.aim_fish) if matching_frame else None
-            if fish is not None:
-                self.aim_fish = fish
-                self.aim_seen_at = now
-            if preview and fish is None:
-                self.log('aim_observe', f'{elapsed:.1f} 秒：暂未重新识别到同一条鱼影，继续观察')
-                return
-            if not matching_frame or now - self.aim_seen_at > AIM_TARGET_MAX_AGE:
-                self.release()
-                self.phase = 'idle'
-                self.log('abort_aim', '无法取得有效瞄准画面' if not matching_frame else '鱼影已丢失，未校准抛竿')
-                return
-            target_source = '跟踪' if fish is not None else '最近一次确认'
-            fish = self.aim_fish
-            height, width = frame.shape[:2]
-            sx, sy = width / AIM_REFERENCE_SIZE[0], height / AIM_REFERENCE_SIZE[1]
-            ring = find_ring(
-                frame, x_range=(380 * sx, 980 * sx), y_range=(180 * sy, 395 * sy),
-                min_radius=max(1, round(13 * sy)), max_radius=max(2, round(42 * sy)),
-            )
-            if preview and ring is None:
-                self.log('aim_observe', f'{elapsed:.1f} 秒：鱼影（{fish.cx:.0f}, {fish.cy:.0f}），落点圈未识别，暂不移动')
-                return
-            anchor_x, anchor_y = (ring.cx, ring.cy) if ring else (AIM_ANCHOR[0] * sx, AIM_ANCHOR[1] * sy)
-            dx, dy = fish.cx - anchor_x, fish.cy - anchor_y
-            mx = int(np.clip(dx / (AIM_GAIN_X * sx), -420, 420))
-            my = int(np.clip(dy / (AIM_GAIN_Y * sy), -300, 300))
-            anchor_source = '落点圈' if ring else '预设锚点'
-            self.log('aim_observe', f'{elapsed:.1f} 秒：鱼影（{fish.cx:.0f}, {fish.cy:.0f}，{target_source}），'
-                     f'{anchor_source}（{anchor_x:.0f}, {anchor_y:.0f}），画面偏差（{dx:+.0f}, {dy:+.0f}）像素')
-            moved = abs(mx) >= 2 or abs(my) >= 2
-            self.check_input()
-            if moved:
-                move_mouse(mx, my)
-            if not preview:
-                # The aim marker recenters quickly. Send the release before doing any log I/O.
-                self.release(report=False)
-            if moved:
-                horizontal = f'向右 {mx}' if mx > 0 else f'向左 {-mx}' if mx < 0 else '水平不动'
-                vertical = f'向下 {my}' if my > 0 else f'向上 {-my}' if my < 0 else '垂直不动'
-                self.log('move', f'已发送：鼠标相对移动，{horizontal}、{vertical}', dx=mx, dy=my)
-            else:
-                self.log('aim_observe', '偏差低于移动阈值，本帧没有发送鼠标移动')
-            if preview:
-                return
-            self.log('button', '已发送：松开鼠标左键')
-            self.casts += 1
-            self.phase = 'waiting'
-            self.phase_at = time.monotonic()
-            self.log('cast', f'已发送第 {self.casts} 次抛竿，等待游戏反馈',
-                     target_source=target_source, anchor_source=anchor_source)
-            cv2.imwrite(str(self.out / f'cast_{self.casts:02d}.png'), frame)
-            return
-
-        if self.phase == 'retrieve':
-            if can_throw and state == 0:
-                self.release()
-                self.phase = 'idle'
-                self.log('retrieved', '已收回', state=state)
-            elif now - self.phase_at > 8.0:
-                self.release()
-                self.phase = 'idle'
-                self.log('retrieve_timeout', '收线超时', state=state)
-            time.sleep(0.09)
-            return
-
-        if self.phase == 'waiting':
-            if state == 6:
-                if not self.keep_front():
-                    time.sleep(0.2)
-                    return
-                self.press()
-                self.phase = 'hooked'
-                self.phase_at = now
-                self.log('hook', '游戏报告咬钩，开始长按收线', color=self.read_line() or {})
-            elif state == 0 and can_throw and now - self.phase_at > 1.5:
-                self.phase = 'idle'
-                self.log('cast_miss', '抛竿未生效，重试')
-            elif now - self.phase_at > policy.FISHING_RECAST_SECONDS:
-                if not self.keep_front():
-                    time.sleep(0.2)
-                    return
-                self.press()
-                self.phase = 'retrieve'
-                self.phase_at = now
-                self.log('recast', '久未咬钩，收线重来', state=state)
-            time.sleep(0.07)
-            return
-
-        if self.phase == 'hooked':
-            if not self.keep_front():
-                self.release()
-                self.phase = 'idle'
-                self.log('interrupt', '游戏失去前台，已松开左键')
-                return
-            if state == 0:
-                self.release()
-                self.phase = 'idle'
-                self.phase_at = time.monotonic()
-                self.log('land', '拉扯结束，已松开左键；鱼是否入包未确认')
-            elif now - self.phase_at > policy.FISHING_HOOK_TIMEOUT_SECONDS:
-                self.release()
-                self.phase = 'idle'
-                self.log('hook_timeout', '咬钩超时，松手')
-            else:
-                self.adjust_tension()
-            time.sleep(0.05)
-            return
-
-        time.sleep(0.1)
-
-    def adjust_tension(self):
-        color = self.read_line() or {}
-        if color.get('red', 0) >= policy.FISHING_LINE_RED_PIXELS:
-            if self.held:
-                self.release()
-                self.log('slack', f"线红 {color['red']}px，松手放线", color=color)
-        elif not self.held and color.get('dom') in ('white', 'yellow'):
-            self.press()
-            self.log('rehold', '张力恢复，继续收线', color=color)
+                self.log('end','自动钓鱼已结束',**self.metrics())
+                self.archive.finish({'outcome':outcome,**self.metrics(),'failures':dict(self.failures)})
+                if self.archive.error and self.on_event is not None:
+                    self.on_event(fishing_event('error','钓鱼归档异常：'+self.archive.error))
 
 
 def main():
-    parser = argparse.ArgumentParser(description='自动钓鱼实机运行器（视觉闭环瞄准）')
-    parser.add_argument('--duration', type=float, default=600.0, help='总运行秒数')
-    parser.add_argument('--out', type=str, default=None, help='日志与截图目录')
-    args = parser.parse_args()
-    FishingRunner(duration=args.duration, out_dir=args.out).run()
+    parser = argparse.ArgumentParser(description='自动钓鱼实机运行器（游戏须已在前台）')
+    parser.add_argument('--duration',type=float)
+    parser.add_argument('--out')
+    parser.add_argument('--catch-target',type=int)
+    options = parser.parse_args()
+    FishingRunner(duration=options.duration,out_dir=options.out,catch_target=options.catch_target).run()
 
 
-if __name__ == '__main__':
+if __name__=='__main__':
     main()

@@ -682,19 +682,57 @@ class CoordinateWindow:
                    color='muted', wraplength=px(340), justify='left').pack(anchor='w', pady=px(8))
         row = self.frame(content, card=True, border=False)
         row.pack(fill='x')
-        self.fishing_start = self.button(row, '开始钓鱼', self.fishing.start, primary=True)
+        self.fishing_mode = tk.StringVar(self.root,value='持续钓鱼')
+        self.fishing_limit = tk.StringVar(self.root,value='30')
+        options = self.frame(content,card=True,border=False)
+        options.pack(fill='x',pady=(0,px(6)),before=row)
+        self.fishing_mode_control = ttk.Combobox(options,textvariable=self.fishing_mode,state='readonly',
+            values=('持续钓鱼','指定时长（分钟）','指定钓获数量'),width=14)
+        self.fishing_mode_control.pack(side='left')
+        self.fishing_limit_control = tk.Entry(options,textvariable=self.fishing_limit,width=6)
+        self.fishing_limit_control.pack(side='left',padx=px(6))
+        self.fishing_start = self.button(row, '开始钓鱼', self.start_fishing_run, primary=True)
         self.fishing_start.pack(side='left', padx=(0, px(8)))
         self.fishing_stop = self.button(row, '停止', self.fishing.stop)
         self.fishing_stop.pack(side='left')
         self.fishing_status = self.label(content, wraplength=px(340), justify='left')
         self.fishing_status.pack(anchor='w', fill='x', pady=px(10))
+        self.fishing_metrics = self.label(content,wraplength=px(400),justify='left')
+        self.fishing_metrics.pack(anchor='w',fill='x')
         self.update_fishing_page()
+
+    def start_fishing_run(self):
+        mode = self.fishing_mode.get()
+        try:
+            limit = int(self.fishing_limit.get()) if mode!='持续钓鱼' else None
+            if limit is not None and limit<1:
+                raise ValueError
+        except ValueError:
+            self.fishing.message = '请输入大于零的运行时长或钓获数量'
+            self.update_fishing_page()
+            return
+        self.fishing.start(duration=limit*60 if mode=='指定时长（分钟）' else None,
+                           catch_target=limit if mode=='指定钓获数量' else None)
 
     def update_fishing_page(self):
         active = self.fishing.active
         configure_changed(self.fishing_start, state='disabled' if active else 'normal')
         configure_changed(self.fishing_stop, state='normal' if active else 'disabled')
         configure_changed(self.fishing_status, text=self.fishing.message)
+        runner = self.fishing.runner
+        data = runner.metrics() if active and runner is not None else self.fishing.metrics
+        def rate(value):
+            return f'{value:.0%}' if value is not None else '待确认'
+        if data:
+            stages = {'idle':'搜索鱼影','aiming':'瞄准','waiting':'等待咬钩','retrieve':'回收浮标',
+                      'hooked':'张力收线','result':'核验结果'}
+            stage = stages.get(data['phase'],'待命') if active else '已结束'
+            text = (f"{stage} · {data['elapsed']:.0f} 秒 · 抛竿 {data['casts']} 次"
+                    f" · 确认钓获 {data['catches']} · 恢复 {data['recoveries']} 次\n"
+                    f"咬钩率 {rate(data['bite_rate'])} · 实际钓获率 {rate(data['catch_rate'])}")
+        else:
+            text = ''
+        configure_changed(self.fishing_metrics,text=text)
 
     def build_status_bar(self):
         panel = RoundedPanel(self.root, radius=px(14), height=px(58))
