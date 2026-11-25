@@ -152,7 +152,12 @@ class CollectionNavigator(GuidanceNavigator):
         if self.last_decision.get('kind') in ('observed_partial_memory','checked_shortcut_trial'):
             self.last_decision={}
         library=getattr(self,'traversal_memory',None)
-        scope=scene_scope(self.scene_provider())
+        snapshot = self.scene_provider()
+        if self.road_route_required(position, target, snapshot):
+            self.partial_aim = None
+            self.short_trial = None
+            return super().next_target(position, target, check, before_plan)
+        scope=scene_scope(snapshot)
         if scope is not None and scope!=self.memory_scope:
             self.memory_scope=scope
             self.terminal_approach_key=None

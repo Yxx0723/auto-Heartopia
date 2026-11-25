@@ -39,10 +39,10 @@ from utils.ui.house_plot_layer import HousePlotLayer
 from utils.ui.map_surface_reference import draw_wooden_platforms
 from utils.ui.map_presentation import (draw_grid, draw_chrome, draw_player, chrome_bounds,
                                       draw_waypoint_labels, draw_target_indicator, draw_terrain_tints,
-                                      draw_map_texture)
+                                      draw_map_texture, draw_saved_route)
 from utils.ui.map_labels import layout_waypoints, HoverTarget, MapHover, target_indicator
 from utils.ui.map_height_layers import draw_height_layers
-from utils.ui.base_map_layer import BaseMapLayer
+from utils.ui.base_map_layer import BaseMapLayer, RoadMaskLayer
 from utils.core.terrain_height import coverage as terrain_coverage
 from utils.drivers.mono_scene import MemorySceneMap, NavigationSceneMap
 from utils.core.map_water_reference import GRASSLAND_POND, MAP_WATER_AREAS, MAP_WATER_ISLANDS
@@ -200,11 +200,13 @@ def portable_data_directory(root, name, legacy_name):
 
 
 class CoordinateWindow:
+    BASE_MAP_HOLD_SECONDS = 20.
     # Defaults keep the map code safe on construction paths that do not build the
     # canvas (tests assemble partial windows), and let the underlay degrade to the
     # M3 rendering instead of raising.
     base_map_enabled = True
     base_map = None
+    base_map_center = None
 
     def __init__(self, root, monitor, resources, clock=time.monotonic, point_path=None, wall_clock=None,
                  playback_runner=None, scene_factory=None, cooking_runner=None, guidance_runner=None,
@@ -248,6 +250,7 @@ class CoordinateWindow:
         self.cooking_dialog = None
         self.playback_status = {'state': 'idle', 'message': '按保存顺序回放 · F6开始/暂停 · F9停止'}
         self.scene_state = {'state': 'waiting', 'objects': [], 'colliders': []}
+        self.reset_base_map_view()
         # None means the explicit "all" mode; an empty set hides every object category.
         self.scene_categories = set(SCENE_CATEGORIES) - {'other', 'shrub', 'animal', 'bush', 'tree'}
         self.scene_filters_expanded = False
@@ -395,16 +398,9 @@ class CoordinateWindow:
         head.grid(row=0, column=0, sticky='ew', padx=px(4), pady=(px(4), px(3)))
         left, left_inner = self.toolbar_pill(head)
         left.pack(side='left')
-        (self.scene_filters_toggle,
-         self.route_overview_button,
-         self.terrain_view_button,
-         self.height_slice_button,
-         self.base_map_button) = self.pack_toolbar_buttons(
+        self.scene_filters_toggle, self.route_overview_button = self.pack_toolbar_buttons(
             left_inner, [('分类筛选 ▾', self.toggle_scene_filters),
-                         ('路线全览', self.show_route_overview),
-                         ('地势', self.toggle_terrain_view),
-                         ('分层', self.toggle_height_slice_view),
-                         ('原生底图', self.toggle_base_map)])
+                         ('路线全览', self.show_route_overview)])
         right, right_inner = self.toolbar_pill(head)
         right.pack(side='right')
         self.map_expand_button = self.pack_toolbar_buttons(right_inner, [
@@ -412,7 +408,6 @@ class CoordinateWindow:
             ('＋', lambda: self.set_zoom(self.zoom * 1.5)),
             ('重置缩放', self.reset_map_view),
             ('大地图', self.toggle_map_size)])[-1]
-        self._sync_base_map_button()
         return head
 
     def build(self):
@@ -451,6 +446,7 @@ class CoordinateWindow:
         # Static high-resolution underlay. Draws only when the viewport changes;
         # when it is present the flat M3 colour blocks are skipped entirely.
         self.base_map = BaseMapLayer(self.canvas)
+        self.road_mask = RoadMaskLayer(self.canvas, self.resources)
         self.base_map_enabled = True
         self.house_plot_layer = HousePlotLayer(self.canvas)
         self.map_hover, self.map_hover_job = MapHover(self.canvas), None
@@ -648,16 +644,9 @@ class CoordinateWindow:
             self.clear_path_memory_button = self.button(navigationbar, '清除记忆', self.clear_path_memory, small=True)
             self.clear_path_memory_button.pack(side='left')
             self.refresh_path_memory_info()
-        # 第 3 行：先走到首点开关 + 引导跟随；主操作按钮留在前两行。
+        # 第 3 行保留手动引导入口。
         guidebar = self.frame(bottom_body)
         guidebar.pack(fill='x', pady=(px(4), 0))
-        self.walk_to_first_var = tk.BooleanVar(self.root, value=False)
-        self.walk_to_first_check = tk.Checkbutton(guidebar, text='先走到首点',
-            variable=self.walk_to_first_var,
-            bg=COLORS['card'], fg=COLORS['text'], activebackground=COLORS['card'],
-            activeforeground=COLORS['text'], selectcolor=COLORS['button'],
-            font=theme.font(12), bd=0, highlightthickness=0)
-        self.walk_to_first_check.pack(side='left', padx=(0, 6))
         self.guidance_button = self.button(guidebar, '跟随游戏引导 · 远距公交追踪',
                                            self.start_guidance_follow, small=True)
         self.guidance_button.pack(side='left', fill='x', expand=True)
@@ -1294,10 +1283,10 @@ class CoordinateWindow:
         configure_changed(self.stamina_value, fg=COLORS[color])
 
     def build_scene_filters(self, parent):
-        self.scene_objects_var, self.scene_colliders_var = tk.BooleanVar(self.root, True), tk.BooleanVar(self.root, True)
+        self.scene_objects_var, self.scene_colliders_var = tk.BooleanVar(self.root, True), tk.BooleanVar(self.root, False)
         self.scene_water_var = tk.BooleanVar(self.root, True)
         self.scene_roads_var = tk.BooleanVar(self.root, True)
-        self.scene_barriers_var = tk.BooleanVar(self.root, True)
+        self.scene_barriers_var = tk.BooleanVar(self.root, False)
         self.scene_nearby_colliders_var = tk.BooleanVar(self.root, False)
         for column in range(4):
             parent.grid_columnconfigure(column, weight=1, uniform='category')
@@ -1428,6 +1417,35 @@ class CoordinateWindow:
         except Exception:
             pass
 
+    def reset_base_map_view(self):
+        self.base_map_center = None
+        self.base_map_pid = None
+        self.base_map_pending_at = None
+
+    def update_base_map_view(self, now):
+        """Retain only static artwork across a temporary loss of scene data."""
+        if self.view.paused:
+            return
+        status = self.view.status
+        pid = status.get('pid')
+        if status.get('state') in ('waiting', 'stopped') or (
+                pid is not None and self.base_map_pid not in (None, pid)):
+            self.reset_base_map_view()
+        scene = self.scene_state
+        scene_name = (scene.get('map_scene_name') or scene.get('survey_scene')
+                      if scene.get('state') == 'ready' else None)
+        if scene_name and scene_name != 'startown':
+            self.reset_base_map_view()
+        elif scene_name == 'startown' and self.view.position is not None:
+            self.base_map_center = self.view.position
+            self.base_map_pid = pid
+            self.base_map_pending_at = None
+        elif self.base_map_center is not None:
+            if self.base_map_pending_at is None:
+                self.base_map_pending_at = now
+            elif now - self.base_map_pending_at >= self.BASE_MAP_HOLD_SECONDS:
+                self.reset_base_map_view()
+
     def tick(self):
         if self.closed:
             return
@@ -1444,6 +1462,7 @@ class CoordinateWindow:
             scene = self.scene_worker.take_latest()
             if scene is not None and not self.view.paused:
                 self.scene_state = scene
+        self.update_base_map_view(now)
         if hasattr(self, 'blueberry_survey'):
             self.blueberry_survey.poll()
         self.poll_route_recording()
@@ -1490,9 +1509,6 @@ class CoordinateWindow:
         if hasattr(self, 'guidance_button'):
             configure_changed(self.guidance_button, state='normal' if live and not playing else 'disabled')
         patrol = getattr(self, 'patrol_route_selected', False)
-        if hasattr(self, 'walk_to_first_check'):
-            configure_changed(self.walk_to_first_check,
-                              state='disabled' if playing or patrol or not self.navigation_var.get() else 'normal')
         configure_changed(self.route_menu, state='disabled' if playing else 'readonly')
         for action, button in self.route_buttons.items():
             enabled = not playing and (action not in ('copy', 'rename') or not self.points_error)
@@ -1679,7 +1695,8 @@ class CoordinateWindow:
         if view.position is not None:
             points.append((view.position[0], view.position[2]))
         xs, zs = zip(*points) if points else ([-5., 5.], [-5., 5.])
-        cx, cz = (view.position[0], view.position[2]) if view.position is not None \
+        map_center = view.position if view.position is not None else self.base_map_center
+        cx, cz = (map_center[0], map_center[2]) if map_center is not None \
             else ((min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2)
         if self.map_view == 'range':
             radius = getattr(self, 'scene_radius', policy.COORD_SCENE_RADIUS)
@@ -1718,7 +1735,6 @@ class CoordinateWindow:
         self.fields['scale'].set(f'刻度 {step:g} 单位/格')
         viewport = Viewport(w, h, cx, cz, scale)
         self.map_cache.begin(viewport)
-        draw_grid(self.map_cache.live, viewport, step)
         scene_objects, scene_boxes = self.map_cache.geometry.select(
             self.scene_state, view.position, getattr(self, 'scene_radius', policy.COORD_SCENE_RADIUS), viewport)
         nearby_models, nearby_boxes = self.map_cache.geometry.nearby_details(view.position)
@@ -1733,11 +1749,16 @@ class CoordinateWindow:
                              if (obj.get('category') if obj.get('category') in SCENE_CATEGORIES else 'other')
                              in self.scene_categories]
         main_map = view.position is not None and self.scene_state.get('survey_scene') == 'startown'
+        show_main_map = main_map or self.base_map_center is not None
         layer = getattr(self, 'base_map', None)
         show_base = bool(self.base_map_enabled and layer is not None
-                         and layer.available and main_map)
+                         and layer.available and show_main_map)
+        if not show_base or scale >= 2.:
+            draw_grid(self.map_cache.live, viewport, step, subtle=show_base)
         if layer is not None:
             layer.draw(viewport, show_base)
+            if show_base:
+                canvas.tag_lower('base-map')
         if not show_base:
             # Only fall back to the flat M3 blocks when no calibrated raster can
             # cover the view; the raster already contains water, roads and relief.
@@ -1748,7 +1769,13 @@ class CoordinateWindow:
         # artwork. Re-filling them would flatten that artwork, so the static
         # reference layers stand down while it is in use and only the dynamic
         # world-coordinate layers (player, route, resources, plots) stay on top.
-        if not show_base and self.scene_roads_var.get() and view.position is not None:
+        roads_enabled = self.scene_roads_var.get()
+        roads_visible = roads_enabled and view.position is not None
+        road_mask = getattr(self, 'road_mask', None)
+        show_road_mask = bool(roads_enabled and show_main_map and road_mask is not None and road_mask.available)
+        if road_mask is not None and road_mask.draw(viewport, show_road_mask):
+            self.map_cache.changed = True
+        if not show_base and roads_visible and not show_road_mask:
             for key, coords, _ in self.map_cache.geometry.visible_roads(viewport):
                 self.map_cache.polyline(key, coords, -3, [
                     {'fill': '#C7C29B', 'width': 10, 'capstyle': 'round', 'joinstyle': 'round',
@@ -1821,9 +1848,7 @@ class CoordinateWindow:
             canvas.create_line(*coords[-64:], fill='#acd7a2', width=2, tags='walk-trail-recent')
         saved_line = [value for point in self.saved_points
                       for value in (px(point['position'][0]), pz(point['position'][2]))]
-        if len(saved_line) >= 4:
-            canvas.create_line(*saved_line, fill='#C6D6C4', width=4, tags='saved-route-edge')
-            canvas.create_line(*saved_line, fill=MAP_STYLE['route_line'], width=1.5, dash=(5, 5), tags='saved-route')
+        draw_saved_route(canvas, saved_line)
         if navigation_path and view.position is not None:
             planned = [v for p in [view.position, *navigation_path] for v in (px(p[0]), pz(p[2]))]
             canvas.create_line(*planned, fill='#C8DFC7', width=6, tags='navigation-path-edge')
@@ -1831,7 +1856,8 @@ class CoordinateWindow:
                                arrow='last', arrowshape=(8, 10, 4), tags='navigation-path')
         active = self.playback_status.get('waypoint') if self.playback_status.get('state') not in (
             'idle', 'finished', 'stopped', 'error', 'partial') else None
-        labels = layout_waypoints(self.saved_points, viewport, active, chrome_bounds(viewport, step))
+        labels = layout_waypoints(self.saved_points, viewport, active, chrome_bounds(viewport, step),
+                                  compact=scale < 1.6)
         draw_waypoint_labels(canvas, viewport, self.saved_points, labels)
         draw_chrome(canvas, viewport, step, self.map_view == 'route', self.scene_roads_var.get(),
                     heading_known=view.heading is not None, resource_view=self.map_view == 'minerals')
@@ -2233,18 +2259,16 @@ class CoordinateWindow:
             count, jump = int(self.recovery_count_var.get()), self.recovery_jump_var.get()
             collect_wait = self.collection_wait()
             loop_count = validate_loop_count(int(self.loop_count_var.get()))
+            auto_navigate = self.navigation_var.get()
             self.playback.start(data, self.view.status.get('pid'), start_mode=mode,
                                 recovery_attempts=count, jump_on_recovery=jump, collect_wait_seconds=collect_wait,
-                                loop_count=loop_count, auto_navigate=self.navigation_var.get(),
+                                loop_count=loop_count, auto_navigate=auto_navigate,
                                 auto_repair=self.repair_auto_var.get(),
                                 auto_eat=self.food_auto_var.get() if hasattr(self, 'food_auto_var') else False,
                                 food_fallback=self.food_fallback_mode(),
                                 route_path=self.point_store.path,
                                 remember_paths=SHOW_PATH_MEMORY_CONTROLS and self.path_memory_var.get(),
-                                # 默认关闭时不传该参数，保持原有启动调用完全不变。
-                                **({'walk_to_first': True}
-                                   if hasattr(self, 'walk_to_first_var')
-                                   and self.walk_to_first_var.get() else {}))
+                                walk_to_first=auto_navigate)
         except (OSError, ValueError) as exc:
             self.playback.record_log('error', f'无法开始点位回放：{exc}')
             messagebox.showerror('无法开始点位回放', str(exc), parent=self.root)
@@ -2381,7 +2405,8 @@ class CoordinateWindow:
                 self.playback_status.get('waypoint'), self.map_view, self.zoom, self.scene_radius,
                 None if view.position is None or self.map_view != 'heightslice'
                 else round(view.position[1], 2),
-                self.base_map_enabled,
+                self.base_map_enabled, self.base_map_center is not None,
+                self.base_map_center if position is None else None,
                 None if self.scene_categories is None else frozenset(self.scene_categories),
                 tuple(v.get() for v in (self.scene_objects_var, self.scene_colliders_var, self.scene_water_var,
                                         self.scene_roads_var, self.scene_barriers_var,
@@ -2479,6 +2504,7 @@ class CoordinateWindow:
         if self.scene_worker:
             self.scene_worker.set_pid(None)
         self.scene_state = {'state': 'loading', 'objects': [], 'colliders': []}
+        self.reset_base_map_view()
         self.worker.set_paused(False)
         self.worker.take_latest()
         self.view.set_paused(False)

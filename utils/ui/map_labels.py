@@ -7,7 +7,7 @@ def intersects(a, b):
     return a[0] < b[2] and a[2] > b[0] and a[1] < b[3] and a[3] > b[1]
 
 
-def layout_waypoints(points, viewport, active=None, avoid=()):
+def layout_waypoints(points, viewport, active=None, avoid=(), *, compact=False):
     """Merge visually coincident captions, retaining every original point index."""
     groups, cells = [], {}
     for index, point in enumerate(points, 1):
@@ -48,6 +48,8 @@ def layout_waypoints(points, viewport, active=None, avoid=()):
             caption = f"{group['ids'][0]}+{len(group['ids'])-1}"
         group.update(indexes=tuple(group['indexes']), caption=caption,
                      active=active in group['indexes'], rect=None)
+        if compact and not (group['active'] or 1 in group['indexes'] or len(points) in group['indexes']):
+            continue
         width, height = max(22, len(caption)*7+12), 20
         x, y = group['anchor']
         for radius in (20, 36, 52, 68):

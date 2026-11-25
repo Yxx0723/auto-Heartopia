@@ -15,6 +15,8 @@ is missing the layer reports unavailable and the caller keeps the M3 rendering.
 """
 from collections import OrderedDict
 from pathlib import Path
+import sys
+from utils.core.road_preference import WorldToImage, load_road_mask
 
 DEFAULT_ROOT = Path('runtime') / 'basemap'
 FALLBACK_FILL = '#6c9fb0'   # matches the reference map's declared bg_color
@@ -30,9 +32,13 @@ MAX_CACHED_LEVELS = 3
 class BaseMapLayer:
     """Draws the cached base map as a single canvas image item."""
 
+    tags = 'base-map'
+
     def __init__(self, canvas, root=None):
         self.canvas = canvas
-        self.root = Path(root) if root else DEFAULT_ROOT
+        default_root = (Path(sys.executable).resolve().parent / DEFAULT_ROOT
+                        if getattr(sys, 'frozen', False) else DEFAULT_ROOT)
+        self.root = Path(root) if root is not None else default_root
         self.master = None
         self.transform = None
         self.error = None
@@ -102,30 +108,28 @@ class BaseMapLayer:
             self._levels.move_to_end(size)
         return cached, size
 
-    def compose(self, viewport):
-        """Return the base map as a PIL image sized to the viewport."""
+    def _viewport_raster(self, viewport, fill):
         from PIL import Image
 
-        left, right, low, high = viewport.bounds()
+        left, _, _, high = viewport.bounds()
         master, size = self._level(viewport.scale)
         shrink = size / self.master.width
-        x0, y0 = self.transform(left, high)
-        x1, y1 = self.transform(right, low)
-        box = (int(min(x0, x1) * shrink), int(min(y0, y1) * shrink),
-               int(max(x0, x1) * shrink), int(max(y0, y1) * shrink))
-        box = (max(0, box[0]), max(0, box[1]),
-               min(size, box[2]), min(size, box[3]))
-        canvas_image = Image.new('RGB', (viewport.width, viewport.height), FALLBACK_FILL)
-        if box[2] > box[0] and box[3] > box[1]:
-            crop = master.crop(box).resize((viewport.width, viewport.height), Image.BILINEAR)
-            canvas_image.paste(crop, (0, 0))
-        return canvas_image
+        x, y = self.transform(left, high)
+        step = self.transform.scale * shrink / viewport.scale
+        return master.transform((viewport.width, viewport.height), Image.AFFINE,
+                                (step, 0, x * shrink, 0, step, y * shrink),
+                                resample=Image.BILINEAR, fillcolor=fill)
+
+    def compose(self, viewport):
+        """Return a calibrated image, filling exposed space beyond the map."""
+        return self._viewport_raster(viewport, FALLBACK_FILL)
 
     def _render(self, viewport):
         from PIL import ImageTk
 
         canvas_image = self.compose(viewport)
-        if self.photo is None:
+        if (self.photo is None or
+                (self.photo.width(), self.photo.height()) != canvas_image.size):
             self.photo = ImageTk.PhotoImage(canvas_image)
         else:
             # Re-using one PhotoImage avoids a full Tk image round-trip per pan
@@ -133,7 +137,7 @@ class BaseMapLayer:
             self.photo.paste(canvas_image)
         if self.item is None:
             self.item = self.canvas.create_image(0, 0, anchor='nw', image=self.photo,
-                                                 tags='base-map')
+                                                 tags=self.tags)
         else:
             self.canvas.itemconfigure(self.item, image=self.photo, state='normal')
             self.canvas.coords(self.item, 0, 0)
@@ -144,17 +148,22 @@ class BaseMapLayer:
         self.signature = None
 
 
-class WorldToImage:
-    """Affine world XZ -> base image pixel, from the measured calibration."""
+class RoadMaskLayer(BaseMapLayer):
+    """Render the same calibrated road mask used for soft navigation costs."""
 
-    def __init__(self, calibration, size):
-        scale = calibration['scale'] * size / calibration['grid']
-        self.scale = scale
-        self.cx, self.cz = calibration['world_center_of_water']
-        self.dx = calibration['dx'] * size / calibration['grid']
-        self.dy = calibration['dy'] * size / calibration['grid']
-        self.half = size / 2
+    tags = ('reference-road', 'map-rank--1')
 
-    def __call__(self, x, z):
-        return (self.half + (x - self.cx) * self.scale + self.dx,
-                self.half - (z - self.cz) * self.scale + self.dy)
+    def _load(self):
+        try:
+            self.master, self.transform = load_road_mask(self.root)
+        except (ImportError, OSError, ValueError, TypeError, KeyError, ZeroDivisionError, OverflowError) as error:
+            self.error = str(error)
+
+    def compose(self, viewport):
+        from PIL import Image
+        from utils.ui.theme import MAP_STYLE
+
+        alpha = self._viewport_raster(viewport, 0).point(lambda value: value * .40)
+        overlay = Image.new('RGBA', alpha.size, MAP_STYLE['road'])
+        overlay.putalpha(alpha)
+        return overlay

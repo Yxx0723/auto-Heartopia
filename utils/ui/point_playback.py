@@ -19,6 +19,7 @@ from utils.drivers.coordinate_memory import ReadOnlyPosition
 from utils.drivers.route_path_memory import RoutePathMemory
 from utils.drivers.playback_history import PlaybackHistory, RecordingPosition, GuidanceRecordingPosition
 from utils.core.guidance_navigation import GuidanceNavigator
+from utils.core.road_preference import load_road_preference
 from utils.ui.scene_map_worker import SceneMapWorker
 from utils.drivers.mono_scene import NavigationSceneMap
 from utils.drivers.navigation_process import NavigationProcessScene
@@ -310,8 +311,9 @@ class PointPlayback:
             window = self.window_factory(pid)
             size = window.size()
             device = self.device_factory(window)
-            if self.history is not None and isinstance(device, TimelineInput):
-                device.input_observer = self.history.input_edge
+            input_observer = getattr(self.history, 'input_edge', None)
+            if isinstance(device, TimelineInput) and callable(input_observer):
+                device.input_observer = input_observer
             controls = self.controls_factory(window, size, Feedback(), self.stop_event.is_set)
             controls.start()
             if map_opening_only:
@@ -397,16 +399,21 @@ class PointPlayback:
             window = self.window_factory(pid)
             size = window.size()
             device = self.device_factory(window)
-            if self.history is not None and isinstance(device, TimelineInput):
-                device.input_observer = self.history.input_edge
+            input_observer = getattr(self.history, 'input_edge', None)
+            if isinstance(device, TimelineInput) and callable(input_observer):
+                device.input_observer = input_observer
             controls = self.controls_factory(window, size, self, self.stop_event.is_set)
             controls.start()
             factory = CollectionNavigator if self.navigator_factory is LocalNavigator else self.navigator_factory
-            options = {'native_map_collection': False} if factory is CollectionNavigator else {}
             recorded = data.get('recorded_walk', False)
+            options = {}
             if recorded:
                 from utils.core.recorded_walk_navigation import RecordedWalkNavigator
-                factory, options = RecordedWalkNavigator, {}
+                factory = RecordedWalkNavigator
+            elif auto_navigate and factory is CollectionNavigator:
+                options = {'native_map_collection': False,
+                           'road_preference': load_road_preference(self.profile.parent),
+                           'require_far_roads': True}
             navigation = ({'navigator': factory(lambda: self.scene_provider(pid), clock=self.clock.monotonic, **options)}
                           if auto_navigate else {})
             if auto_navigate and isinstance(navigation['navigator'],CollectionNavigator) \

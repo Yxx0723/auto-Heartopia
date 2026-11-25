@@ -7,9 +7,10 @@ from functools import lru_cache
 from utils.ui.theme import MAP_STYLE
 
 
-def draw_grid(canvas, viewport, step):
+def draw_grid(canvas, viewport, step, *, subtle=False):
     """Grid stays beneath the retained geometry and is bounded by viewport size."""
     left, right, low, high = viewport.bounds()
+    line_style = {'stipple': 'gray25'} if subtle else {}
     for axis, start, end in ((0, left, right), (1, low, high)):
         for index in range(math.ceil(start / step), math.floor(end / step) + 1):
             value = index * step
@@ -17,17 +18,25 @@ def draw_grid(canvas, viewport, step):
             color = MAP_STYLE['grid_major' if major else 'grid']
             x, z = viewport.screen(value, value)
             if axis == 0:
-                canvas.create_line(x, 0, x, viewport.height, fill=color, tags='map-grid')
-                if 32 < x < viewport.width - 70:
+                canvas.create_line(x, 0, x, viewport.height, fill=color, tags='map-grid', **line_style)
+                if not subtle and 32 < x < viewport.width - 70:
                     canvas.create_text(x + 4, viewport.height - 40, text=f'{value:g}',
                                        fill=MAP_STYLE['muted'], font=('Consolas', -9),
                                        anchor='w', tags='map-grid')
             else:
-                canvas.create_line(0, z, viewport.width, z, fill=color, tags='map-grid')
-                if 62 < z < viewport.height - 50:
+                canvas.create_line(0, z, viewport.width, z, fill=color, tags='map-grid', **line_style)
+                if not subtle and 62 < z < viewport.height - 50:
                     canvas.create_text(9, z - 6, text=f'{value:g}', fill=MAP_STYLE['muted'],
                                        font=('Consolas', -9), anchor='w', tags='map-grid')
     canvas.tag_lower('map-grid')
+
+
+def draw_saved_route(canvas, coords):
+    if len(coords) >= 4:
+        canvas.create_line(*coords, fill='#FFF9E8', width=4.5, capstyle='round',
+                           joinstyle='round', tags='saved-route-edge')
+        canvas.create_line(*coords, fill=MAP_STYLE['route_line'], width=2,
+                           capstyle='round', joinstyle='round', tags='saved-route')
 
 
 def chrome_bounds(viewport, step):
@@ -64,17 +73,18 @@ def draw_waypoint_labels(canvas, viewport, points, labels):
         for index in label['indexes']:
             point = points[index-1]['position']
             x, y = viewport.screen(point[0], point[2])
-            canvas.create_rectangle(x-2.5, y-2.5, x+2.5, y+2.5,
-                                    fill=color, outline='#15271f', width=1, tags='saved-point')
+            radius = 4 if active else 2.5
+            canvas.create_rectangle(x-radius, y-radius, x+radius, y+radius,
+                                    fill=color, outline='#FFF9E8', width=1, tags='saved-point')
         if box is None:
             continue
         x, y = label['anchor']
         bx, by = (box[0]+box[2])/2, (box[1]+box[3])/2
-        canvas.create_line(x, y, bx, by, fill=color if active else '#5d7987', width=1,
+        canvas.create_line(x, y, bx, by, fill=color if active else '#6E858F', width=1,
                            tags='saved-point-leader')
-        canvas.create_rectangle(*box, fill='#20453c' if active else '#182c32',
+        canvas.create_rectangle(*box, fill='#20453C' if active else '#FFF9E8',
                                 outline=color, width=1.5 if active else 1, tags='saved-point-badge')
-        canvas.create_text(bx, by, text=label['caption'], fill='#eaf4ea',
+        canvas.create_text(bx, by, text=label['caption'], fill='#F2FAF2' if active else '#28465A',
                            font=('Consolas', -11, 'bold'), tags='saved-point-label')
 
 
@@ -113,15 +123,14 @@ def movement_direction(trail):
 
 def draw_player(canvas, x, z, trail, paused=False, direction=None):
     color = '#8fa99a' if paused else MAP_STYLE['player']
-    canvas.create_oval(x-6, z-6, x+6, z+6, fill='', outline='#718c6a' if paused else '#91ad73',
-                       width=1, tags='player-ring')
+    canvas.create_oval(x-8, z-8, x+8, z+8, fill='', outline='#FFF9E8', width=2, tags='player-ring')
     direction = direction if direction is not None else movement_direction(trail)
     if direction is not None:
         dx, dz = direction
-        canvas.create_line(x+dx*4, z+dz*4, x+dx*14, z+dz*14,
+        canvas.create_line(x+dx*5, z+dz*5, x+dx*15, z+dz*15,
                            fill=color, width=1.5, arrow='last', arrowshape=(4, 5, 2.5),
                            tags='player-heading')
-    canvas.create_oval(x-2.5, z-2.5, x+2.5, z+2.5, fill=color, outline='', tags='player-position')
+    canvas.create_oval(x-4, z-4, x+4, z+4, fill=color, outline='#FFF9E8', width=1, tags='player-position')
 
 
 # Approximate color boundaries from the icon-reduced, registered map.

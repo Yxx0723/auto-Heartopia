@@ -417,6 +417,9 @@ class _Follower:
         scene=self.navigator.scene_provider() or {}
         if scene.get('state')!='ready':
             return False
+        if getattr(self.navigator, 'require_far_roads', False) is True and self.waypoints \
+                and self.navigator.road_route_required(position, self.waypoints[index]['position'], scene):
+            return False
         radius=policy.COORD_DIRECTION_SAFE_RADIUS
         if self.waypoints and 'special_resource' in self.waypoints[index] \
                 and distance(position,self.waypoints[index]['position'])<radius:
@@ -1393,6 +1396,9 @@ class _Follower:
                     try:
                         if self.navigator:
                             scene = self.navigator.scene_provider() or {}
+                            if getattr(self.navigator, 'require_far_roads', False) is True \
+                                    and self.navigator.road_route_required(reference, points[index]['position'], scene):
+                                self.pause_blocked(index, len(points), '远距离沿道路移动需要先确认镜头方向')
                             scope = repr((scene.get('cache_context'), scene.get('terrain_revision')))
                             if not self.calibration_budget.begin(reference, (self.cycle, index), scope):
                                 raise _SkipPoint('同一区域方向核对次数已达上限，当前方向无法可靠确认')
@@ -1576,6 +1582,10 @@ class _Follower:
                         target = self.navigator.next_target(position, target, check=self.guard, before_plan=self.planning_release)
                     except NavigationWait as exc:
                         self.release()
+                        if exc.reason == 'water_clearance':
+                            raise _SkipPoint(str(exc)) from exc
+                        if exc.reason == 'road_required':
+                            self.pause_blocked(index, len(points), str(exc))
                         if exc.reason == 'scene':
                             if self.scene_wait_interval is None:
                                 self.scene_wait_count += 1
@@ -1641,6 +1651,8 @@ class _Follower:
                 elif physically_stalled or now - progress_at >= policy.COORD_STUCK_SECONDS:
                     if self.waypoints is None:
                         raise ValueError('角色未向目标前进，可能遇到障碍，已停止')
+                    if getattr(getattr(self.navigator, 'path', None), 'road_mode', None):
+                        self.pause_blocked(index, len(points), '沿道路移动无进展')
                     attempted_keys = sorted(self.keys)
                     self.release()
                     try:

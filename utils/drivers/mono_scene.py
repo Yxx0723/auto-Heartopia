@@ -1478,9 +1478,11 @@ class MemorySceneMap:
                 pass  # Missing display data never changes navigation or other scene layers.
         terrain = ()
         main_terrain = False
+        map_scene_name = None
         if world_state == 'ready':
             try:
-                main_terrain = self.native.main_terrain_loaded()
+                map_scene_name = self.native.loaded_scene_name()
+                main_terrain = map_scene_name == 'startown'
                 if global_state == 'ready':
                     terrain = verified_terrain_walls(self.memory.profile.get('game_assembly_sha256'), main_terrain)
             except ValueError:
@@ -1548,6 +1550,7 @@ class MemorySceneMap:
                    'managed_issues': managed_details}
         return {'quality': quality, 'navigation_only': getattr(self, 'navigation_only', False),
                 'survey_scene': 'startown' if main_terrain else None,
+                'map_scene_name': map_scene_name,
                 'survey_version': self.memory.profile.get('game_assembly_sha256'),
                 'terrain_state': 'ready' if terrain else 'unavailable',
                 'navigation_reference': getattr(self, 'navigation_reference', None) if terrain else None,

@@ -5,6 +5,8 @@ root = Path(SPECPATH).resolve().parent
 icon = root / 'packaging/assets/monitor.ico'
 a = Analysis([str(root / 'tools/coordinate_monitor.py')], pathex=[str(root)],
     binaries=[], datas=[(str(root / 'webui/coordinate-monitor/profile.json'), 'monitor'),
+                         (str(root / 'webui/coordinate-monitor/road-mask.png'), 'monitor'),
+                         (str(root / 'webui/coordinate-monitor/road-mask-calibration.json'), 'monitor'),
                          (str(root / 'data/cooking/cooking_catalog.json'), 'data/cooking'),
                          (str(root / 'data/routes/蓝莓.json'), 'data/routes'),
                          (str(icon), 'monitor'),
