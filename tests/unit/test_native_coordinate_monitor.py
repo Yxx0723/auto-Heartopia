@@ -1039,14 +1039,13 @@ def test_configured_fallback_food_scope_reaches_playback_worker(tmp_path,label,m
     assert window.playback.start.call_args.kwargs['food_fallback']==mode
 
 
-def test_house_plot_category_controls_its_own_layer(tmp_path):
-    window=category_window(tmp_path)
-    window.house_plot_layer=Mock()
-    window.toggle_scene_category('house_plot')
-    assert window.house_plot_layer.draw.call_args.args[2] is True
-    window.toggle_scene_category('house_plot')
-    assert window.house_plot_layer.draw.call_args.args[2] is False
+def test_house_plots_are_not_rendered_or_listed(tmp_path):
+    from tests.unit.test_house_plot_layer import scene
+
+    window = category_window(tmp_path)
+    window.scene_state.update(scene())
     window.set_scene_categories(True)
-    assert window.house_plot_layer.draw.call_args.args[2] is True
-    window.set_scene_categories(False)
-    assert window.house_plot_layer.draw.call_args.args[2] is False
+    assert 'house_plot' not in window.scene_filter_buttons
+    for method in (window.canvas.create_polygon, window.canvas.create_text):
+        assert all('house-plot' not in str(call.kwargs.get('tags', ''))
+                   for call in method.call_args_list)

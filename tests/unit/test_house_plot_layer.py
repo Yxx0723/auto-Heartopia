@@ -3,7 +3,6 @@ from copy import deepcopy
 from utils.drivers.house_plots import plot_geometry, SOURCE
 from utils.ui.house_plot_layer import HousePlotLayer, PLOT_COLOR, TAG
 from utils.ui.map_draw_cache import Viewport
-from utils.ui.native_coordinate_monitor import SCENE_CATEGORIES
 
 
 class Canvas:
@@ -36,7 +35,6 @@ def test_exactly_twelve_boundaries_and_unique_interior_numbers():
         if 'outline' in o: assert o['fill']=='' and o['outline']==PLOT_COLOR
     layer.draw(deepcopy(s),view)
     assert layer.redraws==1 and c.serial==24
-    assert 'house_plot' in SCENE_CATEGORIES
 
 
 def test_pan_zoom_resize_reprojects_polygons_and_numbers_without_duplicates():

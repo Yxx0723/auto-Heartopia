@@ -35,7 +35,6 @@ from utils.ui.blueberry_survey_panel import BlueberrySurveyPanel
 from utils.ui.scene_map_worker import SceneMapWorker
 from utils.ui.map_draw_cache import MapDrawCache, Viewport, object_key, muted_color, nearby_model_key
 from utils.ui.collision_display import collision_faces
-from utils.ui.house_plot_layer import HousePlotLayer
 from utils.ui.map_surface_reference import draw_wooden_platforms
 from utils.ui.map_presentation import (draw_grid, draw_chrome, draw_player, chrome_bounds,
                                       draw_waypoint_labels, draw_target_indicator, draw_terrain_tints,
@@ -95,8 +94,7 @@ SCENE_CATEGORIES = {'fish': ('鱼', '#3B9CAB'),
                     'bird': ('鸟类', '#27616B'),
                     'animal': ('小动物', '#8A5A34'),
                     'shrub': ('未确认果灌', '#5E6A3C'),
-                    'other': ('其他物体', '#5E7062'),
-                    'house_plot': ('住宅地皮', '#D8B66C')}
+                    'other': ('其他物体', '#5E7062')}
 
 
 class DisplayValue(tk.StringVar):
@@ -448,7 +446,6 @@ class CoordinateWindow:
         self.base_map = BaseMapLayer(self.canvas)
         self.road_mask = RoadMaskLayer(self.canvas, self.resources)
         self.base_map_enabled = True
-        self.house_plot_layer = HousePlotLayer(self.canvas)
         self.map_hover, self.map_hover_job = MapHover(self.canvas), None
         self.map_pointer = None
         self.canvas.grid(row=2, column=0, sticky='nsew')
@@ -1829,11 +1826,7 @@ class CoordinateWindow:
             self.map_cache.symbol(object_key(obj), (obj['position'][0], obj['position'][2]),
                                   SCENE_RANKS.get(category, 0),
                                   lambda painter, x, z, category=category: self.draw_scene_symbol(painter, x, z, category))
-        if not hasattr(self, 'house_plot_layer'):
-            self.house_plot_layer = HousePlotLayer(canvas)
-        house_changed = self.house_plot_layer.draw(self.scene_state, viewport,
-            self.scene_objects_var.get() and (self.scene_categories is None or 'house_plot' in self.scene_categories))
-        self.map_cache.finish(house_layer=True, house_changed=house_changed)
+        self.map_cache.finish()
         canvas = self.map_cache.live
         segment, coords = None, []
         for point in view.trail:
