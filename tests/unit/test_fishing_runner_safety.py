@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
+from pathlib import Path
+import tempfile
 import threading
 import time
 
@@ -55,6 +57,12 @@ def mock_runner():
     runner.cycle_seconds = 0.
     runner.cycle_count = 0
     runner.tool_panel_open = False
+    # No captured rod artwork here, so binding still falls back to the manual
+    # prompt exactly as these fixtures expect.
+    runner.profile = Path(tempfile.gettempdir())/'fishing-runner-fixture'
+    runner.rod_icon_menu = None
+    runner.panel_menu_cache = None
+    runner.equip_attempts = 0
     return runner
 
 

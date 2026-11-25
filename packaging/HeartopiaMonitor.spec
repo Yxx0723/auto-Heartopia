@@ -22,6 +22,10 @@ a = Analysis([str(root / 'tools/coordinate_monitor.py')], pathex=[str(root)],
                          (str(root/'webui/coordinate-monitor/repair_box_menu.png'), 'monitor'),
                          (str(root/'webui/coordinate-monitor/repair_menu_marker.png'), 'monitor'),
                          (str(root/'webui/coordinate-monitor/axe_pick_icon.png'), 'monitor'),
+                         # Optional: absent until the rod tile is captured from
+                         # the running game, so the build must not require it.
+                         *([(str(root/'webui/coordinate-monitor/fishing_rod_icon.png'), 'monitor')]
+                           if (root/'webui/coordinate-monitor/fishing_rod_icon.png').exists() else []),
                          (str(root/'webui/coordinate-monitor/tool_tablet_marker.png'), 'monitor'),
                          *[(str(root/'webui/coordinate-monitor'/name), 'monitor') for name in (
                              'food_star.png', 'food_search_header.png', 'food_search_results.png', 'food_search_end.png', 'food_bag_marker.png', 'food_bag_close.png', 'food_eat_button.png', 'food_category.png', 'fruit_apple.png',

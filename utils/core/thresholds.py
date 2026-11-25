@@ -635,3 +635,7 @@ FISHING_RESULT_SECONDS = 2.
 FISHING_START_BIND_LIMIT = 15.
 FISHING_REBIND_LIMIT = 5.
 FISHING_BIND_POLL = .2
+# At most two T-panel clicks per run: a third can only repeat the same tile.
+FISHING_EQUIP_ATTEMPTS = 2
+# The held-tool object appears a few frames after the tile click is accepted.
+FISHING_EQUIP_CONFIRM_SECONDS = 2.

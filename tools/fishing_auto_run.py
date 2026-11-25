@@ -37,6 +37,7 @@ from utils.drivers.town_window import TimelineInput, TownWindow
 from utils.vision.aim_ring import find_ring
 from utils.vision.fish_shadow import find_shadows
 from utils.vision.fishing_line import FishingLine
+from utils.vision.fishing_rod import FishingRodMenu, rod_template
 
 
 def find_game():
@@ -101,6 +102,11 @@ class FishingRunner:
         # True while this runner has the T panel open for the user. Only opened
         # once per binding attempt so a wrong keypress can never repeat.
         self.tool_panel_open = False
+        # T-panel icon matcher and the number of automatic equip tries already
+        # spent; both stay empty when the rod artwork was not installed.
+        self.rod_icon_menu = None
+        self.panel_menu_cache = None
+        self.equip_attempts = 0
 
     @property
     def casts(self):
@@ -188,6 +194,102 @@ class FishingRunner:
             return
         time.sleep(TOOL_PANEL_RENDER_SECONDS)
 
+    def panel_menu(self):
+        """Matcher for the axe-pick tile: the panel's stable presence marker."""
+        if self.panel_menu_cache is None:
+            from utils.vision.axe_pick import AxePickMenu
+            self.panel_menu_cache = AxePickMenu(self.profile.parent/'axe_pick_icon.png')
+        return self.panel_menu_cache
+
+    def panel_visible(self):
+        try:
+            return self.panel_menu().locate(self.window.snapshot()) is not None
+        except (OSError,ValueError):
+            return False
+
+    def close_panel_if_open(self):
+        """Close the T panel only when it is actually on screen.
+
+        Selecting a tile usually closes it by itself, so an unconditional tap
+        would reopen the panel right before the first cast and swallow it.
+        """
+        for key in ('t','esc'):
+            if not self.panel_visible():
+                break
+            try:
+                self.tap_key(key)
+            except OSError:
+                break
+            time.sleep(TOOL_PANEL_RENDER_SECONDS)
+        self.tool_panel_open = False
+
+    def rod_icon(self):
+        """Load the captured rod tile once; ``None`` when it is not installed."""
+        if self.rod_icon_menu is None:
+            template = rod_template(self.profile.parent)
+            if template is None:
+                return None
+            self.rod_icon_menu = FishingRodMenu(template)
+        return self.rod_icon_menu
+
+    def equip_rod(self):
+        """Open the T panel, click the rod tile and confirm it through memory.
+
+        Every click is followed by a memory binding read, so a wrong tile is
+        detected instead of being trusted. Missing artwork keeps the previous
+        manual prompt: an unverified coordinate never gets clicked.
+        """
+        if self.equip_attempts >= policy.FISHING_EQUIP_ATTEMPTS:
+            return False
+        try:
+            menu = self.rod_icon()
+        except (OSError,ValueError) as exc:
+            self.log('binding_wait',f'鱼竿图标素材无效：{exc}',error_type=type(exc).__name__)
+            return False
+        if menu is None:
+            return False
+        self.equip_attempts += 1
+
+        def check():
+            self.input.guard()
+
+        def wait(seconds):
+            check()
+            time.sleep(max(0.,min(.6,float(seconds))))
+
+        observed = None
+        try:
+            target = menu.prepare(self.window,self.tap_key,wait,check)
+            self.tool_panel_open = True
+            self.log('tool_panel',f"工具面板已定位鱼竿（{target['x']}, {target['y']}），正在点击装备",
+                     binding_status='NO_TOOL',attempt=self.equip_attempts)
+            menu.use(target,self.device,check,wait)
+            # The hand-hold object is created a few frames after the click, so
+            # one immediate read would report NO_TOOL for a successful click.
+            deadline = time.monotonic()+policy.FISHING_EQUIP_CONFIRM_SECONDS
+            while time.monotonic() < deadline:
+                wait(.15)
+                try:
+                    observed = self.bind_rod()
+                except (OSError,ValueError,KeyError,StopIteration,struct.error):
+                    observed = None
+                if observed is not None:
+                    break
+            if observed is None:
+                raise ValueError('点击鱼竿后仍未绑定到手持工具')
+        except (OSError,ValueError,KeyError,StopIteration,struct.error) as exc:
+            self.log('binding_wait',f'自动装备鱼竿未成功：{exc}',
+                     error_type=type(exc).__name__,binding_status=getattr(exc,'status','NO_TOOL'))
+        finally:
+            try:
+                self.close_panel_if_open()
+            except (OSError,ValueError) as exc:
+                self.log('binding_wait',f'工具面板未关闭：{exc}',error_type=type(exc).__name__)
+        if observed is None:
+            return False
+        self.log('tool_equipped','已在工具面板中自动装备鱼竿',state=observed[0],attempt=self.equip_attempts)
+        return True
+
     def await_binding(self, *, recovery=False):
         deadline = time.monotonic() + (policy.FISHING_REBIND_LIMIT if recovery else policy.FISHING_START_BIND_LIMIT)
         last_issue = None
@@ -206,10 +308,14 @@ class FishingRunner:
                     self.log('binding_wait',issue,attempt=attempt,error_type=type(exc).__name__,binding_status=status)
                     last_issue = issue
                 if status in ('NO_TOOL','OTHER_TOOL') and not recovery:
-                    # Waiting on its own never produced a rod. Open the panel so
-                    # only one click is left; recovery stays hands-off because a
-                    # tool switched mid-session is the user's own doing.
-                    self.open_tool_panel(status)
+                    # Try the captured rod tile first. The manual prompt is the
+                    # fallback, so a missing or stale icon never blocks the run.
+                    if not self.equip_rod():
+                        # Waiting on its own never produced a rod. Open the panel
+                        # so only one click is left; recovery stays hands-off
+                        # because a tool switched mid-session is the user's own
+                        # doing.
+                        self.open_tool_panel(status)
                 if recovery and attempt >= policy.FISHING_MAX_READ_FAILURES:
                     break
                 time.sleep(min(policy.FISHING_BIND_POLL, max(0.,deadline-time.monotonic())))
